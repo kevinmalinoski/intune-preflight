@@ -12,7 +12,14 @@
       "Bash(pkill -f \"tsx.*index.ts\")",
       "Bash(git add *)",
       "Bash(git commit *)",
-      "Bash(pkill -f \"vite\")"
+      "Bash(pkill -f \"vite\")",
+      "Bash(curl -s localhost:4000/api/groups)",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s \"localhost:4000/api/simulate?groups=b261b4f8-5cc9-404d-9630-74b7d73e8a03\")",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s \"localhost:4000/api/simulate?groups=23ae2485-71b7-436e-9a18-5fdb1398f9cb\")",
+      "Bash(curl -s \"localhost:4000/api/simulate?groups=b2e5bf6b-9237-44ea-a5d4-6a18d9ec2afc\")",
+      "Bash(pkill -f vite)"
     ]
   }
 }

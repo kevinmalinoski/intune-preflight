@@ -5,12 +5,10 @@ import { api } from "./api.ts";
 export function SimulationBaselinePanel({
   simulation,
   groupIds,
-  autopilotProfileId,
   onClose,
 }: {
   simulation: SimulationResult;
   groupIds: string[];
-  autopilotProfileId?: string;
   onClose: () => void;
 }) {
   const [filter, setFilter] = useState("");
@@ -29,19 +27,46 @@ export function SimulationBaselinePanel({
         <div>
           <div className="text-xs uppercase tracking-wide text-slate-400">Endpoint baseline</div>
           <h2 className="text-lg font-semibold text-slate-100">
-            {simulation.groups.length} groups · {simulation.policies.length} policies
+            {simulation.groups.length} groups · {simulation.policies.length} policies applied
           </h2>
           <div className="mt-1 text-xs text-slate-400">
             {simulation.settings.length} merged settings ·{" "}
             <span className={simulation.conflicts.length ? "text-amber-400" : "text-emerald-400"}>
               {simulation.conflicts.length} conflicts
             </span>
+            {simulation.excludedPolicies.length > 0 && (
+              <>
+                {" · "}
+                <span className="text-rose-400">{simulation.excludedPolicies.length} excluded</span>
+              </>
+            )}
           </div>
         </div>
         <button onClick={onClose} className="rounded-md px-2 py-1 text-slate-400 hover:bg-ink-800 hover:text-slate-200">
           ✕
         </button>
       </div>
+
+      {simulation.excludedPolicies.length > 0 && (
+        <div className="border-b border-ink-700 bg-rose-500/5 p-3">
+          <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-rose-300">
+            Excluded for this selection
+          </div>
+          <ul className="space-y-1">
+            {simulation.excludedPolicies.map((p) => {
+              const excludingGroups = p.excludedViaGroupIds
+                .map((id) => simulation.groups.find((g) => g.id === id)?.displayName ?? id)
+                .join(", ");
+              return (
+                <li key={p.id} className="text-xs text-slate-300">
+                  <span className="font-medium text-rose-300">{p.displayName}</span>
+                  <span className="text-slate-500"> — excluded via {excludingGroups}</span>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
 
       <div className="flex gap-2 border-b border-ink-700 p-3">
         <input
@@ -51,13 +76,13 @@ export function SimulationBaselinePanel({
           className="flex-1 rounded-md border border-ink-700 bg-ink-800 px-3 py-1.5 text-sm text-slate-200 placeholder:text-slate-500 focus:border-emerald-400 focus:outline-none"
         />
         <a
-          href={api.simulateExportUrl(groupIds, autopilotProfileId, "json")}
+          href={api.simulateExportUrl(groupIds, "json")}
           className="rounded-md border border-ink-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-ink-800"
         >
           Export JSON
         </a>
         <a
-          href={api.simulateExportUrl(groupIds, autopilotProfileId, "csv")}
+          href={api.simulateExportUrl(groupIds, "csv")}
           className="rounded-md border border-ink-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-ink-800"
         >
           Export CSV

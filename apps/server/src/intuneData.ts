@@ -31,15 +31,27 @@ async function getCollectionWithBetaFallback<T>(path: string): Promise<{ items: 
   }
 }
 
-async function resolveAssignedGroupIds(assignments: RawAssignment[]): Promise<string[]> {
-  const ids = new Set<string>();
+interface ResolvedAssignments {
+  includedGroupIds: string[];
+  excludedGroupIds: string[];
+}
+
+function resolveAssignmentGroupIds(assignments: RawAssignment[]): ResolvedAssignments {
+  const included = new Set<string>();
+  const excluded = new Set<string>();
   for (const assignment of assignments) {
     const parsed = parseAssignmentTarget(assignment);
-    if (parsed.isAllDevices) ids.add(VIRTUAL_GROUP_ALL_DEVICES.id);
-    else if (parsed.isAllUsers) ids.add(VIRTUAL_GROUP_ALL_USERS.id);
-    else if (parsed.groupId) ids.add(parsed.groupId);
+    if (parsed.isExclude && parsed.groupId) {
+      excluded.add(parsed.groupId);
+    } else if (parsed.isAllDevices) {
+      included.add(VIRTUAL_GROUP_ALL_DEVICES.id);
+    } else if (parsed.isAllUsers) {
+      included.add(VIRTUAL_GROUP_ALL_USERS.id);
+    } else if (parsed.groupId) {
+      included.add(parsed.groupId);
+    }
   }
-  return [...ids];
+  return { includedGroupIds: [...included], excludedGroupIds: [...excluded] };
 }
 
 async function fetchDeviceConfigurations(): Promise<IntunePolicy[]> {
@@ -54,13 +66,15 @@ async function fetchDeviceConfigurations(): Promise<IntunePolicy[]> {
       `/deviceManagement/deviceConfigurations/${id}/assignments`,
       useBeta
     );
+    const { includedGroupIds, excludedGroupIds } = resolveAssignmentGroupIds(assignments);
     result.push({
       id,
       kind: "deviceConfiguration",
       displayName,
       description: item.description as string | undefined,
       settings: flattenToCspSettings(item, displayName),
-      assignedGroupIds: await resolveAssignedGroupIds(assignments),
+      assignedGroupIds: includedGroupIds,
+      excludedGroupIds,
     });
   }
   return result;
@@ -78,13 +92,15 @@ async function fetchCompliancePolicies(): Promise<IntunePolicy[]> {
       `/deviceManagement/deviceCompliancePolicies/${id}/assignments`,
       useBeta
     );
+    const { includedGroupIds, excludedGroupIds } = resolveAssignmentGroupIds(assignments);
     result.push({
       id,
       kind: "compliancePolicy",
       displayName,
       description: item.description as string | undefined,
       settings: flattenToCspSettings(item, displayName),
-      assignedGroupIds: await resolveAssignedGroupIds(assignments),
+      assignedGroupIds: includedGroupIds,
+      excludedGroupIds,
     });
   }
   return result;
@@ -105,13 +121,15 @@ async function fetchSettingsCatalogPolicies(): Promise<IntunePolicy[]> {
         useBeta
       ),
     ]);
+    const { includedGroupIds, excludedGroupIds } = resolveAssignmentGroupIds(assignments);
     result.push({
       id,
       kind: "settingsCatalog",
       displayName,
       description: item.description as string | undefined,
       settings: flattenSettingsCatalogEntries(settingEntries, displayName),
-      assignedGroupIds: await resolveAssignedGroupIds(assignments),
+      assignedGroupIds: includedGroupIds,
+      excludedGroupIds,
     });
   }
   return result;
@@ -138,13 +156,15 @@ async function fetchAdminTemplates(): Promise<IntunePolicy[]> {
       displayName: `Policy setting ${idx + 1}`,
       value: dv.enabled ? "Enabled" : "Disabled",
     }));
+    const { includedGroupIds, excludedGroupIds } = resolveAssignmentGroupIds(assignments);
     result.push({
       id,
       kind: "adminTemplate",
       displayName,
       description: item.description as string | undefined,
       settings,
-      assignedGroupIds: await resolveAssignedGroupIds(assignments),
+      assignedGroupIds: includedGroupIds,
+      excludedGroupIds,
     });
   }
   return result;
@@ -177,7 +197,7 @@ async function fetchAutopilotProfiles(): Promise<AutopilotProfile[]> {
       id,
       displayName: (item.displayName as string) ?? "Untitled",
       osLabel: "Windows 11",
-      assignedGroupIds: await resolveAssignedGroupIds(assignments),
+      assignedGroupIds: resolveAssignmentGroupIds(assignments).includedGroupIds,
     });
   }
   return result;
@@ -202,7 +222,10 @@ export async function loadTenantData(): Promise<TenantData> {
     const policies = [...deviceConfigs, ...compliance, ...settingsCatalog, ...adminTemplates];
 
     const groupIds = new Set<string>();
-    for (const p of policies) for (const g of p.assignedGroupIds) groupIds.add(g);
+    for (const p of policies) {
+      for (const g of p.assignedGroupIds) groupIds.add(g);
+      for (const g of p.excludedGroupIds) groupIds.add(g);
+    }
     for (const a of autopilotProfiles) for (const g of a.assignedGroupIds) groupIds.add(g);
 
     const realGroupIds = [...groupIds].filter(

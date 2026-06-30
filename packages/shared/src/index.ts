@@ -33,7 +33,10 @@ export interface IntunePolicy {
   displayName: string;
   description?: string;
   settings: CspSetting[];
+  /** Groups (or virtual All Devices/All Users) this policy is assigned to INCLUDE */
   assignedGroupIds: string[];
+  /** Groups explicitly EXCLUDED from this policy -- excludes always win over includes */
+  excludedGroupIds: string[];
 }
 
 export interface AutopilotProfile {
@@ -57,9 +60,20 @@ export interface BaselineSetting extends CspSetting {
   sourceKind: PolicyKind;
 }
 
+export interface ExcludedPolicy {
+  id: string;
+  displayName: string;
+  kind: PolicyKind;
+  /** Which of the queried group(s) caused the exclusion */
+  excludedViaGroupIds: string[];
+}
+
 export interface GroupBaseline {
   group: IntuneGroup;
+  /** Policies that actually apply (included, and not excluded) */
   policies: { id: string; displayName: string; kind: PolicyKind }[];
+  /** Policies that would otherwise apply but are explicitly excluded for this group */
+  excludedPolicies: ExcludedPolicy[];
   settings: BaselineSetting[];
   conflicts: ConflictingSetting[];
 }
@@ -98,15 +112,8 @@ export interface GroupSummary {
   membershipRule?: string;
 }
 
-export interface AutopilotProfileSummary {
-  id: string;
-  displayName: string;
-  osLabel: string;
-  assignedGroupIds: string[];
-}
-
 /** Why a group is part of an endpoint simulation. */
-export type SimulationGroupSource = "autopilot" | "selected" | "all-devices" | "all-users";
+export type SimulationGroupSource = "selected" | "all-devices" | "all-users";
 
 export interface SimulationGroup extends IntuneGroup {
   source: SimulationGroupSource;
@@ -116,13 +123,19 @@ export interface SimulationPolicy {
   id: string;
   displayName: string;
   kind: PolicyKind;
+  status: "included" | "excluded";
   /** Group ids (within this simulation) that assign this policy */
   viaGroupIds: string[];
+  /** Group ids (within this simulation) that exclude this policy -- only set when status is "excluded" */
+  excludedViaGroupIds: string[];
 }
 
 export interface SimulationResult {
   groups: SimulationGroup[];
+  /** Policies that apply -- included and not excluded */
   policies: SimulationPolicy[];
+  /** Policies that would otherwise apply but are explicitly excluded for one of the selected groups */
+  excludedPolicies: SimulationPolicy[];
   settings: BaselineSetting[];
   conflicts: ConflictingSetting[];
 }

@@ -7,7 +7,6 @@ import {
   buildGraphPayload,
   computeGroupBaseline,
   computeSimulation,
-  listAutopilotProfiles,
   listGroupSummaries,
   simulationToCsv,
 } from "./baseline.js";
@@ -73,38 +72,25 @@ app.get<{ Params: { id: string }; Querystring: { format?: string } }>(
   }
 );
 
-app.get("/api/autopilot", async (_req, reply) => {
+function parseSimulationQuery(query: { groups?: string }) {
+  const selectedGroupIds = (query.groups ?? "")
+    .split(",")
+    .map((g) => g.trim())
+    .filter(Boolean);
+  return { selectedGroupIds };
+}
+
+app.get<{ Querystring: { groups?: string } }>("/api/simulate", async (req, reply) => {
   try {
     const data = await loadTenantData();
-    return listAutopilotProfiles(data);
+    return computeSimulation(data, parseSimulationQuery(req.query));
   } catch (err) {
     app.log.error(err);
     return reply.status(502).send({ error: (err as Error).message });
   }
 });
 
-function parseSimulationQuery(query: { groups?: string; autopilotProfileId?: string }) {
-  const selectedGroupIds = (query.groups ?? "")
-    .split(",")
-    .map((g) => g.trim())
-    .filter(Boolean);
-  return { selectedGroupIds, autopilotProfileId: query.autopilotProfileId || undefined };
-}
-
-app.get<{ Querystring: { groups?: string; autopilotProfileId?: string } }>(
-  "/api/simulate",
-  async (req, reply) => {
-    try {
-      const data = await loadTenantData();
-      return computeSimulation(data, parseSimulationQuery(req.query));
-    } catch (err) {
-      app.log.error(err);
-      return reply.status(502).send({ error: (err as Error).message });
-    }
-  }
-);
-
-app.get<{ Querystring: { groups?: string; autopilotProfileId?: string; format?: string } }>(
+app.get<{ Querystring: { groups?: string; format?: string } }>(
   "/api/simulate/export",
   async (req, reply) => {
     try {

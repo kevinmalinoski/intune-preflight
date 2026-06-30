@@ -1,19 +1,13 @@
 import { useMemo, useState } from "react";
-import type { AutopilotProfileSummary, GroupSummary } from "@intune-baseline/shared";
+import type { GroupSummary } from "@intune-baseline/shared";
 
 export function EndpointPicker({
-  autopilotProfiles,
   groups,
-  selectedAutopilotId,
   selectedGroupIds,
-  onChangeAutopilot,
   onToggleGroup,
 }: {
-  autopilotProfiles: AutopilotProfileSummary[];
   groups: GroupSummary[];
-  selectedAutopilotId: string;
   selectedGroupIds: string[];
-  onChangeAutopilot: (id: string) => void;
   onToggleGroup: (id: string) => void;
 }) {
   const [search, setSearch] = useState("");
@@ -24,7 +18,7 @@ export function EndpointPicker({
   );
 
   return (
-    <div className="flex flex-col gap-4 border-b border-ink-700 bg-ink-900 p-4">
+    <div className="flex flex-col gap-3 border-b border-ink-700 bg-ink-900 p-4">
       <div className="flex items-center gap-3">
         <span className="text-2xl" aria-hidden>
           💻
@@ -32,40 +26,20 @@ export function EndpointPicker({
         <div>
           <div className="text-sm font-semibold text-slate-100">Simulate an endpoint</div>
           <div className="text-xs text-slate-400">
-            Pick how this device would enroll and which Entra groups it belongs to — see exactly what gets applied.
+            Pick the Entra security groups this device/user belongs to — see exactly what gets applied, including
+            anything explicitly excluded.
           </div>
         </div>
       </div>
 
       <div>
-        <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
-          Autopilot deployment profile
-        </label>
-        <select
-          value={selectedAutopilotId}
-          onChange={(e) => onChangeAutopilot(e.target.value)}
-          className="w-full max-w-sm rounded-md border border-ink-700 bg-ink-800 px-3 py-2 text-sm text-slate-200 focus:border-sky-400 focus:outline-none"
-        >
-          <option value="">No Autopilot profile (Entra-joined / manually enrolled)</option>
-          {autopilotProfiles.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.displayName} · {p.osLabel}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div>
-        <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
-          Entra security groups this device/user belongs to
-        </label>
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search groups…"
           className="mb-2 w-full max-w-sm rounded-md border border-ink-700 bg-ink-800 px-3 py-1.5 text-sm text-slate-200 placeholder:text-slate-500 focus:border-sky-400 focus:outline-none"
         />
-        <div className="max-h-40 max-w-sm overflow-y-auto rounded-md border border-ink-700">
+        <div className="max-h-48 max-w-sm overflow-y-auto rounded-md border border-ink-700">
           {filteredGroups.map((g) => (
             <label
               key={g.id}
@@ -88,17 +62,19 @@ export function EndpointPicker({
               )}
             </label>
           ))}
-          {filteredGroups.length === 0 && <div className="px-3 py-3 text-center text-xs text-slate-500">No groups found.</div>}
+          {filteredGroups.length === 0 && (
+            <div className="px-3 py-3 text-center text-xs text-slate-500">No groups found.</div>
+          )}
         </div>
         <div className="mt-1 text-[11px] text-slate-500">
-          Dynamic groups are evaluated by Entra from a membership rule — verify the rule still matches this endpoint before
-          trusting the simulation.
+          Dynamic groups are evaluated by Entra from a membership rule — verify the rule still matches this endpoint
+          before trusting the simulation.
         </div>
       </div>
 
       <div className="text-[11px] text-slate-500">
-        <span className="mr-1 inline-block h-2 w-2 rounded-full bg-emerald-400 align-middle" /> All Devices &amp; All Users
-        always apply automatically and are shown as separate branches below.
+        <span className="mr-1 inline-block h-2 w-2 rounded-full bg-emerald-400 align-middle" /> All Devices &amp; All
+        Users always apply automatically (unless excluded) and are shown as separate branches below.
       </div>
     </div>
   );

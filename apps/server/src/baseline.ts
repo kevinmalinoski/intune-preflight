@@ -1,12 +1,13 @@
 import type {
-  AutopilotProfileSummary,
   BaselineSetting,
   ConflictingSetting,
+  ExcludedPolicy,
   GraphEdge,
   GraphNode,
   GraphPayload,
   GroupBaseline,
   GroupSummary,
+  IntunePolicy,
   SimulationGroup,
   SimulationPolicy,
   SimulationResult,
@@ -14,15 +15,27 @@ import type {
 import type { TenantData } from "./intuneData.js";
 import { VIRTUAL_GROUP_ALL_DEVICES, VIRTUAL_GROUP_ALL_USERS } from "./normalize.js";
 
-/** Pure function: no I/O. Computes, for one group, the merged CSP baseline and any conflicts. */
-export function computeGroupBaseline(data: TenantData, groupId: string): GroupBaseline | undefined {
-  const group = data.groups.find((g) => g.id === groupId);
-  if (!group) return undefined;
+/**
+ * A policy applies to a set of group ids if at least one of those ids is an
+ * include target AND none of them is an exclude target. Excludes always win,
+ * even if the same group set also matches an include (e.g. via All Devices) --
+ * this mirrors how Intune itself resolves assignment conflicts.
+ */
+function appliesTo(policy: IntunePolicy, groupIds: string[]): boolean {
+  const included = policy.assignedGroupIds.some((id) => groupIds.includes(id));
+  const excluded = policy.excludedGroupIds.some((id) => groupIds.includes(id));
+  return included && !excluded;
+}
 
-  const assignedPolicies = data.policies.filter((p) => p.assignedGroupIds.includes(groupId));
+function excludedFor(policy: IntunePolicy, groupIds: string[]): boolean {
+  const included = policy.assignedGroupIds.some((id) => groupIds.includes(id));
+  const excluded = policy.excludedGroupIds.some((id) => groupIds.includes(id));
+  return included && excluded;
+}
 
+function mergeSettings(policies: IntunePolicy[]): { settings: BaselineSetting[]; conflicts: ConflictingSetting[] } {
   const bySettingId = new Map<string, BaselineSetting[]>();
-  for (const policy of assignedPolicies) {
+  for (const policy of policies) {
     for (const setting of policy.settings) {
       const entry: BaselineSetting = {
         ...setting,
@@ -38,7 +51,6 @@ export function computeGroupBaseline(data: TenantData, groupId: string): GroupBa
 
   const settings: BaselineSetting[] = [];
   const conflicts: ConflictingSetting[] = [];
-
   for (const [settingId, entries] of bySettingId) {
     settings.push(entries[0]);
     const distinctValues = new Set(entries.map((e) => e.value));
@@ -55,10 +67,30 @@ export function computeGroupBaseline(data: TenantData, groupId: string): GroupBa
       });
     }
   }
+  return { settings, conflicts };
+}
+
+/** Pure function: no I/O. Computes, for one group, the merged CSP baseline, honoring include/exclude assignments. */
+export function computeGroupBaseline(data: TenantData, groupId: string): GroupBaseline | undefined {
+  const group = data.groups.find((g) => g.id === groupId);
+  if (!group) return undefined;
+
+  const applied = data.policies.filter((p) => appliesTo(p, [groupId]));
+  const excluded = data.policies.filter((p) => excludedFor(p, [groupId]));
+
+  const { settings, conflicts } = mergeSettings(applied);
+
+  const excludedPolicies: ExcludedPolicy[] = excluded.map((p) => ({
+    id: p.id,
+    displayName: p.displayName,
+    kind: p.kind,
+    excludedViaGroupIds: [groupId],
+  }));
 
   return {
     group,
-    policies: assignedPolicies.map((p) => ({ id: p.id, displayName: p.displayName, kind: p.kind })),
+    policies: applied.map((p) => ({ id: p.id, displayName: p.displayName, kind: p.kind })),
+    excludedPolicies,
     settings,
     conflicts,
   };
@@ -66,7 +98,12 @@ export function computeGroupBaseline(data: TenantData, groupId: string): GroupBa
 
 export function listGroupSummaries(data: TenantData): GroupSummary[] {
   return data.groups
-    .filter((g) => !g.isVirtual || data.policies.some((p) => p.assignedGroupIds.includes(g.id)) || data.autopilotProfiles.some((a) => a.assignedGroupIds.includes(g.id)))
+    .filter(
+      (g) =>
+        !g.isVirtual ||
+        data.policies.some((p) => p.assignedGroupIds.includes(g.id)) ||
+        data.autopilotProfiles.some((a) => a.assignedGroupIds.includes(g.id))
+    )
     .map((group) => {
       const baseline = computeGroupBaseline(data, group.id);
       return {
@@ -82,25 +119,13 @@ export function listGroupSummaries(data: TenantData): GroupSummary[] {
     .sort((a, b) => b.settingsCount - a.settingsCount);
 }
 
-export function listAutopilotProfiles(data: TenantData): AutopilotProfileSummary[] {
-  return data.autopilotProfiles.map((p) => ({
-    id: p.id,
-    displayName: p.displayName,
-    osLabel: p.osLabel,
-    assignedGroupIds: p.assignedGroupIds,
-  }));
-}
-
 /**
- * Simulates "what policies apply to an endpoint" given the Entra groups it's a
- * member of (and/or an Autopilot deployment profile it would enroll through).
- * All Devices / All Users always apply, regardless of selection, since every
- * real device and user is implicitly a member of those Graph assignment targets.
+ * Simulates "what policies apply to this set of Entra groups" -- the
+ * Policy-Sets-without-Policy-Sets view. All Devices / All Users always apply,
+ * since every real device/user is implicitly a member of those assignment
+ * targets. Excludes always win over includes, exactly like Intune itself.
  */
-export function computeSimulation(
-  data: TenantData,
-  options: { selectedGroupIds: string[]; autopilotProfileId?: string }
-): SimulationResult {
+export function computeSimulation(data: TenantData, options: { selectedGroupIds: string[] }): SimulationResult {
   const groupMap = new Map(data.groups.map((g) => [g.id, g]));
   const groups: SimulationGroup[] = [];
   const seen = new Set<string>();
@@ -112,13 +137,6 @@ export function computeSimulation(
     seen.add(id);
   };
 
-  const autopilotProfile = data.autopilotProfiles.find((p) => p.id === options.autopilotProfileId);
-  if (autopilotProfile) {
-    for (const groupId of autopilotProfile.assignedGroupIds) {
-      if (groupId === VIRTUAL_GROUP_ALL_DEVICES.id || groupId === VIRTUAL_GROUP_ALL_USERS.id) continue;
-      addGroup(groupId, "autopilot");
-    }
-  }
   for (const groupId of options.selectedGroupIds) {
     addGroup(groupId, "selected");
   }
@@ -126,48 +144,29 @@ export function computeSimulation(
   addGroup(VIRTUAL_GROUP_ALL_USERS.id, "all-users");
 
   const groupIds = groups.map((g) => g.id);
-  const policyMap = new Map<string, SimulationPolicy>();
-  const bySettingId = new Map<string, BaselineSetting[]>();
+  const policies: SimulationPolicy[] = [];
+  const excludedPolicies: SimulationPolicy[] = [];
 
   for (const policy of data.policies) {
     const viaGroupIds = policy.assignedGroupIds.filter((id) => groupIds.includes(id));
+    const excludedViaGroupIds = policy.excludedGroupIds.filter((id) => groupIds.includes(id));
     if (viaGroupIds.length === 0) continue;
 
-    policyMap.set(policy.id, { id: policy.id, displayName: policy.displayName, kind: policy.kind, viaGroupIds });
-
-    for (const setting of policy.settings) {
-      const entry: BaselineSetting = {
-        ...setting,
-        sourcePolicyId: policy.id,
-        sourcePolicyName: policy.displayName,
-        sourceKind: policy.kind,
-      };
-      const list = bySettingId.get(setting.settingId) ?? [];
-      list.push(entry);
-      bySettingId.set(setting.settingId, list);
-    }
+    const entry: SimulationPolicy = {
+      id: policy.id,
+      displayName: policy.displayName,
+      kind: policy.kind,
+      status: excludedViaGroupIds.length > 0 ? "excluded" : "included",
+      viaGroupIds,
+      excludedViaGroupIds,
+    };
+    (entry.status === "excluded" ? excludedPolicies : policies).push(entry);
   }
 
-  const settings: BaselineSetting[] = [];
-  const conflicts: ConflictingSetting[] = [];
-  for (const [settingId, entries] of bySettingId) {
-    settings.push(entries[0]);
-    const distinctValues = new Set(entries.map((e) => e.value));
-    if (distinctValues.size > 1) {
-      conflicts.push({
-        settingId,
-        cspArea: entries[0].cspArea,
-        displayName: entries[0].displayName,
-        values: entries.map((e) => ({
-          value: e.value,
-          sourcePolicyId: e.sourcePolicyId,
-          sourcePolicyName: e.sourcePolicyName,
-        })),
-      });
-    }
-  }
+  const appliedPolicyObjs = data.policies.filter((p) => policies.some((sp) => sp.id === p.id));
+  const { settings, conflicts } = mergeSettings(appliedPolicyObjs);
 
-  return { groups, policies: [...policyMap.values()], settings, conflicts };
+  return { groups, policies, excludedPolicies, settings, conflicts };
 }
 
 export function simulationToCsv(simulation: SimulationResult): string {
@@ -190,7 +189,10 @@ export function buildGraphPayload(data: TenantData): GraphPayload {
   const edges: GraphEdge[] = [];
 
   const groupsInUse = new Set<string>();
-  for (const p of data.policies) for (const g of p.assignedGroupIds) groupsInUse.add(g);
+  for (const p of data.policies) {
+    for (const g of p.assignedGroupIds) groupsInUse.add(g);
+    for (const g of p.excludedGroupIds) groupsInUse.add(g);
+  }
   for (const a of data.autopilotProfiles) for (const g of a.assignedGroupIds) groupsInUse.add(g);
 
   for (const group of data.groups) {

@@ -95,13 +95,24 @@ export interface AssignmentTarget {
   groupId?: string;
   isAllDevices?: boolean;
   isAllUsers?: boolean;
+  isExclude?: boolean;
 }
 
+/**
+ * Intune assignment targets come in distinct OData types. Critically,
+ * `#microsoft.graph.exclusionGroupAssignmentTarget` looks identical to a
+ * normal group target (same `groupId` field) but means the OPPOSITE: members
+ * of that group are excluded from the policy, even if included by another
+ * assignment (e.g. All Devices). Treating it as an include -- which earlier
+ * versions of this app did -- silently misattributes excluded policies as
+ * applied.
+ */
 export function parseAssignmentTarget(assignment: {
   target?: { "@odata.type"?: string; groupId?: string };
 }): AssignmentTarget {
   const target = assignment.target;
   const type = target?.["@odata.type"] ?? "";
+  if (type.includes("exclusionGroupAssignmentTarget")) return { groupId: target?.groupId, isExclude: true };
   if (type.includes("allDevices")) return { isAllDevices: true };
   if (type.includes("allLicensedUsers")) return { isAllUsers: true };
   return { groupId: target?.groupId };

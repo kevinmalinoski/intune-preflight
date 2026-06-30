@@ -47,6 +47,21 @@ export function BaselinePanel({ groupId, onClose }: { groupId: string; onClose: 
 
       {baseline && (
         <>
+          {baseline.excludedPolicies.length > 0 && (
+            <div className="border-b border-ink-700 bg-rose-500/5 p-3">
+              <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-rose-300">
+                Excluded for this group
+              </div>
+              <ul className="space-y-1">
+                {baseline.excludedPolicies.map((p) => (
+                  <li key={p.id} className="text-xs text-slate-300">
+                    <span className="font-medium text-rose-300">{p.displayName}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
           <div className="flex gap-2 border-b border-ink-700 p-3">
             <input
               value={filter}

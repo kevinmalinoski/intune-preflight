@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { ReactFlow, Background, Controls, type Node, type Edge, Handle, Position } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import type { SimulationGroup, SimulationPolicy, SimulationResult } from "@intune-baseline/shared";
+import type { SimulationGroup, SimulationResult } from "@intune-baseline/shared";
 
 const KIND_COLOR: Record<string, string> = {
   deviceConfiguration: "#38bdf8",
@@ -11,7 +11,6 @@ const KIND_COLOR: Record<string, string> = {
 };
 
 const SOURCE_STYLE: Record<SimulationGroup["source"], { border: string; bg: string; label: string }> = {
-  autopilot: { border: "#38bdf8", bg: "rgba(56,189,248,0.08)", label: "via Autopilot" },
   selected: { border: "#34d399", bg: "rgba(52,211,153,0.08)", label: "selected" },
   "all-devices": { border: "#94a3b8", bg: "rgba(148,163,184,0.06)", label: "always applies" },
   "all-users": { border: "#94a3b8", bg: "rgba(148,163,184,0.06)", label: "always applies" },
@@ -51,15 +50,25 @@ function GroupNode({ data }: { data: { label: string; source: SimulationGroup["s
   );
 }
 
-function PolicyNode({ data }: { data: { label: string; kind: string; settingsCount: number } }) {
-  const color = KIND_COLOR[data.kind] ?? "#94a3b8";
+function PolicyNode({ data }: { data: { label: string; kind: string; settingsCount: number; excluded?: boolean } }) {
+  const color = data.excluded ? "#fb7185" : KIND_COLOR[data.kind] ?? "#94a3b8";
   return (
-    <div className="rounded-lg border bg-ink-800 px-3 py-2 text-xs text-slate-200 shadow-md" style={{ borderColor: color }}>
+    <div
+      className="rounded-lg border px-3 py-2 text-xs shadow-md"
+      style={{
+        borderColor: color,
+        backgroundColor: data.excluded ? "rgba(251,113,133,0.08)" : "#1a2130",
+        borderStyle: data.excluded ? "dashed" : "solid",
+      }}
+    >
       <Handle type="target" position={Position.Top} className="opacity-0" />
       <div className="font-medium" style={{ color }}>
+        {data.excluded ? "🚫 " : ""}
         {data.label}
       </div>
-      <div className="mt-0.5 text-[10px] text-slate-400">{data.settingsCount} settings</div>
+      <div className="mt-0.5 text-[10px] text-slate-400">
+        {data.excluded ? "excluded for this group" : `${data.settingsCount} settings`}
+      </div>
     </div>
   );
 }
@@ -67,9 +76,7 @@ function PolicyNode({ data }: { data: { label: string; kind: string; settingsCou
 const nodeTypes = { device: DeviceNode, group: GroupNode, policy: PolicyNode };
 
 function layout(simulation: SimulationResult) {
-  const nodes: Node[] = [
-    { id: "device", type: "device", position: { x: 0, y: 0 }, data: {} },
-  ];
+  const nodes: Node[] = [{ id: "device", type: "device", position: { x: 0, y: 0 }, data: {} }];
 
   const groupX = 320;
   simulation.groups.forEach((g, idx) => {
@@ -82,14 +89,23 @@ function layout(simulation: SimulationResult) {
   });
 
   const policyX = 680;
-  simulation.policies.forEach((p, idx) => {
+  let row = 0;
+  for (const p of simulation.policies) {
     nodes.push({
       id: `policy:${p.id}`,
       type: "policy",
-      position: { x: policyX, y: idx * 70 },
-      data: { label: p.displayName, kind: p.kind, settingsCount: undefined },
+      position: { x: policyX, y: row++ * 70 },
+      data: { label: p.displayName, kind: p.kind, settingsCount: undefined, excluded: false },
     });
-  });
+  }
+  for (const p of simulation.excludedPolicies) {
+    nodes.push({
+      id: `policy:${p.id}`,
+      type: "policy",
+      position: { x: policyX, y: row++ * 70 },
+      data: { label: p.displayName, kind: p.kind, settingsCount: undefined, excluded: true },
+    });
+  }
 
   const edges: Edge[] = [];
   for (const g of simulation.groups) {
@@ -107,6 +123,16 @@ function layout(simulation: SimulationResult) {
         source: `group:${groupId}`,
         target: `policy:${p.id}`,
         style: { stroke: "#334155" },
+      });
+    }
+  }
+  for (const p of simulation.excludedPolicies) {
+    for (const groupId of p.excludedViaGroupIds) {
+      edges.push({
+        id: `exclude-${groupId}->${p.id}`,
+        source: `group:${groupId}`,
+        target: `policy:${p.id}`,
+        style: { stroke: "#fb7185", strokeDasharray: "4 4" },
       });
     }
   }
