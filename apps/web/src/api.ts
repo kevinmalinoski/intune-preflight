@@ -9,19 +9,19 @@ async function getJson<T>(path: string): Promise<T> {
   return res.json();
 }
 
-function simulationQuery(groupIds: string[], platform?: Platform, deviceFilterId?: string) {
+function simulationQuery(groupIds: string[], platform?: Platform, deviceFilterIds?: string[]) {
   const params = new URLSearchParams();
   if (groupIds.length) params.set("groups", groupIds.join(","));
   if (platform) params.set("platform", platform);
-  if (deviceFilterId) params.set("deviceFilterId", deviceFilterId);
+  if (deviceFilterIds?.length) params.set("deviceFilterIds", deviceFilterIds.join(","));
   return params.toString();
 }
 
 export const api = {
   groups: () => getJson<GroupSummary[]>("/groups"),
   filters: () => getJson<AssignmentFilter[]>("/filters"),
-  simulate: (groupIds: string[], platform?: Platform, deviceFilterId?: string) =>
-    getJson<SimulationResult>(`/simulate?${simulationQuery(groupIds, platform, deviceFilterId)}`),
-  simulateExportUrl: (groupIds: string[], platform: Platform | undefined, deviceFilterId: string | undefined, format: "json" | "csv") =>
-    `/api/simulate/export?${simulationQuery(groupIds, platform, deviceFilterId)}&format=${format}`,
+  simulate: (groupIds: string[], platform?: Platform, deviceFilterIds?: string[]) =>
+    getJson<SimulationResult>(`/simulate?${simulationQuery(groupIds, platform, deviceFilterIds)}`),
+  simulateExportUrl: (groupIds: string[], platform: Platform | undefined, deviceFilterIds: string[] | undefined, format: "json" | "csv") =>
+    `/api/simulate/export?${simulationQuery(groupIds, platform, deviceFilterIds)}&format=${format}`,
 };

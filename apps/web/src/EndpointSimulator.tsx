@@ -10,7 +10,7 @@ export function EndpointSimulator() {
   const [filters, setFilters] = useState<AssignmentFilter[]>([]);
   const [platform, setPlatform] = useState<Platform>("windows");
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
-  const [deviceFilterId, setDeviceFilterId] = useState("");
+  const [deviceFilterIds, setDeviceFilterIds] = useState<string[]>([]);
   const [simulation, setSimulation] = useState<SimulationResult | null>(null);
   const [showBaseline, setShowBaseline] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,23 +24,29 @@ export function EndpointSimulator() {
       .catch((e) => setError(e.message));
   }, []);
 
-  // A filter selected for one platform won't apply to another -- reset on switch.
+  // Filters selected for one platform won't apply to another -- reset on switch.
   useEffect(() => {
-    setDeviceFilterId("");
+    setDeviceFilterIds([]);
   }, [platform]);
 
   useEffect(() => {
     api
-      .simulate(selectedGroupIds, platform, deviceFilterId || undefined)
+      .simulate(selectedGroupIds, platform, deviceFilterIds)
       .then(setSimulation)
       .catch((e) => setError(e.message));
-  }, [selectedGroupIds, platform, deviceFilterId]);
+  }, [selectedGroupIds, platform, deviceFilterIds]);
 
   const toggleGroup = (id: string) => {
     setSelectedGroupIds((prev) => (prev.includes(id) ? prev.filter((g) => g !== id) : [...prev, id]));
   };
 
-  const deviceFilterName = filters.find((f) => f.id === deviceFilterId)?.displayName;
+  const toggleDeviceFilter = (id: string) => {
+    setDeviceFilterIds((prev) => (prev.includes(id) ? prev.filter((f) => f !== id) : [...prev, id]));
+  };
+
+  const deviceFilterNames = deviceFilterIds
+    .map((id) => filters.find((f) => f.id === id)?.displayName)
+    .filter((name): name is string => Boolean(name));
 
   return (
     <div className="flex h-full flex-col">
@@ -51,8 +57,8 @@ export function EndpointSimulator() {
         onTogglePlatform={setPlatform}
         onToggleGroup={toggleGroup}
         filters={filters}
-        deviceFilterId={deviceFilterId}
-        onChangeDeviceFilter={setDeviceFilterId}
+        deviceFilterIds={deviceFilterIds}
+        onToggleDeviceFilter={toggleDeviceFilter}
       />
 
       <div className="relative flex-1 bg-ink-950">
@@ -63,7 +69,7 @@ export function EndpointSimulator() {
         )}
         {!error && simulation && (
           <>
-            <SimulationDiagram simulation={simulation} deviceFilterName={deviceFilterName} />
+            <SimulationDiagram simulation={simulation} deviceFilterNames={deviceFilterNames} />
             <div className="absolute right-4 top-4 z-10 flex flex-col items-end gap-2">
               <button
                 onClick={() => setShowBaseline(true)}
@@ -88,7 +94,7 @@ export function EndpointSimulator() {
           simulation={simulation}
           groupIds={selectedGroupIds}
           platform={platform}
-          deviceFilterId={deviceFilterId || undefined}
+          deviceFilterIds={deviceFilterIds}
           onClose={() => setShowBaseline(false)}
         />
       )}

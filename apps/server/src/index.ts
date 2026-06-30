@@ -32,17 +32,20 @@ app.get("/api/filters", async (_req, reply) => {
   }
 });
 
-function parseSimulationQuery(query: { groups?: string; platform?: string; deviceFilterId?: string }) {
+function parseSimulationQuery(query: { groups?: string; platform?: string; deviceFilterIds?: string }) {
   const selectedGroupIds = (query.groups ?? "")
     .split(",")
     .map((g) => g.trim())
     .filter(Boolean);
   const platform = VALID_PLATFORMS.includes(query.platform as Platform) ? (query.platform as Platform) : undefined;
-  const deviceFilterId = query.deviceFilterId || undefined;
-  return { selectedGroupIds, platform, deviceFilterId };
+  const deviceFilterIds = (query.deviceFilterIds ?? "")
+    .split(",")
+    .map((f) => f.trim())
+    .filter(Boolean);
+  return { selectedGroupIds, platform, deviceFilterIds };
 }
 
-app.get<{ Querystring: { groups?: string; platform?: string; deviceFilterId?: string } }>(
+app.get<{ Querystring: { groups?: string; platform?: string; deviceFilterIds?: string } }>(
   "/api/simulate",
   async (req, reply) => {
     try {
@@ -55,7 +58,7 @@ app.get<{ Querystring: { groups?: string; platform?: string; deviceFilterId?: st
   }
 );
 
-app.get<{ Querystring: { groups?: string; platform?: string; deviceFilterId?: string; format?: string } }>(
+app.get<{ Querystring: { groups?: string; platform?: string; deviceFilterIds?: string; format?: string } }>(
   "/api/simulate/export",
   async (req, reply) => {
     try {

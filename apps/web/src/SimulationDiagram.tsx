@@ -42,7 +42,7 @@ function estimateRowHeight(label: string): number {
   return BASE_ROW_HEIGHT + (lines - 1) * LINE_HEIGHT + ROW_GAP;
 }
 
-function DeviceNode({ data }: { data: { groupNames: string[]; filterName?: string } }) {
+function DeviceNode({ data }: { data: { groupNames: string[]; filterNames: string[] } }) {
   return (
     <div className="flex w-64 flex-col items-center gap-2 rounded-2xl border-2 border-emerald-400 bg-ink-900 px-5 py-4 text-emerald-100 shadow-[0_8px_30px_rgba(16,185,129,0.25)]">
       <Handle type="source" position={Position.Right} className="opacity-0" />
@@ -58,8 +58,10 @@ function DeviceNode({ data }: { data: { groupNames: string[]; filterName?: strin
           </span>
         </div>
         <div>
-          <span className="font-medium uppercase tracking-wide text-emerald-300/80">Device Filter:</span>{" "}
-          <span className="text-emerald-100/90">{data.filterName ?? "None"}</span>
+          <span className="font-medium uppercase tracking-wide text-emerald-300/80">Device Filters:</span>{" "}
+          <span className="text-emerald-100/90">
+            {data.filterNames.length > 0 ? data.filterNames.join(", ") : "None"}
+          </span>
         </div>
       </div>
     </div>
@@ -128,10 +130,10 @@ const nodeTypes = { device: DeviceNode, group: GroupNode, policy: PolicyNode };
 
 const COLUMN_GAP = 140;
 
-function layout(simulation: SimulationResult, deviceFilterName: string | undefined) {
+function layout(simulation: SimulationResult, deviceFilterNames: string[]) {
   const groupNames = simulation.groups.filter((g) => g.source === "selected").map((g) => g.displayName);
   const nodes: Node[] = [
-    { id: "device", type: "device", position: { x: 0, y: 0 }, data: { groupNames, filterName: deviceFilterName } },
+    { id: "device", type: "device", position: { x: 0, y: 0 }, data: { groupNames, filterNames: deviceFilterNames } },
   ];
 
   const groupX = GROUP_NODE_WIDTH * 0 + 220 + COLUMN_GAP / 2;
@@ -226,12 +228,12 @@ function Legend() {
 
 export function SimulationDiagram({
   simulation,
-  deviceFilterName,
+  deviceFilterNames = [],
 }: {
   simulation: SimulationResult;
-  deviceFilterName?: string;
+  deviceFilterNames?: string[];
 }) {
-  const { nodes, edges } = useMemo(() => layout(simulation, deviceFilterName), [simulation, deviceFilterName]);
+  const { nodes, edges } = useMemo(() => layout(simulation, deviceFilterNames), [simulation, deviceFilterNames]);
   const policySettingsCount = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const s of simulation.settings) counts[s.sourcePolicyId] = (counts[s.sourcePolicyId] ?? 0) + 1;

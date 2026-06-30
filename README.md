@@ -81,8 +81,8 @@ packages/shared/  TypeScript types shared by both apps
 |---|---|
 | `GET /api/groups` | Device groups with policy/setting/conflict counts |
 | `GET /api/filters` | Intune Assignment Filters available in the tenant |
-| `GET /api/simulate?groups=id1,id2&platform=windows&deviceFilterId=...` | Simulated endpoint baseline for the given groups, platform (`windows`\|`macos`\|`ios`\|`android`), and Assignment Filter |
-| `GET /api/simulate/export?groups=...&platform=...&deviceFilterId=...&format=json\|csv` | Download the simulated baseline |
+| `GET /api/simulate?groups=id1,id2&platform=windows&deviceFilterIds=id1,id2` | Simulated endpoint baseline for the given groups, platform (`windows`\|`macos`\|`ios`\|`android`), and Assignment Filter(s) -- a device can match more than one filter at once |
+| `GET /api/simulate/export?groups=...&platform=...&deviceFilterIds=...&format=json\|csv` | Download the simulated baseline |
 | `POST /api/refresh` | Clear the in-memory cache and re-fetch from Graph |
 
 ## Notes & limitations

@@ -15,8 +15,8 @@ export function EndpointPicker({
   onTogglePlatform,
   onToggleGroup,
   filters,
-  deviceFilterId,
-  onChangeDeviceFilter,
+  deviceFilterIds,
+  onToggleDeviceFilter,
 }: {
   groups: GroupSummary[];
   selectedGroupIds: string[];
@@ -24,8 +24,8 @@ export function EndpointPicker({
   onTogglePlatform: (platform: Platform) => void;
   onToggleGroup: (id: string) => void;
   filters: AssignmentFilter[];
-  deviceFilterId: string;
-  onChangeDeviceFilter: (id: string) => void;
+  deviceFilterIds: string[];
+  onToggleDeviceFilter: (id: string) => void;
 }) {
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState(false);
@@ -41,7 +41,9 @@ export function EndpointPicker({
     .map((id) => groups.find((g) => g.id === id)?.displayName ?? id)
     .join(", ");
   const platformLabel = PLATFORM_OPTIONS.find((p) => p.value === platform)?.label ?? platform;
-  const deviceFilterLabel = filters.find((f) => f.id === deviceFilterId)?.displayName;
+  const deviceFilterLabels = deviceFilterIds
+    .map((id) => filters.find((f) => f.id === id)?.displayName)
+    .filter((label): label is string => Boolean(label));
 
   if (collapsed) {
     return (
@@ -51,7 +53,9 @@ export function EndpointPicker({
         </span>
         <div className="min-w-0 flex-1 truncate text-xs text-slate-300">
           <span className="font-medium text-slate-100">{platformLabel}</span>
-          {deviceFilterLabel && <span className="text-violet-300"> · matches "{deviceFilterLabel}"</span>}
+          {deviceFilterLabels.length > 0 && (
+            <span className="text-violet-300"> · matches "{deviceFilterLabels.join('", "')}"</span>
+          )}
           {selectedGroupIds.length > 0 ? (
             <span className="text-slate-400"> · {selectedGroupNames}</span>
           ) : (
@@ -114,24 +118,36 @@ export function EndpointPicker({
 
       <div>
         <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
-          Device filter
+          Device filters
         </label>
-        <select
-          value={deviceFilterId}
-          onChange={(e) => onChangeDeviceFilter(e.target.value)}
-          className="w-full max-w-sm rounded-md border border-ink-700 bg-ink-800 px-3 py-1.5 text-sm text-slate-200 focus:border-violet-400 focus:outline-none"
-        >
-          <option value="">No filter (default)</option>
-          {platformFilters.map((f) => (
-            <option key={f.id} value={f.id}>
-              {f.displayName}
-            </option>
-          ))}
-        </select>
+        {platformFilters.length === 0 ? (
+          <div className="max-w-sm rounded-md border border-ink-700 px-3 py-2 text-xs text-slate-500">
+            No Assignment Filters defined for this platform.
+          </div>
+        ) : (
+          <div className="max-h-32 max-w-sm overflow-y-auto rounded-md border border-ink-700">
+            {platformFilters.map((f) => (
+              <label
+                key={f.id}
+                className="flex cursor-pointer items-start gap-2 border-b border-ink-800 px-3 py-1.5 text-xs last:border-b-0 hover:bg-ink-800"
+              >
+                <input
+                  type="checkbox"
+                  checked={deviceFilterIds.includes(f.id)}
+                  onChange={() => onToggleDeviceFilter(f.id)}
+                  className="mt-0.5 shrink-0 accent-violet-400"
+                />
+                <span className="min-w-0 flex-1 break-words leading-snug text-slate-200" title={f.rule}>
+                  {f.displayName}
+                </span>
+              </label>
+            ))}
+          </div>
+        )}
         <div className="mt-1 text-[11px] text-slate-500">
-          Which Intune Assignment Filter (if any) this device matches — e.g. "Kiosk Devices". Policies whose
-          assignment includes or excludes a filter are resolved against this, on top of group membership. Default is
-          no filter assigned.
+          Which Intune Assignment Filter(s), if any, this device matches — e.g. a device can be both "Kiosk Devices"
+          and "Corporate Owned" at once. Policies whose assignment includes or excludes a filter are resolved against
+          this, on top of group membership. Default is no filters matched.
         </div>
       </div>
 

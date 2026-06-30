@@ -16,13 +16,16 @@ import { VIRTUAL_GROUP_ALL_DEVICES, VIRTUAL_GROUP_ALL_USERS } from "./normalize.
 
 /**
  * Whether a single group assignment's filter allows it to apply, given which
- * filter (if any) is selected as representing the simulated device. A
- * missing entry means the assignment has no filter, so it always passes.
+ * filter(s) (if any) are selected as representing the simulated device. A
+ * device can match more than one Assignment Filter at once (e.g. "Kiosk
+ * Devices" AND "Corporate Owned"), so this checks set membership rather than
+ * equality. A missing entry means the assignment has no filter, so it always
+ * passes.
  */
-function passesAssignmentFilter(filterRef: AssignmentFilterRef | undefined, selectedFilterId: string | undefined): boolean {
+function passesAssignmentFilter(filterRef: AssignmentFilterRef | undefined, selectedFilterIds: string[]): boolean {
   if (!filterRef) return true;
-  if (filterRef.filterType === "exclude") return filterRef.filterId !== selectedFilterId;
-  return filterRef.filterId === selectedFilterId;
+  if (filterRef.filterType === "exclude") return !selectedFilterIds.includes(filterRef.filterId);
+  return selectedFilterIds.includes(filterRef.filterId);
 }
 
 /**
@@ -135,12 +138,14 @@ export function listAssignmentFilters(data: TenantData): AssignmentFilter[] {
  * simulation. An optional device filter represents which Assignment Filter
  * (if any) the simulated device matches -- e.g. selecting "Kiosk Devices"
  * correctly excludes policies whose assignment excludes that filter, which
- * group/exclude logic alone can't see.
+ * group/exclude logic alone can't see. A device can match multiple filters
+ * at once, so this accepts a set of selected filter ids.
  */
 export function computeSimulation(
   data: TenantData,
-  options: { selectedGroupIds: string[]; platform?: Platform; deviceFilterId?: string }
+  options: { selectedGroupIds: string[]; platform?: Platform; deviceFilterIds?: string[] }
 ): SimulationResult {
+  const deviceFilterIds = options.deviceFilterIds ?? [];
   const groupMap = new Map(data.groups.map((g) => [g.id, g]));
   const filterNameById = new Map(data.assignmentFilters.map((f) => [f.id, f.displayName]));
   const groups: SimulationGroup[] = [];
@@ -193,7 +198,7 @@ export function computeSimulation(
     }
 
     const filterByGroupId = new Map(policy.assignmentFilters.map((f) => [f.groupId, f]));
-    const passingGroupIds = rawViaGroupIds.filter((id) => passesAssignmentFilter(filterByGroupId.get(id), options.deviceFilterId));
+    const passingGroupIds = rawViaGroupIds.filter((id) => passesAssignmentFilter(filterByGroupId.get(id), deviceFilterIds));
 
     if (passingGroupIds.length === 0) {
       const failingFilter = filterByGroupId.get(rawViaGroupIds[0]);
