@@ -28,7 +28,8 @@
       "Bash(grep -n \"return { policies, groups, autopilotProfiles }\" /Users/kevinmalinoski/IntuneMachineAudit/apps/server/src/intuneData.ts)",
       "Bash(curl -s \"localhost:4000/api/simulate?platform=windows&deviceFilterId=881b2051-1cc3-48bc-b926-425bdfa744a7\")",
       "mcp__Claude_Preview__preview_start",
-      "mcp__Claude_in_Chrome__list_connected_browsers"
+      "mcp__Claude_in_Chrome__list_connected_browsers",
+      "Bash(git reset *)"
     ]
   }
 }
