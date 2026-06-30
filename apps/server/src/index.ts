@@ -3,7 +3,7 @@ import cors from "@fastify/cors";
 import type { Platform } from "@intune-baseline/shared";
 import { config } from "./config.js";
 import { loadTenantData, clearTenantDataCache } from "./intuneData.js";
-import { computeSimulation, listGroupSummaries, simulationToCsv } from "./baseline.js";
+import { computeSimulation, listAssignmentFilters, listGroupSummaries, simulationToCsv } from "./baseline.js";
 
 const app = Fastify({ logger: true });
 await app.register(cors, { origin: true });
@@ -22,26 +22,40 @@ app.get("/api/groups", async (_req, reply) => {
   }
 });
 
-function parseSimulationQuery(query: { groups?: string; platform?: string }) {
-  const selectedGroupIds = (query.groups ?? "")
-    .split(",")
-    .map((g) => g.trim())
-    .filter(Boolean);
-  const platform = VALID_PLATFORMS.includes(query.platform as Platform) ? (query.platform as Platform) : undefined;
-  return { selectedGroupIds, platform };
-}
-
-app.get<{ Querystring: { groups?: string; platform?: string } }>("/api/simulate", async (req, reply) => {
+app.get("/api/filters", async (_req, reply) => {
   try {
     const data = await loadTenantData();
-    return computeSimulation(data, parseSimulationQuery(req.query));
+    return listAssignmentFilters(data);
   } catch (err) {
     app.log.error(err);
     return reply.status(502).send({ error: (err as Error).message });
   }
 });
 
-app.get<{ Querystring: { groups?: string; platform?: string; format?: string } }>(
+function parseSimulationQuery(query: { groups?: string; platform?: string; deviceFilterId?: string }) {
+  const selectedGroupIds = (query.groups ?? "")
+    .split(",")
+    .map((g) => g.trim())
+    .filter(Boolean);
+  const platform = VALID_PLATFORMS.includes(query.platform as Platform) ? (query.platform as Platform) : undefined;
+  const deviceFilterId = query.deviceFilterId || undefined;
+  return { selectedGroupIds, platform, deviceFilterId };
+}
+
+app.get<{ Querystring: { groups?: string; platform?: string; deviceFilterId?: string } }>(
+  "/api/simulate",
+  async (req, reply) => {
+    try {
+      const data = await loadTenantData();
+      return computeSimulation(data, parseSimulationQuery(req.query));
+    } catch (err) {
+      app.log.error(err);
+      return reply.status(502).send({ error: (err as Error).message });
+    }
+  }
+);
+
+app.get<{ Querystring: { groups?: string; platform?: string; deviceFilterId?: string; format?: string } }>(
   "/api/simulate/export",
   async (req, reply) => {
     try {

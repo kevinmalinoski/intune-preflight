@@ -1,4 +1,4 @@
-import type { GroupSummary, Platform, SimulationResult } from "@intune-baseline/shared";
+import type { AssignmentFilter, GroupSummary, Platform, SimulationResult } from "@intune-baseline/shared";
 
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(`/api${path}`);
@@ -9,17 +9,19 @@ async function getJson<T>(path: string): Promise<T> {
   return res.json();
 }
 
-function simulationQuery(groupIds: string[], platform?: Platform) {
+function simulationQuery(groupIds: string[], platform?: Platform, deviceFilterId?: string) {
   const params = new URLSearchParams();
   if (groupIds.length) params.set("groups", groupIds.join(","));
   if (platform) params.set("platform", platform);
+  if (deviceFilterId) params.set("deviceFilterId", deviceFilterId);
   return params.toString();
 }
 
 export const api = {
   groups: () => getJson<GroupSummary[]>("/groups"),
-  simulate: (groupIds: string[], platform?: Platform) =>
-    getJson<SimulationResult>(`/simulate?${simulationQuery(groupIds, platform)}`),
-  simulateExportUrl: (groupIds: string[], platform: Platform | undefined, format: "json" | "csv") =>
-    `/api/simulate/export?${simulationQuery(groupIds, platform)}&format=${format}`,
+  filters: () => getJson<AssignmentFilter[]>("/filters"),
+  simulate: (groupIds: string[], platform?: Platform, deviceFilterId?: string) =>
+    getJson<SimulationResult>(`/simulate?${simulationQuery(groupIds, platform, deviceFilterId)}`),
+  simulateExportUrl: (groupIds: string[], platform: Platform | undefined, deviceFilterId: string | undefined, format: "json" | "csv") =>
+    `/api/simulate/export?${simulationQuery(groupIds, platform, deviceFilterId)}&format=${format}`,
 };

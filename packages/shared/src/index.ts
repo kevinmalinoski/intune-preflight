@@ -31,6 +31,21 @@ export interface CspSetting {
   value: string;
 }
 
+/** An Intune Assignment Filter, used to scope an assignment to devices matching a rule (e.g. "Kiosk Devices"). */
+export interface AssignmentFilter {
+  id: string;
+  displayName: string;
+  platform: Platform;
+  rule: string;
+}
+
+export interface AssignmentFilterRef {
+  /** Real group id, or the virtual All Devices/All Users id, that this filter is attached to */
+  groupId: string;
+  filterId: string;
+  filterType: "include" | "exclude";
+}
+
 export interface IntunePolicy {
   id: string;
   kind: PolicyKind;
@@ -42,6 +57,8 @@ export interface IntunePolicy {
   assignedGroupIds: string[];
   /** Groups explicitly EXCLUDED from this policy -- excludes always win over includes */
   excludedGroupIds: string[];
+  /** Assignment Filters attached to specific group assignments above, scoping them to matching devices */
+  assignmentFilters: AssignmentFilterRef[];
 }
 
 export interface AutopilotProfile {
@@ -63,14 +80,6 @@ export interface BaselineSetting extends CspSetting {
   sourcePolicyId: string;
   sourcePolicyName: string;
   sourceKind: PolicyKind;
-}
-
-export interface ExcludedPolicy {
-  id: string;
-  displayName: string;
-  kind: PolicyKind;
-  /** Which of the queried group(s) caused the exclusion */
-  excludedViaGroupIds: string[];
 }
 
 export interface GroupSummary {
@@ -99,13 +108,15 @@ export interface SimulationPolicy {
   viaGroupIds: string[];
   /** Group ids (within this simulation) that exclude this policy -- only set when status is "excluded" */
   excludedViaGroupIds: string[];
+  /** Set when exclusion is (also/instead) caused by an Assignment Filter not matching the selected device filter */
+  excludedByFilter?: { filterId: string; filterName: string };
 }
 
 export interface SimulationResult {
   groups: SimulationGroup[];
   /** Policies that apply -- included and not excluded */
   policies: SimulationPolicy[];
-  /** Policies that would otherwise apply but are explicitly excluded for one of the selected groups */
+  /** Policies that would otherwise apply but are explicitly excluded for one of the selected groups, or filtered out by an Assignment Filter */
   excludedPolicies: SimulationPolicy[];
   settings: BaselineSetting[];
   conflicts: ConflictingSetting[];

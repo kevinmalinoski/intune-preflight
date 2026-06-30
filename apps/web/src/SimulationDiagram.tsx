@@ -67,7 +67,11 @@ function GroupNode({ data }: { data: { label: string; source: SimulationGroup["s
   );
 }
 
-function PolicyNode({ data }: { data: { label: string; kind: string; settingsCount: number; excluded?: boolean } }) {
+function PolicyNode({
+  data,
+}: {
+  data: { label: string; kind: string; settingsCount: number; excluded?: boolean; excludedReason?: string };
+}) {
   const color = data.excluded ? "#fb7185" : KIND_COLOR[data.kind] ?? "#94a3b8";
   return (
     <div
@@ -86,7 +90,7 @@ function PolicyNode({ data }: { data: { label: string; kind: string; settingsCou
         {data.label}
       </div>
       <div className="mt-1 text-[10px] text-slate-400">
-        {data.excluded ? "excluded for this group" : `${data.settingsCount} settings`}
+        {data.excluded ? data.excludedReason ?? "excluded for this group" : `${data.settingsCount} settings`}
       </div>
     </div>
   );
@@ -113,11 +117,14 @@ function layout(simulation: SimulationResult) {
   let policyY = 0;
   for (const p of [...simulation.policies, ...simulation.excludedPolicies]) {
     const excluded = simulation.excludedPolicies.includes(p);
+    const excludedReason = p.excludedByFilter
+      ? `excluded — device filter "${p.excludedByFilter.filterName}"`
+      : undefined;
     nodes.push({
       id: `policy:${p.id}`,
       type: "policy",
       position: { x: policyX, y: policyY },
-      data: { label: p.displayName, kind: p.kind, settingsCount: undefined, excluded },
+      data: { label: p.displayName, kind: p.kind, settingsCount: undefined, excluded, excludedReason },
     });
     policyY += estimateRowHeight(p.displayName);
   }
@@ -142,7 +149,10 @@ function layout(simulation: SimulationResult) {
     }
   }
   for (const p of simulation.excludedPolicies) {
-    for (const groupId of p.excludedViaGroupIds) {
+    // Group-exclude and filter-exclude are mutually exclusive per policy (see computeSimulation):
+    // group-excluded policies carry excludedViaGroupIds, filter-excluded ones carry viaGroupIds instead.
+    const sourceGroupIds = p.excludedViaGroupIds.length > 0 ? p.excludedViaGroupIds : p.viaGroupIds;
+    for (const groupId of sourceGroupIds) {
       edges.push({
         id: `exclude-${groupId}->${p.id}`,
         source: `group:${groupId}`,

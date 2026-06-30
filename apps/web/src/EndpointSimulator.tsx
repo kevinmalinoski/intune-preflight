@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { GroupSummary, Platform, SimulationResult } from "@intune-baseline/shared";
+import type { AssignmentFilter, GroupSummary, Platform, SimulationResult } from "@intune-baseline/shared";
 import { api } from "./api.ts";
 import { EndpointPicker } from "./EndpointPicker.tsx";
 import { SimulationDiagram } from "./SimulationDiagram.tsx";
@@ -7,25 +7,34 @@ import { SimulationBaselinePanel } from "./SimulationBaselinePanel.tsx";
 
 export function EndpointSimulator() {
   const [groups, setGroups] = useState<GroupSummary[]>([]);
+  const [filters, setFilters] = useState<AssignmentFilter[]>([]);
   const [platform, setPlatform] = useState<Platform>("windows");
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
+  const [deviceFilterId, setDeviceFilterId] = useState("");
   const [simulation, setSimulation] = useState<SimulationResult | null>(null);
   const [showBaseline, setShowBaseline] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api
-      .groups()
-      .then((allGroups) => setGroups(allGroups.filter((g) => !g.id.startsWith("virtual-"))))
+    Promise.all([api.groups(), api.filters()])
+      .then(([allGroups, allFilters]) => {
+        setGroups(allGroups.filter((g) => !g.id.startsWith("virtual-")));
+        setFilters(allFilters);
+      })
       .catch((e) => setError(e.message));
   }, []);
 
+  // A filter selected for one platform won't apply to another -- reset on switch.
+  useEffect(() => {
+    setDeviceFilterId("");
+  }, [platform]);
+
   useEffect(() => {
     api
-      .simulate(selectedGroupIds, platform)
+      .simulate(selectedGroupIds, platform, deviceFilterId || undefined)
       .then(setSimulation)
       .catch((e) => setError(e.message));
-  }, [selectedGroupIds, platform]);
+  }, [selectedGroupIds, platform, deviceFilterId]);
 
   const toggleGroup = (id: string) => {
     setSelectedGroupIds((prev) => (prev.includes(id) ? prev.filter((g) => g !== id) : [...prev, id]));
@@ -39,6 +48,9 @@ export function EndpointSimulator() {
         platform={platform}
         onTogglePlatform={setPlatform}
         onToggleGroup={toggleGroup}
+        filters={filters}
+        deviceFilterId={deviceFilterId}
+        onChangeDeviceFilter={setDeviceFilterId}
       />
 
       <div className="relative flex-1 bg-ink-950">
@@ -74,6 +86,7 @@ export function EndpointSimulator() {
           simulation={simulation}
           groupIds={selectedGroupIds}
           platform={platform}
+          deviceFilterId={deviceFilterId || undefined}
           onClose={() => setShowBaseline(false)}
         />
       )}

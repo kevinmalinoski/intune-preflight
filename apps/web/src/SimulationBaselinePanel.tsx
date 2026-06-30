@@ -37,11 +37,13 @@ export function SimulationBaselinePanel({
   simulation,
   groupIds,
   platform,
+  deviceFilterId,
   onClose,
 }: {
   simulation: SimulationResult;
   groupIds: string[];
   platform: Platform;
+  deviceFilterId?: string;
   onClose: () => void;
 }) {
   const [filter, setFilter] = useState("");
@@ -96,7 +98,11 @@ export function SimulationBaselinePanel({
               return (
                 <li key={p.id} className="text-xs text-slate-300">
                   <span className="font-medium text-rose-300">{p.displayName}</span>
-                  <span className="text-slate-500"> — excluded via {excludingGroups}</span>
+                  {p.excludedByFilter ? (
+                    <span className="text-slate-500"> — excluded via device filter "{p.excludedByFilter.filterName}"</span>
+                  ) : (
+                    <span className="text-slate-500"> — excluded via {excludingGroups}</span>
+                  )}
                 </li>
               );
             })}
@@ -122,13 +128,13 @@ export function SimulationBaselinePanel({
           Conflicts only
         </label>
         <a
-          href={api.simulateExportUrl(groupIds, platform, "json")}
+          href={api.simulateExportUrl(groupIds, platform, deviceFilterId, "json")}
           className="rounded-md border border-ink-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-ink-800"
         >
           Export JSON
         </a>
         <a
-          href={api.simulateExportUrl(groupIds, platform, "csv")}
+          href={api.simulateExportUrl(groupIds, platform, deviceFilterId, "csv")}
           className="rounded-md border border-ink-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-ink-800"
         >
           Export CSV

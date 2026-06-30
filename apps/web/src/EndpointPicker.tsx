@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { GroupSummary, Platform } from "@intune-baseline/shared";
+import type { AssignmentFilter, GroupSummary, Platform } from "@intune-baseline/shared";
 
 const PLATFORM_OPTIONS: { value: Platform; label: string }[] = [
   { value: "windows", label: "Windows" },
@@ -14,12 +14,18 @@ export function EndpointPicker({
   platform,
   onTogglePlatform,
   onToggleGroup,
+  filters,
+  deviceFilterId,
+  onChangeDeviceFilter,
 }: {
   groups: GroupSummary[];
   selectedGroupIds: string[];
   platform: Platform;
   onTogglePlatform: (platform: Platform) => void;
   onToggleGroup: (id: string) => void;
+  filters: AssignmentFilter[];
+  deviceFilterId: string;
+  onChangeDeviceFilter: (id: string) => void;
 }) {
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState(false);
@@ -29,10 +35,13 @@ export function EndpointPicker({
     [groups, search]
   );
 
+  const platformFilters = useMemo(() => filters.filter((f) => f.platform === platform), [filters, platform]);
+
   const selectedGroupNames = selectedGroupIds
     .map((id) => groups.find((g) => g.id === id)?.displayName ?? id)
     .join(", ");
   const platformLabel = PLATFORM_OPTIONS.find((p) => p.value === platform)?.label ?? platform;
+  const deviceFilterLabel = filters.find((f) => f.id === deviceFilterId)?.displayName;
 
   if (collapsed) {
     return (
@@ -42,6 +51,7 @@ export function EndpointPicker({
         </span>
         <div className="min-w-0 flex-1 truncate text-xs text-slate-300">
           <span className="font-medium text-slate-100">{platformLabel}</span>
+          {deviceFilterLabel && <span className="text-violet-300"> · matches "{deviceFilterLabel}"</span>}
           {selectedGroupIds.length > 0 ? (
             <span className="text-slate-400"> · {selectedGroupNames}</span>
           ) : (
@@ -68,8 +78,8 @@ export function EndpointPicker({
           <div>
             <div className="text-sm font-semibold text-slate-100">Simulate an endpoint</div>
             <div className="text-xs text-slate-400">
-              Pick the OS and the Entra security groups this device/user belongs to — see exactly what gets applied,
-              including anything explicitly excluded.
+              Pick the OS, Entra security groups, and (optionally) the device filter this endpoint matches — see
+              exactly what gets applied, including anything explicitly excluded.
             </div>
           </div>
         </div>
@@ -99,6 +109,29 @@ export function EndpointPicker({
         <div className="mt-1 text-[11px] text-slate-500">
           Only policies targeting this platform are shown — compliance policies in particular are always
           platform-specific in Intune, even when their names don't say so.
+        </div>
+      </div>
+
+      <div>
+        <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
+          Device filter
+        </label>
+        <select
+          value={deviceFilterId}
+          onChange={(e) => onChangeDeviceFilter(e.target.value)}
+          className="w-full max-w-sm rounded-md border border-ink-700 bg-ink-800 px-3 py-1.5 text-sm text-slate-200 focus:border-violet-400 focus:outline-none"
+        >
+          <option value="">No filter (default)</option>
+          {platformFilters.map((f) => (
+            <option key={f.id} value={f.id}>
+              {f.displayName}
+            </option>
+          ))}
+        </select>
+        <div className="mt-1 text-[11px] text-slate-500">
+          Which Intune Assignment Filter (if any) this device matches — e.g. "Kiosk Devices". Policies whose
+          assignment includes or excludes a filter are resolved against this, on top of group membership. Default is
+          no filter assigned.
         </div>
       </div>
 

@@ -1,10 +1,11 @@
-import type { AutopilotProfile, IntuneGroup, IntunePolicy } from "@intune-baseline/shared";
+import type { AssignmentFilter, AssignmentFilterRef, AutopilotProfile, IntuneGroup, IntunePolicy } from "@intune-baseline/shared";
 import { graphGetCollection } from "./graphClient.js";
 import {
   flattenScriptToCspSettings,
   flattenSettingsCatalogEntries,
   flattenToCspSettings,
   parseAssignmentTarget,
+  platformFromAssignmentFilter,
   platformFromOdataType,
   platformFromSettingsCatalog,
   VIRTUAL_GROUP_ALL_DEVICES,
@@ -16,7 +17,12 @@ import { config } from "./config.js";
 const cache = new TtlCache(config.cacheTtlSeconds);
 
 interface RawAssignment {
-  target?: { "@odata.type"?: string; groupId?: string };
+  target?: {
+    "@odata.type"?: string;
+    groupId?: string;
+    deviceAndAppManagementAssignmentFilterId?: string | null;
+    deviceAndAppManagementAssignmentFilterType?: string;
+  };
 }
 
 /**
@@ -37,24 +43,35 @@ async function getCollectionWithBetaFallback<T>(path: string): Promise<{ items: 
 interface ResolvedAssignments {
   includedGroupIds: string[];
   excludedGroupIds: string[];
+  assignmentFilters: AssignmentFilterRef[];
 }
 
 function resolveAssignmentGroupIds(assignments: RawAssignment[]): ResolvedAssignments {
   const included = new Set<string>();
   const excluded = new Set<string>();
+  const assignmentFilters: AssignmentFilterRef[] = [];
+
   for (const assignment of assignments) {
     const parsed = parseAssignmentTarget(assignment);
+    let groupId: string | undefined;
     if (parsed.isExclude && parsed.groupId) {
       excluded.add(parsed.groupId);
+      groupId = parsed.groupId;
     } else if (parsed.isAllDevices) {
       included.add(VIRTUAL_GROUP_ALL_DEVICES.id);
+      groupId = VIRTUAL_GROUP_ALL_DEVICES.id;
     } else if (parsed.isAllUsers) {
       included.add(VIRTUAL_GROUP_ALL_USERS.id);
+      groupId = VIRTUAL_GROUP_ALL_USERS.id;
     } else if (parsed.groupId) {
       included.add(parsed.groupId);
+      groupId = parsed.groupId;
+    }
+    if (groupId && parsed.filterId && parsed.filterType) {
+      assignmentFilters.push({ groupId, filterId: parsed.filterId, filterType: parsed.filterType });
     }
   }
-  return { includedGroupIds: [...included], excludedGroupIds: [...excluded] };
+  return { includedGroupIds: [...included], excludedGroupIds: [...excluded], assignmentFilters };
 }
 
 async function fetchDeviceConfigurations(): Promise<IntunePolicy[]> {
@@ -69,7 +86,7 @@ async function fetchDeviceConfigurations(): Promise<IntunePolicy[]> {
       `/deviceManagement/deviceConfigurations/${id}/assignments`,
       useBeta
     );
-    const { includedGroupIds, excludedGroupIds } = resolveAssignmentGroupIds(assignments);
+    const { includedGroupIds, excludedGroupIds, assignmentFilters } = resolveAssignmentGroupIds(assignments);
     result.push({
       id,
       kind: "deviceConfiguration",
@@ -79,6 +96,7 @@ async function fetchDeviceConfigurations(): Promise<IntunePolicy[]> {
       settings: flattenToCspSettings(item, displayName),
       assignedGroupIds: includedGroupIds,
       excludedGroupIds,
+      assignmentFilters,
     });
   }
   return result;
@@ -96,7 +114,7 @@ async function fetchCompliancePolicies(): Promise<IntunePolicy[]> {
       `/deviceManagement/deviceCompliancePolicies/${id}/assignments`,
       useBeta
     );
-    const { includedGroupIds, excludedGroupIds } = resolveAssignmentGroupIds(assignments);
+    const { includedGroupIds, excludedGroupIds, assignmentFilters } = resolveAssignmentGroupIds(assignments);
     result.push({
       id,
       kind: "compliancePolicy",
@@ -106,6 +124,7 @@ async function fetchCompliancePolicies(): Promise<IntunePolicy[]> {
       settings: flattenToCspSettings(item, displayName),
       assignedGroupIds: includedGroupIds,
       excludedGroupIds,
+      assignmentFilters,
     });
   }
   return result;
@@ -143,7 +162,7 @@ async function fetchSettingsCatalogPolicies(): Promise<IntunePolicy[]> {
         useBeta
       ),
     ]);
-    const { includedGroupIds, excludedGroupIds } = resolveAssignmentGroupIds(assignments);
+    const { includedGroupIds, excludedGroupIds, assignmentFilters } = resolveAssignmentGroupIds(assignments);
     result.push({
       id,
       kind: "settingsCatalog",
@@ -153,6 +172,7 @@ async function fetchSettingsCatalogPolicies(): Promise<IntunePolicy[]> {
       settings: flattenSettingsCatalogEntries(settingEntries, displayName),
       assignedGroupIds: includedGroupIds,
       excludedGroupIds,
+      assignmentFilters,
     });
   }
   return result;
@@ -179,7 +199,7 @@ async function fetchAdminTemplates(): Promise<IntunePolicy[]> {
       displayName: `Policy setting ${idx + 1}`,
       value: dv.enabled ? "Enabled" : "Disabled",
     }));
-    const { includedGroupIds, excludedGroupIds } = resolveAssignmentGroupIds(assignments);
+    const { includedGroupIds, excludedGroupIds, assignmentFilters } = resolveAssignmentGroupIds(assignments);
     result.push({
       id,
       kind: "adminTemplate",
@@ -190,6 +210,7 @@ async function fetchAdminTemplates(): Promise<IntunePolicy[]> {
       settings,
       assignedGroupIds: includedGroupIds,
       excludedGroupIds,
+      assignmentFilters,
     });
   }
   return result;
@@ -243,13 +264,15 @@ async function fetchPlatformScripts(): Promise<IntunePolicy[]> {
 
       let includedGroupIds: string[];
       let excludedGroupIds: string[];
+      let assignmentFilters: AssignmentFilterRef[];
       if (source.assignmentStyle === "groupOnly") {
         const assignments = await graphGetCollection<RawGroupAssignment>(`${source.path}/${id}/groupAssignments`, useBeta);
         includedGroupIds = resolveGroupAssignmentIds(assignments);
         excludedGroupIds = [];
+        assignmentFilters = [];
       } else {
         const assignments = await graphGetCollection<RawAssignment>(`${source.path}/${id}/assignments`, useBeta);
-        ({ includedGroupIds, excludedGroupIds } = resolveAssignmentGroupIds(assignments));
+        ({ includedGroupIds, excludedGroupIds, assignmentFilters } = resolveAssignmentGroupIds(assignments));
       }
 
       result.push({
@@ -261,6 +284,7 @@ async function fetchPlatformScripts(): Promise<IntunePolicy[]> {
         settings: flattenScriptToCspSettings(item, displayName),
         assignedGroupIds: includedGroupIds,
         excludedGroupIds,
+        assignmentFilters,
       });
     }
   }
@@ -300,15 +324,32 @@ async function fetchAutopilotProfiles(): Promise<AutopilotProfile[]> {
   return result;
 }
 
+async function fetchAssignmentFilters(): Promise<AssignmentFilter[]> {
+  let items: Record<string, unknown>[];
+  try {
+    items = (await getCollectionWithBetaFallback<Record<string, unknown>>("/deviceManagement/assignmentFilters")).items;
+  } catch (err) {
+    console.warn(`Skipping Assignment Filters: ${(err as Error).message}.`);
+    return [];
+  }
+  return items.map((item) => ({
+    id: item.id as string,
+    displayName: (item.displayName as string) ?? "Untitled",
+    platform: platformFromAssignmentFilter(item.platform as string | undefined),
+    rule: (item.rule as string) ?? "",
+  }));
+}
+
 export interface TenantData {
   policies: IntunePolicy[];
   groups: IntuneGroup[];
   autopilotProfiles: AutopilotProfile[];
+  assignmentFilters: AssignmentFilter[];
 }
 
 export async function loadTenantData(): Promise<TenantData> {
   return cache.getOrFetch("tenant-data", async () => {
-    const [deviceConfigs, compliance, settingsCatalog, adminTemplates, platformScripts, autopilotProfiles] =
+    const [deviceConfigs, compliance, settingsCatalog, adminTemplates, platformScripts, autopilotProfiles, assignmentFilters] =
       await Promise.all([
         fetchDeviceConfigurations(),
         fetchCompliancePolicies(),
@@ -316,6 +357,7 @@ export async function loadTenantData(): Promise<TenantData> {
         fetchAdminTemplates(),
         fetchPlatformScripts(),
         fetchAutopilotProfiles(),
+        fetchAssignmentFilters(),
       ]);
 
     const policies = [...deviceConfigs, ...compliance, ...settingsCatalog, ...adminTemplates, ...platformScripts];
@@ -353,7 +395,7 @@ export async function loadTenantData(): Promise<TenantData> {
       }
     }
 
-    return { policies, groups, autopilotProfiles };
+    return { policies, groups, autopilotProfiles, assignmentFilters };
   });
 }
 

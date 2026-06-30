@@ -128,6 +128,8 @@ export interface AssignmentTarget {
   isAllDevices?: boolean;
   isAllUsers?: boolean;
   isExclude?: boolean;
+  filterId?: string;
+  filterType?: "include" | "exclude";
 }
 
 /**
@@ -138,16 +140,35 @@ export interface AssignmentTarget {
  * assignment (e.g. All Devices). Treating it as an include -- which earlier
  * versions of this app did -- silently misattributes excluded policies as
  * applied.
+ *
+ * Independently, an assignment can also carry an Assignment Filter
+ * (`deviceAndAppManagementAssignmentFilterId`/`...FilterType`) that further
+ * scopes it to devices matching a rule -- e.g. a policy assigned to All
+ * Devices but with an `exclude` filter for "Kiosk Devices" does NOT apply to
+ * kiosks, even though the group-level logic alone would say it does.
  */
 export function parseAssignmentTarget(assignment: {
-  target?: { "@odata.type"?: string; groupId?: string };
+  target?: {
+    "@odata.type"?: string;
+    groupId?: string;
+    deviceAndAppManagementAssignmentFilterId?: string | null;
+    deviceAndAppManagementAssignmentFilterType?: string;
+  };
 }): AssignmentTarget {
   const target = assignment.target;
   const type = target?.["@odata.type"] ?? "";
-  if (type.includes("exclusionGroupAssignmentTarget")) return { groupId: target?.groupId, isExclude: true };
-  if (type.includes("allDevices")) return { isAllDevices: true };
-  if (type.includes("allLicensedUsers")) return { isAllUsers: true };
-  return { groupId: target?.groupId };
+  const filterId = target?.deviceAndAppManagementAssignmentFilterId ?? undefined;
+  const filterType =
+    target?.deviceAndAppManagementAssignmentFilterType === "include" ||
+    target?.deviceAndAppManagementAssignmentFilterType === "exclude"
+      ? target.deviceAndAppManagementAssignmentFilterType
+      : undefined;
+  const filter: Pick<AssignmentTarget, "filterId" | "filterType"> = filterId && filterType ? { filterId, filterType } : {};
+
+  if (type.includes("exclusionGroupAssignmentTarget")) return { groupId: target?.groupId, isExclude: true, ...filter };
+  if (type.includes("allDevices")) return { isAllDevices: true, ...filter };
+  if (type.includes("allLicensedUsers")) return { isAllUsers: true, ...filter };
+  return { groupId: target?.groupId, ...filter };
 }
 
 /**
@@ -169,6 +190,16 @@ export function platformFromOdataType(odataType: string | undefined): Platform {
 /** Settings Catalog (configurationPolicies) resources expose platform directly via the `platforms` field. */
 export function platformFromSettingsCatalog(platforms: string | undefined): Platform {
   const value = (platforms ?? "").toLowerCase();
+  if (value.includes("macos")) return "macos";
+  if (value.includes("ios")) return "ios";
+  if (value.includes("android")) return "android";
+  if (value.includes("windows")) return "windows";
+  return "other";
+}
+
+/** Assignment Filters expose platform via a Graph enum like "windows10AndLater", "iOSMobileApplicationManagement". */
+export function platformFromAssignmentFilter(platform: string | undefined): Platform {
+  const value = (platform ?? "").toLowerCase();
   if (value.includes("macos")) return "macos";
   if (value.includes("ios")) return "ios";
   if (value.includes("android")) return "android";

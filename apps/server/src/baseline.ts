@@ -1,4 +1,6 @@
 import type {
+  AssignmentFilter,
+  AssignmentFilterRef,
   BaselineSetting,
   ConflictingSetting,
   GroupSummary,
@@ -10,6 +12,17 @@ import type {
 } from "@intune-baseline/shared";
 import type { TenantData } from "./intuneData.js";
 import { VIRTUAL_GROUP_ALL_DEVICES, VIRTUAL_GROUP_ALL_USERS } from "./normalize.js";
+
+/**
+ * Whether a single group assignment's filter allows it to apply, given which
+ * filter (if any) is selected as representing the simulated device. A
+ * missing entry means the assignment has no filter, so it always passes.
+ */
+function passesAssignmentFilter(filterRef: AssignmentFilterRef | undefined, selectedFilterId: string | undefined): boolean {
+  if (!filterRef) return true;
+  if (filterRef.filterType === "exclude") return filterRef.filterId !== selectedFilterId;
+  return filterRef.filterId === selectedFilterId;
+}
 
 /**
  * A policy applies to a set of group ids if at least one of those ids is an
@@ -85,6 +98,10 @@ export function listGroupSummaries(data: TenantData): GroupSummary[] {
     .sort((a, b) => b.settingsCount - a.settingsCount);
 }
 
+export function listAssignmentFilters(data: TenantData): AssignmentFilter[] {
+  return data.assignmentFilters;
+}
+
 /**
  * Simulates "what policies apply to this set of Entra groups" -- the
  * Policy-Sets-without-Policy-Sets view. All Devices / All Users always apply,
@@ -92,13 +109,17 @@ export function listGroupSummaries(data: TenantData): GroupSummary[] {
  * targets. Excludes always win over includes, exactly like Intune itself.
  * An optional platform filter excludes policies targeting a different OS, so
  * e.g. macOS/iOS/Android compliance policies don't clutter a Windows-focused
- * simulation.
+ * simulation. An optional device filter represents which Assignment Filter
+ * (if any) the simulated device matches -- e.g. selecting "Kiosk Devices"
+ * correctly excludes policies whose assignment excludes that filter, which
+ * group/exclude logic alone can't see.
  */
 export function computeSimulation(
   data: TenantData,
-  options: { selectedGroupIds: string[]; platform?: Platform }
+  options: { selectedGroupIds: string[]; platform?: Platform; deviceFilterId?: string }
 ): SimulationResult {
   const groupMap = new Map(data.groups.map((g) => [g.id, g]));
+  const filterNameById = new Map(data.assignmentFilters.map((f) => [f.id, f.displayName]));
   const groups: SimulationGroup[] = [];
   const seen = new Set<string>();
 
@@ -124,19 +145,49 @@ export function computeSimulation(
   const excludedPolicies: SimulationPolicy[] = [];
 
   for (const policy of candidatePolicies) {
-    const viaGroupIds = policy.assignedGroupIds.filter((id) => groupIds.includes(id));
+    const rawViaGroupIds = policy.assignedGroupIds.filter((id) => groupIds.includes(id));
     const excludedViaGroupIds = policy.excludedGroupIds.filter((id) => groupIds.includes(id));
-    if (viaGroupIds.length === 0) continue;
+    if (rawViaGroupIds.length === 0) continue;
 
-    const entry: SimulationPolicy = {
+    if (excludedViaGroupIds.length > 0) {
+      excludedPolicies.push({
+        id: policy.id,
+        displayName: policy.displayName,
+        kind: policy.kind,
+        status: "excluded",
+        viaGroupIds: rawViaGroupIds,
+        excludedViaGroupIds,
+      });
+      continue;
+    }
+
+    const filterByGroupId = new Map(policy.assignmentFilters.map((f) => [f.groupId, f]));
+    const passingGroupIds = rawViaGroupIds.filter((id) => passesAssignmentFilter(filterByGroupId.get(id), options.deviceFilterId));
+
+    if (passingGroupIds.length === 0) {
+      const failingFilter = filterByGroupId.get(rawViaGroupIds[0]);
+      excludedPolicies.push({
+        id: policy.id,
+        displayName: policy.displayName,
+        kind: policy.kind,
+        status: "excluded",
+        viaGroupIds: rawViaGroupIds,
+        excludedViaGroupIds: [],
+        excludedByFilter: failingFilter
+          ? { filterId: failingFilter.filterId, filterName: filterNameById.get(failingFilter.filterId) ?? failingFilter.filterId }
+          : undefined,
+      });
+      continue;
+    }
+
+    policies.push({
       id: policy.id,
       displayName: policy.displayName,
       kind: policy.kind,
-      status: excludedViaGroupIds.length > 0 ? "excluded" : "included",
-      viaGroupIds,
-      excludedViaGroupIds,
-    };
-    (entry.status === "excluded" ? excludedPolicies : policies).push(entry);
+      status: "included",
+      viaGroupIds: passingGroupIds,
+      excludedViaGroupIds: [],
+    });
   }
 
   const appliedPolicyObjs = candidatePolicies.filter((p) => policies.some((sp) => sp.id === p.id));

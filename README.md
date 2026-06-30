@@ -6,6 +6,7 @@ Intune makes you click into every Configuration Profile, Compliance Policy, Sett
 
 - 🖥️ **Endpoint simulator** — pick an OS platform and the Entra security groups an endpoint belongs to, and see exactly which policies apply as a connected diagram: device → groups → policies
 - 🚫 **Include/exclude aware** — Intune assignments can explicitly *exclude* a group from a policy; this is resolved correctly (excludes always win) and shown directly in the diagram and baseline, not silently dropped
+- 🎯 **Assignment Filter aware** — pick the Intune Assignment Filter (e.g. "Kiosk Devices") your simulated endpoint matches, and policies whose assignment includes/excludes that filter are resolved correctly — not just group membership
 - 🌐 **Platform filter** — Windows, macOS, iOS/iPadOS, and Android policies are scoped separately so e.g. macOS compliance policies don't clutter a Windows simulation
 - 🔍 **Drill-down baseline** — every CSP setting from every applied policy, merged into one filterable table, with conflicting settings flagged
 - 📤 **Export** — JSON or CSV export of the simulated endpoint's full baseline
@@ -79,8 +80,9 @@ packages/shared/  TypeScript types shared by both apps
 | Endpoint | Description |
 |---|---|
 | `GET /api/groups` | Device groups with policy/setting/conflict counts |
-| `GET /api/simulate?groups=id1,id2&platform=windows` | Simulated endpoint baseline for the given groups + platform (`windows`\|`macos`\|`ios`\|`android`) |
-| `GET /api/simulate/export?groups=...&platform=...&format=json\|csv` | Download the simulated baseline |
+| `GET /api/filters` | Intune Assignment Filters available in the tenant |
+| `GET /api/simulate?groups=id1,id2&platform=windows&deviceFilterId=...` | Simulated endpoint baseline for the given groups, platform (`windows`\|`macos`\|`ios`\|`android`), and Assignment Filter |
+| `GET /api/simulate/export?groups=...&platform=...&deviceFilterId=...&format=json\|csv` | Download the simulated baseline |
 | `POST /api/refresh` | Clear the in-memory cache and re-fetch from Graph |
 
 ## Notes & limitations
