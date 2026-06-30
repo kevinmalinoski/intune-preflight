@@ -20,6 +20,10 @@ function simulationQuery(groupIds: string[], platform?: Platform, deviceFilterId
 export const api = {
   groups: () => getJson<GroupSummary[]>("/groups"),
   filters: () => getJson<AssignmentFilter[]>("/filters"),
+  refresh: async () => {
+    const res = await fetch("/api/refresh", { method: "POST" });
+    if (!res.ok) throw new Error(`Refresh failed: ${res.status}`);
+  },
   simulate: (groupIds: string[], platform?: Platform, deviceFilterIds?: string[]) =>
     getJson<SimulationResult>(`/simulate?${simulationQuery(groupIds, platform, deviceFilterIds)}`),
   simulateExportUrl: (groupIds: string[], platform: Platform | undefined, deviceFilterIds: string[] | undefined, format: "json" | "csv") =>
