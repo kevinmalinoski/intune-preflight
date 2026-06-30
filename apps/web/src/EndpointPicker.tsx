@@ -22,25 +22,63 @@ export function EndpointPicker({
   onToggleGroup: (id: string) => void;
 }) {
   const [search, setSearch] = useState("");
+  const [collapsed, setCollapsed] = useState(false);
 
   const filteredGroups = useMemo(
     () => groups.filter((g) => g.displayName.toLowerCase().includes(search.toLowerCase())),
     [groups, search]
   );
 
-  return (
-    <div className="flex flex-col gap-3 border-b border-ink-700 bg-ink-900 p-4">
-      <div className="flex items-center gap-3">
-        <span className="text-2xl" aria-hidden>
+  const selectedGroupNames = selectedGroupIds
+    .map((id) => groups.find((g) => g.id === id)?.displayName ?? id)
+    .join(", ");
+  const platformLabel = PLATFORM_OPTIONS.find((p) => p.value === platform)?.label ?? platform;
+
+  if (collapsed) {
+    return (
+      <div className="flex items-center gap-3 border-b border-ink-700 bg-ink-900 px-4 py-2">
+        <span className="text-lg" aria-hidden>
           💻
         </span>
-        <div>
-          <div className="text-sm font-semibold text-slate-100">Simulate an endpoint</div>
-          <div className="text-xs text-slate-400">
-            Pick the OS and the Entra security groups this device/user belongs to — see exactly what gets applied,
-            including anything explicitly excluded.
+        <div className="min-w-0 flex-1 truncate text-xs text-slate-300">
+          <span className="font-medium text-slate-100">{platformLabel}</span>
+          {selectedGroupIds.length > 0 ? (
+            <span className="text-slate-400"> · {selectedGroupNames}</span>
+          ) : (
+            <span className="text-slate-500"> · no groups selected (All Devices/Users only)</span>
+          )}
+        </div>
+        <button
+          onClick={() => setCollapsed(false)}
+          className="shrink-0 rounded-md border border-ink-700 px-2.5 py-1 text-xs text-slate-300 hover:bg-ink-800"
+        >
+          Edit ▾
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-3 border-b border-ink-700 bg-ink-900 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span className="text-2xl" aria-hidden>
+            💻
+          </span>
+          <div>
+            <div className="text-sm font-semibold text-slate-100">Simulate an endpoint</div>
+            <div className="text-xs text-slate-400">
+              Pick the OS and the Entra security groups this device/user belongs to — see exactly what gets applied,
+              including anything explicitly excluded.
+            </div>
           </div>
         </div>
+        <button
+          onClick={() => setCollapsed(true)}
+          className="shrink-0 rounded-md border border-ink-700 px-2.5 py-1 text-xs text-slate-300 hover:bg-ink-800"
+        >
+          Collapse ▴
+        </button>
       </div>
 
       <div>
