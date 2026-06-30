@@ -192,7 +192,9 @@ export function EndpointPicker({
         </div>
         <div className="mt-1 text-[11px] text-slate-500">
           Dynamic groups are evaluated by Entra from a membership rule — verify the rule still matches this endpoint
-          before trusting the simulation.
+          before trusting the simulation. If a selected group's rule logically implies membership in another dynamic
+          group too (e.g. a narrower OrderID prefix), that group is added automatically and shown in amber in the
+          diagram as "Implied by rule."
         </div>
       </div>
 

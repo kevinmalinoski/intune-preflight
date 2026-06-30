@@ -6,7 +6,8 @@ Intune makes you click into every Configuration Profile, Compliance Policy, Sett
 
 - 🖥️ **Endpoint simulator** — pick an OS platform and the Entra security groups an endpoint belongs to, and see exactly which policies apply as a connected diagram: device → groups → policies
 - 🚫 **Include/exclude aware** — Intune assignments can explicitly *exclude* a group from a policy; this is resolved correctly (excludes always win) and shown directly in the diagram and baseline, not silently dropped
-- 🎯 **Assignment Filter aware** — pick the Intune Assignment Filter (e.g. "Kiosk Devices") your simulated endpoint matches, and policies whose assignment includes/excludes that filter are resolved correctly — not just group membership
+- 🎯 **Assignment Filter aware** — pick the Intune Assignment Filter(s) your simulated endpoint matches (e.g. "Kiosk Devices"), and policies whose assignment includes/excludes a filter are resolved correctly — not just group membership
+- 🔗 **Dynamic group implication** — selecting a dynamic group whose membership rule logically guarantees membership in another dynamic group too (e.g. a narrower OrderID prefix) automatically adds that group, flagged "Implied by rule" so it can be eyeballed against Entra
 - 🌐 **Platform filter** — Windows, macOS, iOS/iPadOS, and Android policies are scoped separately so e.g. macOS compliance policies don't clutter a Windows simulation
 - 🔍 **Drill-down baseline** — every CSP setting from every applied policy, merged into one filterable table, with conflicting settings flagged
 - 📤 **Export** — JSON or CSV export of the simulated endpoint's full baseline
@@ -90,7 +91,7 @@ packages/shared/  TypeScript types shared by both apps
 - **Read-only.** This tool never writes to your tenant — application permissions used are all `*.Read.All`.
 - **In-memory cache, no database.** Data is re-fetched from Graph on first request after each cache expiry or server restart. If you need persistence across restarts or multiple instances, swap `apps/server/src/cache.ts` for Redis or SQLite.
 - **Settings flattening is schema-agnostic.** Device Configuration and Compliance Policy settings are derived directly from each Graph resource's own properties rather than a hand-maintained CSP schema per profile type — this keeps the tool maintainable as Intune adds new policy types, at the cost of raw Graph field names showing up as setting names in some cases.
-- **Dynamic group membership rules are surfaced, not evaluated.** The app shows you a dynamic group's actual membership rule so you can verify it, but it doesn't check whether a specific device/user actually matches that rule — confirm in Entra directly.
+- **Dynamic group membership rules are surfaced, not fully evaluated.** The app shows you a dynamic group's actual membership rule so you can verify it, but it doesn't check whether a specific device/user actually matches that rule — confirm in Entra directly. The "implied group" feature is a best-effort heuristic limited to simple same-property `-startsWith`/`-eq` clauses (the common case for OrderID/serial-prefix-scoped groups); it doesn't parse the full Entra dynamic-membership-rule language (boolean structure, other operators, non-device properties), so always double-check an implied group against the real rules before relying on it.
 - Tested against a sandbox Microsoft 365 tenant. Always verify against the Intune admin center before relying on the computed baseline for compliance decisions.
 
 ## License

@@ -207,6 +207,69 @@ export function platformFromAssignmentFilter(platform: string | undefined): Plat
   return "other";
 }
 
+interface RuleClause {
+  property: string;
+  op: "startsWith" | "eq";
+  value: string;
+}
+
+/**
+ * Extracts simple `device.<property> -startsWith "value"` / `-eq "value"`
+ * clauses (including the `-any (_ -startsWith "value")` form used for
+ * collection properties like devicePhysicalIds) from an Entra dynamic group
+ * membership rule. This is NOT a full parser for the rule language --
+ * boolean structure (and/or/not), other operators (-contains, -match, -in,
+ * etc.), and non-device properties are ignored. It only extracts what's
+ * needed to detect the common "one rule's prefix is a prefix of another
+ * rule's prefix" case, which is what makes selecting one dynamic group
+ * imply membership in another.
+ */
+function parseMembershipRuleClauses(rule: string | undefined): RuleClause[] {
+  if (!rule) return [];
+  const pattern = /device\.(\w+)\s*(?:-any\s*\(\s*_\s*)?-(startsWith|eq)\s*"([^"]*)"/gi;
+  const clauses: RuleClause[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(rule))) {
+    clauses.push({ property: match[1].toLowerCase(), op: match[2].toLowerCase() as "startsWith" | "eq", value: match[3] });
+  }
+  return clauses;
+}
+
+/**
+ * Whether every real device that satisfies `selectedRule` is GUARANTEED to
+ * also satisfy `otherRule`, based on the extracted clauses. For two clauses
+ * on the same property: if the selected clause's value starts with the
+ * other clause's value, anything matching the (narrower) selected clause
+ * necessarily matches the (broader) other clause too -- e.g. selecting a
+ * group scoped to OrderID "MALO-KIOSK-SINGLE" implies membership in a
+ * broader group scoped to "MALO-KIOSK", since every device in the former
+ * has an OrderID starting with the latter's prefix as well.
+ *
+ * Deliberately conservative/best-effort: only handles single-clause-vs-single-clause
+ * matches on the same property and op pairing described above. Rules with
+ * "and"/"or"/"not" combinators are still scanned (the regex finds all
+ * clauses regardless of structure), which can occasionally produce a false
+ * positive for rules that "and" together unrelated clauses -- this is why
+ * implied groups are surfaced to the user for verification rather than
+ * silently merged into the simulation.
+ */
+export function ruleImplies(selectedRule: string | undefined, otherRule: string | undefined): boolean {
+  const selectedClauses = parseMembershipRuleClauses(selectedRule);
+  const otherClauses = parseMembershipRuleClauses(otherRule);
+  if (selectedClauses.length === 0 || otherClauses.length === 0) return false;
+
+  return selectedClauses.some((selected) =>
+    otherClauses.some((other) => {
+      if (selected.property !== other.property) return false;
+      if (selected.value.length === 0 || other.value.length === 0) return false;
+      if (other.op === "eq") return selected.op === "eq" && selected.value === other.value;
+      // other.op === "startsWith": anything starting with `selected.value`
+      // also starts with `other.value` iff `other.value` is a prefix of it.
+      return selected.value.startsWith(other.value) && selected.value !== other.value;
+    })
+  );
+}
+
 export const VIRTUAL_GROUP_ALL_DEVICES = { id: "virtual-all-devices", displayName: "All Devices", isVirtual: true };
 export const VIRTUAL_GROUP_ALL_USERS = { id: "virtual-all-users", displayName: "All Users", isVirtual: true };
 

@@ -103,10 +103,18 @@ export interface GroupSummary {
 }
 
 /** Why a group is part of an endpoint simulation. */
-export type SimulationGroupSource = "selected" | "all-devices" | "all-users";
+export type SimulationGroupSource = "selected" | "all-devices" | "all-users" | "implied";
 
 export interface SimulationGroup extends IntuneGroup {
   source: SimulationGroupSource;
+  /**
+   * Set when source is "implied": the selected group(s) whose dynamic
+   * membership rule logically implies membership in this one too (e.g.
+   * selecting a group scoped to OrderID "MALO-KIOSK-SINGLE" implies
+   * membership in a broader "MALO-KIOSK" group). Best-effort -- verify
+   * against the actual rules in Entra before relying on it.
+   */
+  impliedByGroupNames?: string[];
 }
 
 export interface SimulationPolicy {

@@ -23,6 +23,7 @@ const SOURCE_STYLE: Record<SimulationGroup["source"], { border: string; bg: stri
   selected: { border: "#34d399", bg: "rgba(52,211,153,0.10)", label: "Selected group" },
   "all-devices": { border: "#94a3b8", bg: "rgba(148,163,184,0.07)", label: "Always applies" },
   "all-users": { border: "#94a3b8", bg: "rgba(148,163,184,0.07)", label: "Always applies" },
+  implied: { border: "#fbbf24", bg: "rgba(251,191,36,0.08)", label: "Implied by rule" },
 };
 
 const GROUP_NODE_WIDTH = 250;
@@ -68,18 +69,26 @@ function DeviceNode({ data }: { data: { groupNames: string[]; filterNames: strin
   );
 }
 
-function GroupNode({ data }: { data: { label: string; source: SimulationGroup["source"]; isDynamic?: boolean } }) {
+function GroupNode({
+  data,
+}: {
+  data: { label: string; source: SimulationGroup["source"]; isDynamic?: boolean; impliedByGroupNames?: string[] };
+}) {
   const style = SOURCE_STYLE[data.source];
+  const tooltip =
+    data.source === "implied" && data.impliedByGroupNames?.length
+      ? `${data.label}\n\nImplied by the dynamic membership rule of: ${data.impliedByGroupNames.join(", ")}.\nBest-effort -- verify against the actual rules in Entra.`
+      : data.label;
   return (
     <div
       className="rounded-xl border bg-ink-900 px-4 py-3 text-xs shadow-[0_4px_16px_rgba(0,0,0,0.35)]"
       style={{ borderColor: style.border, width: GROUP_NODE_WIDTH }}
-      title={data.label}
+      title={tooltip}
     >
       <Handle type="target" position={Position.Left} className="opacity-0" />
       <Handle type="source" position={Position.Right} className="opacity-0" />
       <div className="break-words font-semibold leading-snug text-slate-100">{data.label}</div>
-      <div className="mt-2 flex items-center gap-1.5">
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
         <span
           className="rounded px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide"
           style={{ color: style.border, backgroundColor: style.bg }}
@@ -92,6 +101,9 @@ function GroupNode({ data }: { data: { label: string; source: SimulationGroup["s
           </span>
         )}
       </div>
+      {data.source === "implied" && data.impliedByGroupNames?.length ? (
+        <div className="mt-1.5 text-[10px] text-amber-300/80">via {data.impliedByGroupNames.join(", ")}</div>
+      ) : null}
     </div>
   );
 }
@@ -143,9 +155,9 @@ function layout(simulation: SimulationResult, deviceFilterNames: string[]) {
       id: `group:${g.id}`,
       type: "group",
       position: { x: groupX, y: groupY },
-      data: { label: g.displayName, source: g.source, isDynamic: g.isDynamic },
+      data: { label: g.displayName, source: g.source, isDynamic: g.isDynamic, impliedByGroupNames: g.impliedByGroupNames },
     });
-    groupY += estimateRowHeight(g.displayName);
+    groupY += estimateRowHeight(g.displayName) + (g.impliedByGroupNames?.length ? LINE_HEIGHT : 0);
   }
 
   const policyX = groupX + GROUP_NODE_WIDTH + COLUMN_GAP;
@@ -206,6 +218,7 @@ function layout(simulation: SimulationResult, deviceFilterNames: string[]) {
 function Legend() {
   const items: { color: string; label: string }[] = [
     { color: "#34d399", label: "Selected group" },
+    { color: "#fbbf24", label: "Implied by rule" },
     { color: "#94a3b8", label: "All Devices / All Users" },
     { color: "#38bdf8", label: "Device Configuration" },
     { color: "#a78bfa", label: "Settings Catalog" },

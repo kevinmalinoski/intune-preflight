@@ -12,7 +12,7 @@ import type {
   SimulationResult,
 } from "@intune-baseline/shared";
 import type { TenantData } from "./intuneData.js";
-import { VIRTUAL_GROUP_ALL_DEVICES, VIRTUAL_GROUP_ALL_USERS } from "./normalize.js";
+import { ruleImplies, VIRTUAL_GROUP_ALL_DEVICES, VIRTUAL_GROUP_ALL_USERS } from "./normalize.js";
 
 /**
  * Whether a single group assignment's filter allows it to apply, given which
@@ -159,16 +159,35 @@ export function computeSimulation(
     [VIRTUAL_GROUP_ALL_USERS.id, VIRTUAL_GROUP_ALL_USERS],
   ]);
 
-  const addGroup = (id: string, source: SimulationGroup["source"]) => {
+  const addGroup = (id: string, source: SimulationGroup["source"], impliedByGroupNames?: string[]) => {
     if (seen.has(id)) return;
     const group = groupMap.get(id) ?? virtualGroupsById.get(id) ?? { id, displayName: id };
-    groups.push({ ...group, source });
+    groups.push({ ...group, source, impliedByGroupNames });
     seen.add(id);
   };
 
   for (const groupId of options.selectedGroupIds) {
     addGroup(groupId, "selected");
   }
+
+  // A dynamic group's membership rule can logically guarantee membership in
+  // another dynamic group too (e.g. a group scoped to OrderID prefix
+  // "MALO-KIOSK-SINGLE" is always a subset of one scoped to "MALO-KIOSK").
+  // Surface those as "implied" rather than silently folding them into the
+  // selection, since rule-implication detection here is best-effort (see
+  // ruleImplies in normalize.ts) and should be eyeballed against Entra.
+  const dynamicGroups = data.groups.filter((g) => g.isDynamic && g.membershipRule);
+  for (const selectedId of options.selectedGroupIds) {
+    const selectedGroup = dynamicGroups.find((g) => g.id === selectedId);
+    if (!selectedGroup) continue;
+    for (const candidate of dynamicGroups) {
+      if (seen.has(candidate.id) || candidate.id === selectedGroup.id) continue;
+      if (ruleImplies(selectedGroup.membershipRule, candidate.membershipRule)) {
+        addGroup(candidate.id, "implied", [selectedGroup.displayName]);
+      }
+    }
+  }
+
   addGroup(VIRTUAL_GROUP_ALL_DEVICES.id, "all-devices");
   addGroup(VIRTUAL_GROUP_ALL_USERS.id, "all-users");
 
