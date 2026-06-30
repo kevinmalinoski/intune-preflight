@@ -215,9 +215,17 @@ export async function loadTenantData(): Promise<TenantData> {
 
     for (const id of realGroupIds) {
       try {
-        const group = await graphGetCollection<Record<string, unknown>>(`/groups?$filter=id eq '${id}'`);
+        const group = await graphGetCollection<Record<string, unknown>>(
+          `/groups?$filter=id eq '${id}'&$select=id,displayName,groupTypes,membershipRule`
+        );
         const match = group[0];
-        groups.push({ id, displayName: (match?.displayName as string) ?? id });
+        const groupTypes = (match?.groupTypes as string[] | undefined) ?? [];
+        groups.push({
+          id,
+          displayName: (match?.displayName as string) ?? id,
+          isDynamic: groupTypes.includes("DynamicMembership"),
+          membershipRule: match?.membershipRule as string | undefined,
+        });
       } catch {
         groups.push({ id, displayName: id });
       }

@@ -12,6 +12,10 @@ export interface IntuneGroup {
   displayName: string;
   /** True for the two Graph "virtual" targets: All Devices / All Users */
   isVirtual?: boolean;
+  /** True when the group's membership is computed from a rule rather than explicit adds */
+  isDynamic?: boolean;
+  /** The Entra dynamic membership rule, e.g. (device.deviceOSType -eq "Windows") */
+  membershipRule?: string;
 }
 
 export interface CspSetting {
@@ -90,4 +94,35 @@ export interface GroupSummary {
   policyCount: number;
   settingsCount: number;
   conflictCount: number;
+  isDynamic?: boolean;
+  membershipRule?: string;
+}
+
+export interface AutopilotProfileSummary {
+  id: string;
+  displayName: string;
+  osLabel: string;
+  assignedGroupIds: string[];
+}
+
+/** Why a group is part of an endpoint simulation. */
+export type SimulationGroupSource = "autopilot" | "selected" | "all-devices" | "all-users";
+
+export interface SimulationGroup extends IntuneGroup {
+  source: SimulationGroupSource;
+}
+
+export interface SimulationPolicy {
+  id: string;
+  displayName: string;
+  kind: PolicyKind;
+  /** Group ids (within this simulation) that assign this policy */
+  viaGroupIds: string[];
+}
+
+export interface SimulationResult {
+  groups: SimulationGroup[];
+  policies: SimulationPolicy[];
+  settings: BaselineSetting[];
+  conflicts: ConflictingSetting[];
 }
