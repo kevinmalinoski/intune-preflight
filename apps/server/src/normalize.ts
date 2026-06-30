@@ -211,7 +211,24 @@ interface RuleClause {
   property: string;
   op: "startsWith" | "eq";
   value: string;
+  /** True when this came from the `-any (_ -op "value")` collection form, e.g. devicePhysicalIds entries. */
+  isAnyCollection: boolean;
 }
+
+/** A clause value like `[ZTDid]` or `[OrderID]` with nothing after the closing bracket -- "has any entry of this tag type" rather than a specific one. */
+const BARE_TAG = /^\[[^\]]+\]$/;
+
+/**
+ * Multi-valued identity collections Intune/Autopilot populate on a device --
+ * currently just devicePhysicalIds (Graph also accepts the differently-cased
+ * "devicePhysicalIDs" in some rule exports). Several distinct tag-prefixed
+ * entries (ZTDid, OrderID, GroupTag, PurchaseOrderId, SerialNumber, ...) are
+ * written into this same array together at Autopilot enrollment, so two
+ * `-any` clauses against it using different tags aren't competing
+ * alternatives -- a real device can, and typically does, satisfy both at
+ * once.
+ */
+const MULTI_TAG_COLLECTION_PROPERTIES = new Set(["devicephysicalids"]);
 
 /**
  * Extracts simple `device.<property> -startsWith "value"` / `-eq "value"`
@@ -220,38 +237,51 @@ interface RuleClause {
  * membership rule. This is NOT a full parser for the rule language --
  * boolean structure (and/or/not), other operators (-contains, -match, -in,
  * etc.), and non-device properties are ignored. It only extracts what's
- * needed to detect the common "one rule's prefix is a prefix of another
- * rule's prefix" case, which is what makes selecting one dynamic group
- * imply membership in another.
+ * needed to detect the implication patterns below.
  */
 function parseMembershipRuleClauses(rule: string | undefined): RuleClause[] {
   if (!rule) return [];
-  const pattern = /device\.(\w+)\s*(?:-any\s*\(\s*_\s*)?-(startsWith|eq)\s*"([^"]*)"/gi;
+  const pattern = /device\.(\w+)\s*(-any\s*\(\s*_\s*)?-(startsWith|eq)\s*"([^"]*)"/gi;
   const clauses: RuleClause[] = [];
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(rule))) {
-    clauses.push({ property: match[1].toLowerCase(), op: match[2].toLowerCase() as "startsWith" | "eq", value: match[3] });
+    clauses.push({
+      property: match[1].toLowerCase(),
+      op: match[3].toLowerCase() as "startsWith" | "eq",
+      value: match[4],
+      isAnyCollection: Boolean(match[2]),
+    });
   }
   return clauses;
 }
 
 /**
  * Whether every real device that satisfies `selectedRule` is GUARANTEED to
- * also satisfy `otherRule`, based on the extracted clauses. For two clauses
- * on the same property: if the selected clause's value starts with the
- * other clause's value, anything matching the (narrower) selected clause
- * necessarily matches the (broader) other clause too -- e.g. selecting a
- * group scoped to OrderID "MALO-KIOSK-SINGLE" implies membership in a
- * broader group scoped to "MALO-KIOSK", since every device in the former
- * has an OrderID starting with the latter's prefix as well.
+ * also satisfy `otherRule`, based on the extracted clauses. Two patterns are
+ * recognized:
+ *
+ * 1. Same property, prefix relationship: if the selected clause's value
+ *    starts with the other clause's value, anything matching the (narrower)
+ *    selected clause necessarily matches the (broader) other clause too --
+ *    e.g. selecting a group scoped to OrderID "MALO-KIOSK-SINGLE" implies
+ *    membership in a broader group scoped to "MALO-KIOSK".
+ *
+ * 2. Same multi-tag identity collection (e.g. devicePhysicalIds), other
+ *    clause is a bare tag wildcard ("[ZTDid]" with nothing after it, i.e.
+ *    "has any entry of this tag type"): implied by ANY other `-any` clause
+ *    against that same collection, regardless of tag, since these arrays are
+ *    populated with multiple tag types together at Autopilot enrollment --
+ *    e.g. selecting an OrderID-scoped Kiosk group implies membership in a
+ *    generic "is this device Autopilot-enrolled" group scoped to a bare
+ *    "[ZTDid]" check, because a Kiosk device is itself Autopilot-enrolled
+ *    and therefore also carries a ZTDid entry.
  *
  * Deliberately conservative/best-effort: only handles single-clause-vs-single-clause
- * matches on the same property and op pairing described above. Rules with
- * "and"/"or"/"not" combinators are still scanned (the regex finds all
- * clauses regardless of structure), which can occasionally produce a false
- * positive for rules that "and" together unrelated clauses -- this is why
- * implied groups are surfaced to the user for verification rather than
- * silently merged into the simulation.
+ * matches. Rules with "and"/"or"/"not" combinators are still scanned (the
+ * regex finds all clauses regardless of structure), which can occasionally
+ * produce a false positive for rules that "and" together unrelated clauses --
+ * this is why implied groups are surfaced to the user for verification
+ * rather than silently merged into the simulation.
  */
 export function ruleImplies(selectedRule: string | undefined, otherRule: string | undefined): boolean {
   const selectedClauses = parseMembershipRuleClauses(selectedRule);
@@ -262,6 +292,16 @@ export function ruleImplies(selectedRule: string | undefined, otherRule: string 
     otherClauses.some((other) => {
       if (selected.property !== other.property) return false;
       if (selected.value.length === 0 || other.value.length === 0) return false;
+
+      if (
+        selected.isAnyCollection &&
+        other.isAnyCollection &&
+        MULTI_TAG_COLLECTION_PROPERTIES.has(other.property) &&
+        BARE_TAG.test(other.value)
+      ) {
+        return true;
+      }
+
       if (other.op === "eq") return selected.op === "eq" && selected.value === other.value;
       // other.op === "startsWith": anything starting with `selected.value`
       // also starts with `other.value` iff `other.value` is a prefix of it.
