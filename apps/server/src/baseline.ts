@@ -146,9 +146,17 @@ export function computeSimulation(
   const groups: SimulationGroup[] = [];
   const seen = new Set<string>();
 
+  // The two virtual targets aren't guaranteed to be in data.groups (they're only
+  // added there if some policy/Autopilot profile happens to reference them) --
+  // fall back to their known display names rather than the raw "virtual-..." id.
+  const virtualGroupsById = new Map([
+    [VIRTUAL_GROUP_ALL_DEVICES.id, VIRTUAL_GROUP_ALL_DEVICES],
+    [VIRTUAL_GROUP_ALL_USERS.id, VIRTUAL_GROUP_ALL_USERS],
+  ]);
+
   const addGroup = (id: string, source: SimulationGroup["source"]) => {
     if (seen.has(id)) return;
-    const group = groupMap.get(id) ?? { id, displayName: id };
+    const group = groupMap.get(id) ?? virtualGroupsById.get(id) ?? { id, displayName: id };
     groups.push({ ...group, source });
     seen.add(id);
   };
