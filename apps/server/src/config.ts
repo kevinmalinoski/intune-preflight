@@ -1,3 +1,10 @@
+import { config as loadDotenv } from "dotenv";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+
+// Load the repo-root .env regardless of which directory the process was started from.
+loadDotenv({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../.env") });
+
 function required(name: string): string {
   const value = process.env[name];
   if (!value) {

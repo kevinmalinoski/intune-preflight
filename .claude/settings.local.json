@@ -6,7 +6,11 @@
       "Bash(npx tsc *)",
       "Bash(timeout 5 node --experimental-strip-types apps/server/src/index.ts)",
       "Bash(echo \"---exit: $?\")",
-      "Bash(npx vite *)"
+      "Bash(npx vite *)",
+      "Bash(curl -s localhost:4000/api/graph)",
+      "Bash(curl -s \"localhost:4000/api/groups/23ae2485-71b7-436e-9a18-5fdb1398f9cb/baseline\")",
+      "Bash(pkill -f \"tsx.*index.ts\")",
+      "Bash(git add *)"
     ]
   }
 }

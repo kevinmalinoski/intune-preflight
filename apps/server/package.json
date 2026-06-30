@@ -11,8 +11,9 @@
   },
   "dependencies": {
     "@azure/msal-node": "^2.16.0",
-    "@intune-baseline/shared": "*",
     "@fastify/cors": "^10.0.1",
+    "@intune-baseline/shared": "*",
+    "dotenv": "^17.4.2",
     "fastify": "^5.1.0"
   },
   "devDependencies": {

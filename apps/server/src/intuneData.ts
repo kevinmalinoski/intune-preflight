@@ -16,6 +16,21 @@ interface RawAssignment {
   target?: { "@odata.type"?: string; groupId?: string };
 }
 
+/**
+ * A handful of newer deviceManagement resources (Settings Catalog, Admin
+ * Templates, Autopilot profiles) 400 with "Resource not found for the
+ * segment" on v1.0 in some tenants. Fall back to the beta endpoint when that
+ * happens, and report which base URL worked so sibling/child requests for the
+ * same resource type can skip straight to it instead of re-discovering.
+ */
+async function getCollectionWithBetaFallback<T>(path: string): Promise<{ items: T[]; useBeta: boolean }> {
+  try {
+    return { items: await graphGetCollection<T>(path), useBeta: false };
+  } catch {
+    return { items: await graphGetCollection<T>(path, true), useBeta: true };
+  }
+}
+
 async function resolveAssignedGroupIds(assignments: RawAssignment[]): Promise<string[]> {
   const ids = new Set<string>();
   for (const assignment of assignments) {
@@ -28,12 +43,17 @@ async function resolveAssignedGroupIds(assignments: RawAssignment[]): Promise<st
 }
 
 async function fetchDeviceConfigurations(): Promise<IntunePolicy[]> {
-  const items = await graphGetCollection<Record<string, unknown>>("/deviceManagement/deviceConfigurations");
+  const { items, useBeta } = await getCollectionWithBetaFallback<Record<string, unknown>>(
+    "/deviceManagement/deviceConfigurations"
+  );
   const result: IntunePolicy[] = [];
   for (const item of items) {
     const id = item.id as string;
     const displayName = (item.displayName as string) ?? "Untitled";
-    const assignments = await graphGetCollection<RawAssignment>(`/deviceManagement/deviceConfigurations/${id}/assignments`);
+    const assignments = await graphGetCollection<RawAssignment>(
+      `/deviceManagement/deviceConfigurations/${id}/assignments`,
+      useBeta
+    );
     result.push({
       id,
       kind: "deviceConfiguration",
@@ -47,12 +67,17 @@ async function fetchDeviceConfigurations(): Promise<IntunePolicy[]> {
 }
 
 async function fetchCompliancePolicies(): Promise<IntunePolicy[]> {
-  const items = await graphGetCollection<Record<string, unknown>>("/deviceManagement/deviceCompliancePolicies");
+  const { items, useBeta } = await getCollectionWithBetaFallback<Record<string, unknown>>(
+    "/deviceManagement/deviceCompliancePolicies"
+  );
   const result: IntunePolicy[] = [];
   for (const item of items) {
     const id = item.id as string;
     const displayName = (item.displayName as string) ?? "Untitled";
-    const assignments = await graphGetCollection<RawAssignment>(`/deviceManagement/deviceCompliancePolicies/${id}/assignments`);
+    const assignments = await graphGetCollection<RawAssignment>(
+      `/deviceManagement/deviceCompliancePolicies/${id}/assignments`,
+      useBeta
+    );
     result.push({
       id,
       kind: "compliancePolicy",
@@ -66,14 +91,19 @@ async function fetchCompliancePolicies(): Promise<IntunePolicy[]> {
 }
 
 async function fetchSettingsCatalogPolicies(): Promise<IntunePolicy[]> {
-  const items = await graphGetCollection<Record<string, unknown>>("/deviceManagement/configurationPolicies");
+  const { items, useBeta } = await getCollectionWithBetaFallback<Record<string, unknown>>(
+    "/deviceManagement/configurationPolicies"
+  );
   const result: IntunePolicy[] = [];
   for (const item of items) {
     const id = item.id as string;
     const displayName = (item.name as string) ?? (item.displayName as string) ?? "Untitled";
     const [assignments, settingEntries] = await Promise.all([
-      graphGetCollection<RawAssignment>(`/deviceManagement/configurationPolicies/${id}/assignments`),
-      graphGetCollection<{ settingInstance?: Record<string, unknown> }>(`/deviceManagement/configurationPolicies/${id}/settings`),
+      graphGetCollection<RawAssignment>(`/deviceManagement/configurationPolicies/${id}/assignments`, useBeta),
+      graphGetCollection<{ settingInstance?: Record<string, unknown> }>(
+        `/deviceManagement/configurationPolicies/${id}/settings`,
+        useBeta
+      ),
     ]);
     result.push({
       id,
@@ -88,14 +118,19 @@ async function fetchSettingsCatalogPolicies(): Promise<IntunePolicy[]> {
 }
 
 async function fetchAdminTemplates(): Promise<IntunePolicy[]> {
-  const items = await graphGetCollection<Record<string, unknown>>("/deviceManagement/groupPolicyConfigurations");
+  const { items, useBeta } = await getCollectionWithBetaFallback<Record<string, unknown>>(
+    "/deviceManagement/groupPolicyConfigurations"
+  );
   const result: IntunePolicy[] = [];
   for (const item of items) {
     const id = item.id as string;
     const displayName = (item.displayName as string) ?? "Untitled";
     const [assignments, definitionValues] = await Promise.all([
-      graphGetCollection<RawAssignment>(`/deviceManagement/groupPolicyConfigurations/${id}/assignments`),
-      graphGetCollection<Record<string, unknown>>(`/deviceManagement/groupPolicyConfigurations/${id}/definitionValues`),
+      graphGetCollection<RawAssignment>(`/deviceManagement/groupPolicyConfigurations/${id}/assignments`, useBeta),
+      graphGetCollection<Record<string, unknown>>(
+        `/deviceManagement/groupPolicyConfigurations/${id}/definitionValues`,
+        useBeta
+      ),
     ]);
     const settings = definitionValues.map((dv, idx) => ({
       settingId: (dv.id as string) ?? `${id}-${idx}`,
@@ -116,14 +151,27 @@ async function fetchAdminTemplates(): Promise<IntunePolicy[]> {
 }
 
 async function fetchAutopilotProfiles(): Promise<AutopilotProfile[]> {
-  const items = await graphGetCollection<Record<string, unknown>>(
-    "/deviceManagement/windowsAutopilotDeploymentProfiles"
-  );
+  let items: Record<string, unknown>[];
+  let useBeta: boolean;
+  try {
+    ({ items, useBeta } = await getCollectionWithBetaFallback<Record<string, unknown>>(
+      "/deviceManagement/windowsAutopilotDeploymentProfiles"
+    ));
+  } catch (err) {
+    // Autopilot profiles require an extra Graph permission
+    // (DeviceManagementServiceConfig.Read.All) beyond the core set. Treat this
+    // as optional rather than failing the whole tenant load.
+    console.warn(
+      `Skipping Autopilot profiles: ${(err as Error).message}. Grant the app DeviceManagementServiceConfig.Read.All permission to enable them.`
+    );
+    return [];
+  }
   const result: AutopilotProfile[] = [];
   for (const item of items) {
     const id = item.id as string;
     const assignments = await graphGetCollection<RawAssignment>(
-      `/deviceManagement/windowsAutopilotDeploymentProfiles/${id}/assignments`
+      `/deviceManagement/windowsAutopilotDeploymentProfiles/${id}/assignments`,
+      useBeta
     );
     result.push({
       id,
