@@ -4,20 +4,22 @@
 
 Intune makes you click into every Configuration Profile, Compliance Policy, Settings Catalog policy, and Administrative Template one at a time to see what's actually applied to a device group. This tool connects to your tenant, reads every policy and its assignments, and computes — automatically — the full merged CSP-level baseline for each device group. No manual Policy Set authoring required.
 
-- 🗺️ **Interactive graph view** — device groups, assigned policies, and Windows 11 Autopilot deployment profiles laid out as a connected flow diagram
-- 🔍 **Drill-down baseline** — click a group to see every CSP setting from every assigned policy, merged into one table, with conflicting settings flagged
-- 📤 **Export** — JSON or CSV export of any group's full baseline
+- 🖥️ **Endpoint simulator** — pick an OS platform and the Entra security groups an endpoint belongs to, and see exactly which policies apply as a connected diagram: device → groups → policies
+- 🚫 **Include/exclude aware** — Intune assignments can explicitly *exclude* a group from a policy; this is resolved correctly (excludes always win) and shown directly in the diagram and baseline, not silently dropped
+- 🌐 **Platform filter** — Windows, macOS, iOS/iPadOS, and Android policies are scoped separately so e.g. macOS compliance policies don't clutter a Windows simulation
+- 🔍 **Drill-down baseline** — every CSP setting from every applied policy, merged into one filterable table, with conflicting settings flagged
+- 📤 **Export** — JSON or CSV export of the simulated endpoint's full baseline
 - 🪶 **Lightweight** — no database, no build pipeline beyond Vite/TypeScript, runs as two small Node processes (or two containers)
 
 ## How it works
 
 ```
 Microsoft Graph  --->  apps/server (Fastify)  --->  apps/web (React + React Flow)
- (app-only auth)        in-memory cache              graph view + drill-down
-                         baseline engine
+ (app-only auth)        in-memory cache              endpoint simulator + drill-down
+                         simulation engine
 ```
 
-The server authenticates to Microsoft Graph using an Azure AD **app registration** (client-credentials flow — no per-user sign-in needed), pulls every device configuration, compliance policy, Settings Catalog policy, and administrative template along with their group assignments, and computes a merged baseline per device group. Results are cached in memory for `CACHE_TTL_SECONDS` (default 5 minutes) — there is intentionally no database, to keep the app easy to run and reason about. `POST /api/refresh` clears the cache on demand.
+The server authenticates to Microsoft Graph using an Azure AD **app registration** (client-credentials flow — no per-user sign-in needed), pulls every device configuration, compliance policy, Settings Catalog policy, and administrative template along with their group assignments (both included and excluded), and computes a merged baseline for whatever combination of groups/platform you select. Results are cached in memory for `CACHE_TTL_SECONDS` (default 5 minutes) — there is intentionally no database, to keep the app easy to run and reason about. `POST /api/refresh` clears the cache on demand.
 
 ## 1. Create an Azure AD app registration
 
@@ -28,7 +30,7 @@ The server authenticates to Microsoft Graph using an Azure AD **app registration
    - `DeviceManagementManagedDevices.Read.All`
    - `Group.Read.All`
    - `Device.Read.All`
-   - `DeviceManagementServiceConfig.Read.All` (optional — only needed to show Windows Autopilot deployment profiles; the app skips them gracefully if this is omitted)
+   - `DeviceManagementServiceConfig.Read.All` (optional — only needed to discover groups targeted by Windows Autopilot deployment profiles; the app skips this gracefully if omitted)
 4. Click **Grant admin consent** for your tenant.
 5. Under **Certificates & secrets → New client secret**, create a secret and copy its value immediately (it's only shown once).
 6. Note your **Application (client) ID**, **Directory (tenant) ID**, and the **client secret** value.
@@ -66,8 +68,8 @@ docker compose up --build
 ## Project layout
 
 ```
-apps/server/    Fastify API — Graph auth, data fetch, baseline engine
-apps/web/       React + Vite UI — graph view (React Flow) + drill-down panel
+apps/server/    Fastify API — Graph auth, data fetch, simulation engine
+apps/web/       React + Vite UI — endpoint simulator (React Flow) + drill-down panel
 packages/shared/  TypeScript types shared by both apps
 ```
 
@@ -76,9 +78,8 @@ packages/shared/  TypeScript types shared by both apps
 | Endpoint | Description |
 |---|---|
 | `GET /api/groups` | Device groups with policy/setting/conflict counts |
-| `GET /api/graph` | Nodes/edges for the visualizer |
-| `GET /api/groups/:id/baseline` | Full merged CSP baseline + conflicts for a group |
-| `GET /api/groups/:id/export?format=json\|csv` | Download the baseline |
+| `GET /api/simulate?groups=id1,id2&platform=windows` | Simulated endpoint baseline for the given groups + platform (`windows`\|`macos`\|`ios`\|`android`) |
+| `GET /api/simulate/export?groups=...&platform=...&format=json\|csv` | Download the simulated baseline |
 | `POST /api/refresh` | Clear the in-memory cache and re-fetch from Graph |
 
 ## Notes & limitations
@@ -86,6 +87,7 @@ packages/shared/  TypeScript types shared by both apps
 - **Read-only.** This tool never writes to your tenant — application permissions used are all `*.Read.All`.
 - **In-memory cache, no database.** Data is re-fetched from Graph on first request after each cache expiry or server restart. If you need persistence across restarts or multiple instances, swap `apps/server/src/cache.ts` for Redis or SQLite.
 - **Settings flattening is schema-agnostic.** Device Configuration and Compliance Policy settings are derived directly from each Graph resource's own properties rather than a hand-maintained CSP schema per profile type — this keeps the tool maintainable as Intune adds new policy types, at the cost of raw Graph field names showing up as setting names in some cases.
+- **Dynamic group membership rules are surfaced, not evaluated.** The app shows you a dynamic group's actual membership rule so you can verify it, but it doesn't check whether a specific device/user actually matches that rule — confirm in Entra directly.
 - Tested against a sandbox Microsoft 365 tenant. Always verify against the Intune admin center before relying on the computed baseline for compliance decisions.
 
 ## License

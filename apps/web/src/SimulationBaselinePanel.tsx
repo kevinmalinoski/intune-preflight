@@ -1,14 +1,16 @@
 import { useState } from "react";
-import type { SimulationResult } from "@intune-baseline/shared";
+import type { Platform, SimulationResult } from "@intune-baseline/shared";
 import { api } from "./api.ts";
 
 export function SimulationBaselinePanel({
   simulation,
   groupIds,
+  platform,
   onClose,
 }: {
   simulation: SimulationResult;
   groupIds: string[];
+  platform: Platform;
   onClose: () => void;
 }) {
   const [filter, setFilter] = useState("");
@@ -76,13 +78,13 @@ export function SimulationBaselinePanel({
           className="flex-1 rounded-md border border-ink-700 bg-ink-800 px-3 py-1.5 text-sm text-slate-200 placeholder:text-slate-500 focus:border-emerald-400 focus:outline-none"
         />
         <a
-          href={api.simulateExportUrl(groupIds, "json")}
+          href={api.simulateExportUrl(groupIds, platform, "json")}
           className="rounded-md border border-ink-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-ink-800"
         >
           Export JSON
         </a>
         <a
-          href={api.simulateExportUrl(groupIds, "csv")}
+          href={api.simulateExportUrl(groupIds, platform, "csv")}
           className="rounded-md border border-ink-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-ink-800"
         >
           Export CSV

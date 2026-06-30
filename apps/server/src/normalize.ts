@@ -1,4 +1,4 @@
-import type { CspSetting, PolicyKind } from "@intune-baseline/shared";
+import type { CspSetting, PolicyKind, Platform } from "@intune-baseline/shared";
 
 // Metadata fields present on most Graph device-management resources that aren't
 // actual configuration settings -- excluded when flattening a policy into CSP settings.
@@ -116,6 +116,32 @@ export function parseAssignmentTarget(assignment: {
   if (type.includes("allDevices")) return { isAllDevices: true };
   if (type.includes("allLicensedUsers")) return { isAllUsers: true };
   return { groupId: target?.groupId };
+}
+
+/**
+ * Derives the target OS platform from a Graph resource's @odata.type, which
+ * for deviceConfigurations and deviceCompliancePolicies always encodes the
+ * platform (e.g. #microsoft.graph.windows10CompliancePolicy,
+ * #microsoft.graph.iosCompliancePolicy, #microsoft.graph.macOSGeneralDeviceConfiguration).
+ * "ios" types cover both iOS and iPadOS in Graph's model.
+ */
+export function platformFromOdataType(odataType: string | undefined): Platform {
+  const type = (odataType ?? "").toLowerCase();
+  if (type.includes("macos")) return "macos";
+  if (type.includes("ios")) return "ios";
+  if (type.includes("android")) return "android";
+  if (type.includes("windows")) return "windows";
+  return "other";
+}
+
+/** Settings Catalog (configurationPolicies) resources expose platform directly via the `platforms` field. */
+export function platformFromSettingsCatalog(platforms: string | undefined): Platform {
+  const value = (platforms ?? "").toLowerCase();
+  if (value.includes("macos")) return "macos";
+  if (value.includes("ios")) return "ios";
+  if (value.includes("android")) return "android";
+  if (value.includes("windows")) return "windows";
+  return "other";
 }
 
 export const VIRTUAL_GROUP_ALL_DEVICES = { id: "virtual-all-devices", displayName: "All Devices", isVirtual: true };

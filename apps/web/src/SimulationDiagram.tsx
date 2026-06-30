@@ -16,6 +16,19 @@ const SOURCE_STYLE: Record<SimulationGroup["source"], { border: string; bg: stri
   "all-users": { border: "#94a3b8", bg: "rgba(148,163,184,0.06)", label: "always applies" },
 };
 
+const GROUP_NODE_WIDTH = 260;
+const POLICY_NODE_WIDTH = 240;
+const CHARS_PER_LINE = 26;
+const LINE_HEIGHT = 15;
+const BASE_ROW_HEIGHT = 60;
+const ROW_GAP = 16;
+
+/** Long group/policy names wrap to multiple lines -- estimate row height so nodes never overlap. */
+function estimateRowHeight(label: string): number {
+  const lines = Math.max(1, Math.ceil(label.length / CHARS_PER_LINE));
+  return BASE_ROW_HEIGHT + (lines - 1) * LINE_HEIGHT + ROW_GAP;
+}
+
 function DeviceNode() {
   return (
     <div className="flex flex-col items-center rounded-2xl border-2 border-emerald-400 bg-emerald-500/10 px-6 py-4 text-emerald-100 shadow-xl shadow-emerald-950/50">
@@ -33,17 +46,20 @@ function GroupNode({ data }: { data: { label: string; source: SimulationGroup["s
   return (
     <div
       className="rounded-xl border px-4 py-2.5 text-xs shadow-lg"
-      style={{ borderColor: style.border, backgroundColor: style.bg }}
+      style={{ borderColor: style.border, backgroundColor: style.bg, width: GROUP_NODE_WIDTH }}
+      title={data.label}
     >
       <Handle type="target" position={Position.Top} className="opacity-0" />
       <Handle type="source" position={Position.Bottom} className="opacity-0" />
-      <div className="flex items-center gap-1.5 font-semibold text-slate-100">
-        {data.label}
+      <div className="flex items-start gap-1.5 font-semibold leading-snug text-slate-100">
+        <span className="break-words">{data.label}</span>
         {data.isDynamic && (
-          <span className="rounded bg-violet-500/20 px-1 py-0.5 text-[9px] font-medium text-violet-300">dynamic</span>
+          <span className="shrink-0 rounded bg-violet-500/20 px-1 py-0.5 text-[9px] font-medium text-violet-300">
+            dynamic
+          </span>
         )}
       </div>
-      <div className="mt-0.5 text-[10px] uppercase tracking-wide" style={{ color: style.border }}>
+      <div className="mt-1 text-[10px] uppercase tracking-wide" style={{ color: style.border }}>
         {style.label}
       </div>
     </div>
@@ -59,14 +75,16 @@ function PolicyNode({ data }: { data: { label: string; kind: string; settingsCou
         borderColor: color,
         backgroundColor: data.excluded ? "rgba(251,113,133,0.08)" : "#1a2130",
         borderStyle: data.excluded ? "dashed" : "solid",
+        width: POLICY_NODE_WIDTH,
       }}
+      title={data.label}
     >
       <Handle type="target" position={Position.Top} className="opacity-0" />
-      <div className="font-medium" style={{ color }}>
+      <div className="break-words font-medium leading-snug" style={{ color }}>
         {data.excluded ? "🚫 " : ""}
         {data.label}
       </div>
-      <div className="mt-0.5 text-[10px] text-slate-400">
+      <div className="mt-1 text-[10px] text-slate-400">
         {data.excluded ? "excluded for this group" : `${data.settingsCount} settings`}
       </div>
     </div>
@@ -79,32 +97,28 @@ function layout(simulation: SimulationResult) {
   const nodes: Node[] = [{ id: "device", type: "device", position: { x: 0, y: 0 }, data: {} }];
 
   const groupX = 320;
-  simulation.groups.forEach((g, idx) => {
+  let groupY = 0;
+  for (const g of simulation.groups) {
     nodes.push({
       id: `group:${g.id}`,
       type: "group",
-      position: { x: groupX, y: idx * 80 },
+      position: { x: groupX, y: groupY },
       data: { label: g.displayName, source: g.source, isDynamic: g.isDynamic },
     });
-  });
+    groupY += estimateRowHeight(g.displayName);
+  }
 
   const policyX = 680;
-  let row = 0;
-  for (const p of simulation.policies) {
+  let policyY = 0;
+  for (const p of [...simulation.policies, ...simulation.excludedPolicies]) {
+    const excluded = simulation.excludedPolicies.includes(p);
     nodes.push({
       id: `policy:${p.id}`,
       type: "policy",
-      position: { x: policyX, y: row++ * 70 },
-      data: { label: p.displayName, kind: p.kind, settingsCount: undefined, excluded: false },
+      position: { x: policyX, y: policyY },
+      data: { label: p.displayName, kind: p.kind, settingsCount: undefined, excluded },
     });
-  }
-  for (const p of simulation.excludedPolicies) {
-    nodes.push({
-      id: `policy:${p.id}`,
-      type: "policy",
-      position: { x: policyX, y: row++ * 70 },
-      data: { label: p.displayName, kind: p.kind, settingsCount: undefined, excluded: true },
-    });
+    policyY += estimateRowHeight(p.displayName);
   }
 
   const edges: Edge[] = [];

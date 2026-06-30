@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { GroupSummary, SimulationResult } from "@intune-baseline/shared";
+import type { GroupSummary, Platform, SimulationResult } from "@intune-baseline/shared";
 import { api } from "./api.ts";
 import { EndpointPicker } from "./EndpointPicker.tsx";
 import { SimulationDiagram } from "./SimulationDiagram.tsx";
@@ -7,6 +7,7 @@ import { SimulationBaselinePanel } from "./SimulationBaselinePanel.tsx";
 
 export function EndpointSimulator() {
   const [groups, setGroups] = useState<GroupSummary[]>([]);
+  const [platform, setPlatform] = useState<Platform>("windows");
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
   const [simulation, setSimulation] = useState<SimulationResult | null>(null);
   const [showBaseline, setShowBaseline] = useState(false);
@@ -21,10 +22,10 @@ export function EndpointSimulator() {
 
   useEffect(() => {
     api
-      .simulate(selectedGroupIds)
+      .simulate(selectedGroupIds, platform)
       .then(setSimulation)
       .catch((e) => setError(e.message));
-  }, [selectedGroupIds]);
+  }, [selectedGroupIds, platform]);
 
   const toggleGroup = (id: string) => {
     setSelectedGroupIds((prev) => (prev.includes(id) ? prev.filter((g) => g !== id) : [...prev, id]));
@@ -32,7 +33,13 @@ export function EndpointSimulator() {
 
   return (
     <div className="flex h-full flex-col">
-      <EndpointPicker groups={groups} selectedGroupIds={selectedGroupIds} onToggleGroup={toggleGroup} />
+      <EndpointPicker
+        groups={groups}
+        selectedGroupIds={selectedGroupIds}
+        platform={platform}
+        onTogglePlatform={setPlatform}
+        onToggleGroup={toggleGroup}
+      />
 
       <div className="relative flex-1 bg-ink-950">
         {error && (
@@ -66,6 +73,7 @@ export function EndpointSimulator() {
         <SimulationBaselinePanel
           simulation={simulation}
           groupIds={selectedGroupIds}
+          platform={platform}
           onClose={() => setShowBaseline(false)}
         />
       )}

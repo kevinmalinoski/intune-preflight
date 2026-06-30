@@ -1,18 +1,14 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
+import type { Platform } from "@intune-baseline/shared";
 import { config } from "./config.js";
 import { loadTenantData, clearTenantDataCache } from "./intuneData.js";
-import {
-  baselineToCsv,
-  buildGraphPayload,
-  computeGroupBaseline,
-  computeSimulation,
-  listGroupSummaries,
-  simulationToCsv,
-} from "./baseline.js";
+import { computeSimulation, listGroupSummaries, simulationToCsv } from "./baseline.js";
 
 const app = Fastify({ logger: true });
 await app.register(cors, { origin: true });
+
+const VALID_PLATFORMS: Platform[] = ["windows", "macos", "ios", "android", "other"];
 
 app.get("/api/health", async () => ({ status: "ok" }));
 
@@ -26,61 +22,16 @@ app.get("/api/groups", async (_req, reply) => {
   }
 });
 
-app.get("/api/graph", async (_req, reply) => {
-  try {
-    const data = await loadTenantData();
-    return buildGraphPayload(data);
-  } catch (err) {
-    app.log.error(err);
-    return reply.status(502).send({ error: (err as Error).message });
-  }
-});
-
-app.get<{ Params: { id: string } }>("/api/groups/:id/baseline", async (req, reply) => {
-  try {
-    const data = await loadTenantData();
-    const baseline = computeGroupBaseline(data, req.params.id);
-    if (!baseline) return reply.status(404).send({ error: "Group not found" });
-    return baseline;
-  } catch (err) {
-    app.log.error(err);
-    return reply.status(502).send({ error: (err as Error).message });
-  }
-});
-
-app.get<{ Params: { id: string }; Querystring: { format?: string } }>(
-  "/api/groups/:id/export",
-  async (req, reply) => {
-    try {
-      const data = await loadTenantData();
-      const baseline = computeGroupBaseline(data, req.params.id);
-      if (!baseline) return reply.status(404).send({ error: "Group not found" });
-
-      if (req.query.format === "csv") {
-        reply.header("Content-Type", "text/csv");
-        reply.header("Content-Disposition", `attachment; filename="${baseline.group.displayName}-baseline.csv"`);
-        return baselineToCsv(baseline);
-      }
-
-      reply.header("Content-Type", "application/json");
-      reply.header("Content-Disposition", `attachment; filename="${baseline.group.displayName}-baseline.json"`);
-      return baseline;
-    } catch (err) {
-      app.log.error(err);
-      return reply.status(502).send({ error: (err as Error).message });
-    }
-  }
-);
-
-function parseSimulationQuery(query: { groups?: string }) {
+function parseSimulationQuery(query: { groups?: string; platform?: string }) {
   const selectedGroupIds = (query.groups ?? "")
     .split(",")
     .map((g) => g.trim())
     .filter(Boolean);
-  return { selectedGroupIds };
+  const platform = VALID_PLATFORMS.includes(query.platform as Platform) ? (query.platform as Platform) : undefined;
+  return { selectedGroupIds, platform };
 }
 
-app.get<{ Querystring: { groups?: string } }>("/api/simulate", async (req, reply) => {
+app.get<{ Querystring: { groups?: string; platform?: string } }>("/api/simulate", async (req, reply) => {
   try {
     const data = await loadTenantData();
     return computeSimulation(data, parseSimulationQuery(req.query));
@@ -90,7 +41,7 @@ app.get<{ Querystring: { groups?: string } }>("/api/simulate", async (req, reply
   }
 });
 
-app.get<{ Querystring: { groups?: string; format?: string } }>(
+app.get<{ Querystring: { groups?: string; platform?: string; format?: string } }>(
   "/api/simulate/export",
   async (req, reply) => {
     try {

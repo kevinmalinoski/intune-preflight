@@ -7,6 +7,9 @@ export type PolicyKind =
   | "compliancePolicy"
   | "adminTemplate";
 
+/** Target OS platform for a policy. "other" covers resource types we can't confidently classify. */
+export type Platform = "windows" | "macos" | "ios" | "android" | "other";
+
 export interface IntuneGroup {
   id: string;
   displayName: string;
@@ -32,6 +35,7 @@ export interface IntunePolicy {
   kind: PolicyKind;
   displayName: string;
   description?: string;
+  platform: Platform;
   settings: CspSetting[];
   /** Groups (or virtual All Devices/All Users) this policy is assigned to INCLUDE */
   assignedGroupIds: string[];
@@ -66,40 +70,6 @@ export interface ExcludedPolicy {
   kind: PolicyKind;
   /** Which of the queried group(s) caused the exclusion */
   excludedViaGroupIds: string[];
-}
-
-export interface GroupBaseline {
-  group: IntuneGroup;
-  /** Policies that actually apply (included, and not excluded) */
-  policies: { id: string; displayName: string; kind: PolicyKind }[];
-  /** Policies that would otherwise apply but are explicitly excluded for this group */
-  excludedPolicies: ExcludedPolicy[];
-  settings: BaselineSetting[];
-  conflicts: ConflictingSetting[];
-}
-
-// --- Graph visualization payload ---
-
-export type GraphNodeType = "group" | "policy" | "autopilot";
-
-export interface GraphNode {
-  id: string;
-  type: GraphNodeType;
-  label: string;
-  kind?: PolicyKind;
-  osLabel?: string;
-  settingsCount?: number;
-}
-
-export interface GraphEdge {
-  id: string;
-  source: string;
-  target: string;
-}
-
-export interface GraphPayload {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
 }
 
 export interface GroupSummary {
