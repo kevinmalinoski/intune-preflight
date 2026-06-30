@@ -42,14 +42,26 @@ function estimateRowHeight(label: string): number {
   return BASE_ROW_HEIGHT + (lines - 1) * LINE_HEIGHT + ROW_GAP;
 }
 
-function DeviceNode() {
+function DeviceNode({ data }: { data: { groupNames: string[]; filterName?: string } }) {
   return (
-    <div className="flex flex-col items-center gap-1 rounded-2xl border-2 border-emerald-400 bg-ink-900 px-6 py-4 text-emerald-100 shadow-[0_8px_30px_rgba(16,185,129,0.25)]">
+    <div className="flex w-64 flex-col items-center gap-2 rounded-2xl border-2 border-emerald-400 bg-ink-900 px-5 py-4 text-emerald-100 shadow-[0_8px_30px_rgba(16,185,129,0.25)]">
       <Handle type="source" position={Position.Right} className="opacity-0" />
       <span className="text-3xl" aria-hidden>
         🖥️
       </span>
-      <span className="text-sm font-semibold">This endpoint</span>
+      <span className="text-sm font-semibold">Configured Endpoint</span>
+      <div className="w-full space-y-1.5 border-t border-emerald-400/20 pt-2 text-left text-[11px]">
+        <div>
+          <span className="font-medium uppercase tracking-wide text-emerald-300/80">Entra Groups:</span>{" "}
+          <span className="text-emerald-100/90">
+            {data.groupNames.length > 0 ? data.groupNames.join(", ") : "None selected"}
+          </span>
+        </div>
+        <div>
+          <span className="font-medium uppercase tracking-wide text-emerald-300/80">Device Filter:</span>{" "}
+          <span className="text-emerald-100/90">{data.filterName ?? "None"}</span>
+        </div>
+      </div>
     </div>
   );
 }
@@ -116,8 +128,11 @@ const nodeTypes = { device: DeviceNode, group: GroupNode, policy: PolicyNode };
 
 const COLUMN_GAP = 140;
 
-function layout(simulation: SimulationResult) {
-  const nodes: Node[] = [{ id: "device", type: "device", position: { x: 0, y: 0 }, data: {} }];
+function layout(simulation: SimulationResult, deviceFilterName: string | undefined) {
+  const groupNames = simulation.groups.filter((g) => g.source === "selected").map((g) => g.displayName);
+  const nodes: Node[] = [
+    { id: "device", type: "device", position: { x: 0, y: 0 }, data: { groupNames, filterName: deviceFilterName } },
+  ];
 
   const groupX = GROUP_NODE_WIDTH * 0 + 220 + COLUMN_GAP / 2;
   let groupY = 0;
@@ -209,8 +224,14 @@ function Legend() {
   );
 }
 
-export function SimulationDiagram({ simulation }: { simulation: SimulationResult }) {
-  const { nodes, edges } = useMemo(() => layout(simulation), [simulation]);
+export function SimulationDiagram({
+  simulation,
+  deviceFilterName,
+}: {
+  simulation: SimulationResult;
+  deviceFilterName?: string;
+}) {
+  const { nodes, edges } = useMemo(() => layout(simulation, deviceFilterName), [simulation, deviceFilterName]);
   const policySettingsCount = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const s of simulation.settings) counts[s.sourcePolicyId] = (counts[s.sourcePolicyId] ?? 0) + 1;

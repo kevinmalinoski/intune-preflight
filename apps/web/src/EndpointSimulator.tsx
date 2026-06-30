@@ -40,6 +40,8 @@ export function EndpointSimulator() {
     setSelectedGroupIds((prev) => (prev.includes(id) ? prev.filter((g) => g !== id) : [...prev, id]));
   };
 
+  const deviceFilterName = filters.find((f) => f.id === deviceFilterId)?.displayName;
+
   return (
     <div className="flex h-full flex-col">
       <EndpointPicker
@@ -61,7 +63,7 @@ export function EndpointSimulator() {
         )}
         {!error && simulation && (
           <>
-            <SimulationDiagram simulation={simulation} />
+            <SimulationDiagram simulation={simulation} deviceFilterName={deviceFilterName} />
             <div className="absolute right-4 top-4 z-10 flex flex-col items-end gap-2">
               <button
                 onClick={() => setShowBaseline(true)}
