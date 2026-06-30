@@ -6,6 +6,7 @@ import type {
   GroupSummary,
   IntunePolicy,
   Platform,
+  PolicyOverlap,
   SimulationGroup,
   SimulationPolicy,
   SimulationResult,
@@ -36,7 +37,16 @@ function appliesTo(policy: IntunePolicy, groupIds: string[]): boolean {
   return included && !excluded;
 }
 
-function mergeSettings(policies: IntunePolicy[]): { settings: BaselineSetting[]; conflicts: ConflictingSetting[] } {
+/**
+ * When multiple applied policies set the same CSP setting, only a genuine
+ * disagreement (different values) is a Conflict. Multiple policies setting
+ * the same value to the same thing is not a conflict -- it's redundant
+ * configuration, tracked separately as a Policy Overlap so it doesn't get
+ * lost among real conflicts but also isn't reported as a false alarm.
+ */
+function mergeSettings(
+  policies: IntunePolicy[]
+): { settings: BaselineSetting[]; conflicts: ConflictingSetting[]; overlaps: PolicyOverlap[] } {
   const bySettingId = new Map<string, BaselineSetting[]>();
   for (const policy of policies) {
     for (const setting of policy.settings) {
@@ -54,6 +64,7 @@ function mergeSettings(policies: IntunePolicy[]): { settings: BaselineSetting[];
 
   const settings: BaselineSetting[] = [];
   const conflicts: ConflictingSetting[] = [];
+  const overlaps: PolicyOverlap[] = [];
   for (const [settingId, entries] of bySettingId) {
     settings.push(entries[0]);
     const distinctValues = new Set(entries.map((e) => e.value));
@@ -69,9 +80,21 @@ function mergeSettings(policies: IntunePolicy[]): { settings: BaselineSetting[];
           sourceKind: e.sourceKind,
         })),
       });
+    } else if (entries.length > 1) {
+      overlaps.push({
+        settingId,
+        cspArea: entries[0].cspArea,
+        displayName: entries[0].displayName,
+        value: entries[0].value,
+        sourcePolicies: entries.map((e) => ({
+          sourcePolicyId: e.sourcePolicyId,
+          sourcePolicyName: e.sourcePolicyName,
+          sourceKind: e.sourceKind,
+        })),
+      });
     }
   }
-  return { settings, conflicts };
+  return { settings, conflicts, overlaps };
 }
 
 export function listGroupSummaries(data: TenantData): GroupSummary[] {
@@ -191,28 +214,38 @@ export function computeSimulation(
   }
 
   const appliedPolicyObjs = candidatePolicies.filter((p) => policies.some((sp) => sp.id === p.id));
-  const { settings, conflicts } = mergeSettings(appliedPolicyObjs);
+  const { settings, conflicts, overlaps } = mergeSettings(appliedPolicyObjs);
 
-  return { groups, policies, excludedPolicies, settings, conflicts };
+  return { groups, policies, excludedPolicies, settings, conflicts, overlaps };
 }
 
 export function simulationToCsv(simulation: SimulationResult): string {
-  const header = ["CSP Area", "Setting", "Value", "Source Policy", "Policy Type", "Conflict"];
+  const header = ["CSP Area", "Setting", "Value", "Source Policy", "Policy Type", "Conflict", "Policy Overlap"];
   const conflictsBySettingId = new Map(simulation.conflicts.map((c) => [c.settingId, c]));
+  const overlapsBySettingId = new Map(simulation.overlaps.map((o) => [o.settingId, o]));
 
   const rows: string[][] = [];
   for (const s of simulation.settings) {
     const conflict = conflictsBySettingId.get(s.settingId);
-    if (!conflict) {
-      rows.push([s.cspArea, s.displayName, s.value, s.sourcePolicyName, s.sourceKind, "no"]);
+    if (conflict) {
+      // One row per conflicting policy/value, all sharing the same setting --
+      // so both sides of the disagreement are visible directly in the export,
+      // not just flagged on a single row.
+      for (const v of conflict.values) {
+        rows.push([conflict.cspArea, conflict.displayName, v.value, v.sourcePolicyName, v.sourceKind, "yes", "no"]);
+      }
       continue;
     }
-    // One row per conflicting policy/value, all sharing the same setting --
-    // so both sides of the disagreement are visible directly in the export,
-    // not just flagged on a single row.
-    for (const v of conflict.values) {
-      rows.push([conflict.cspArea, conflict.displayName, v.value, v.sourcePolicyName, v.sourceKind, "yes"]);
+    const overlap = overlapsBySettingId.get(s.settingId);
+    if (overlap) {
+      // Same idea, but for policies that agree on the value -- still worth
+      // surfacing as redundant configuration, distinct from a real conflict.
+      for (const sp of overlap.sourcePolicies) {
+        rows.push([overlap.cspArea, overlap.displayName, overlap.value, sp.sourcePolicyName, sp.sourceKind, "no", "yes"]);
+      }
+      continue;
     }
+    rows.push([s.cspArea, s.displayName, s.value, s.sourcePolicyName, s.sourceKind, "no", "no"]);
   }
 
   const escape = (v: string) => `"${v.replace(/"/g, '""')}"`;

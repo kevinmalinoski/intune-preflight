@@ -2,33 +2,58 @@ import { useMemo, useState } from "react";
 import type { BaselineSetting, Platform, SimulationResult } from "@intune-baseline/shared";
 import { api } from "./api.ts";
 
+type RowKind = "normal" | "conflict" | "overlap";
+
 interface DisplayRow extends BaselineSetting {
-  isConflict: boolean;
+  rowKind: RowKind;
 }
 
-/** Expands conflicting settings into one row per disagreeing policy, instead of hiding all but the first. */
+type ViewFilter = "all" | "conflicts" | "overlaps";
+
+/**
+ * Expands conflicting AND overlapping settings into one row per source
+ * policy, instead of hiding everything but the first. Conflicts (different
+ * values) and overlaps (same value, redundant) are kept visually distinct.
+ */
 function buildRows(simulation: SimulationResult): DisplayRow[] {
   const conflictsBySettingId = new Map(simulation.conflicts.map((c) => [c.settingId, c]));
+  const overlapsBySettingId = new Map(simulation.overlaps.map((o) => [o.settingId, o]));
   const rows: DisplayRow[] = [];
 
   for (const s of simulation.settings) {
     const conflict = conflictsBySettingId.get(s.settingId);
-    if (!conflict) {
-      rows.push({ ...s, isConflict: false });
+    if (conflict) {
+      for (const v of conflict.values) {
+        rows.push({
+          settingId: s.settingId,
+          cspArea: conflict.cspArea,
+          displayName: conflict.displayName,
+          value: v.value,
+          sourcePolicyId: v.sourcePolicyId,
+          sourcePolicyName: v.sourcePolicyName,
+          sourceKind: v.sourceKind,
+          rowKind: "conflict",
+        });
+      }
       continue;
     }
-    for (const v of conflict.values) {
-      rows.push({
-        settingId: s.settingId,
-        cspArea: conflict.cspArea,
-        displayName: conflict.displayName,
-        value: v.value,
-        sourcePolicyId: v.sourcePolicyId,
-        sourcePolicyName: v.sourcePolicyName,
-        sourceKind: v.sourceKind,
-        isConflict: true,
-      });
+    const overlap = overlapsBySettingId.get(s.settingId);
+    if (overlap) {
+      for (const sp of overlap.sourcePolicies) {
+        rows.push({
+          settingId: s.settingId,
+          cspArea: overlap.cspArea,
+          displayName: overlap.displayName,
+          value: overlap.value,
+          sourcePolicyId: sp.sourcePolicyId,
+          sourcePolicyName: sp.sourcePolicyName,
+          sourceKind: sp.sourceKind,
+          rowKind: "overlap",
+        });
+      }
+      continue;
     }
+    rows.push({ ...s, rowKind: "normal" });
   }
   return rows;
 }
@@ -47,12 +72,12 @@ export function SimulationBaselinePanel({
   onClose: () => void;
 }) {
   const [filter, setFilter] = useState("");
-  const [conflictsOnly, setConflictsOnly] = useState(false);
+  const [view, setView] = useState<ViewFilter>("all");
 
   const allRows = useMemo(() => buildRows(simulation), [simulation]);
   const rows = allRows.filter(
     (s) =>
-      (!conflictsOnly || s.isConflict) &&
+      (view === "all" || (view === "conflicts" && s.rowKind === "conflict") || (view === "overlaps" && s.rowKind === "overlap")) &&
       (!filter ||
         s.displayName.toLowerCase().includes(filter.toLowerCase()) ||
         s.cspArea.toLowerCase().includes(filter.toLowerCase()) ||
@@ -71,6 +96,10 @@ export function SimulationBaselinePanel({
             {simulation.settings.length} merged settings ·{" "}
             <span className={simulation.conflicts.length ? "text-amber-400" : "text-emerald-400"}>
               {simulation.conflicts.length} conflicts
+            </span>
+            {" · "}
+            <span className={simulation.overlaps.length ? "text-sky-400" : "text-emerald-400"}>
+              {simulation.overlaps.length} overlaps
             </span>
             {simulation.excludedPolicies.length > 0 && (
               <>
@@ -117,16 +146,19 @@ export function SimulationBaselinePanel({
           placeholder="Filter settings…"
           className="flex-1 rounded-md border border-ink-700 bg-ink-800 px-3 py-1.5 text-sm text-slate-200 placeholder:text-slate-500 focus:border-emerald-400 focus:outline-none"
         />
-        <label className="flex items-center gap-1.5 whitespace-nowrap text-xs text-slate-300">
-          <input
-            type="checkbox"
-            checked={conflictsOnly}
-            onChange={(e) => setConflictsOnly(e.target.checked)}
-            className="accent-amber-400"
-            disabled={simulation.conflicts.length === 0}
-          />
-          Conflicts only
-        </label>
+        <select
+          value={view}
+          onChange={(e) => setView(e.target.value as ViewFilter)}
+          className="rounded-md border border-ink-700 bg-ink-800 px-2 py-1.5 text-xs text-slate-300 focus:border-emerald-400 focus:outline-none"
+        >
+          <option value="all">All settings</option>
+          <option value="conflicts" disabled={simulation.conflicts.length === 0}>
+            Conflicts only ({simulation.conflicts.length})
+          </option>
+          <option value="overlaps" disabled={simulation.overlaps.length === 0}>
+            Policy overlap only ({simulation.overlaps.length})
+          </option>
+        </select>
         <a
           href={api.simulateExportUrl(groupIds, platform, deviceFilterId, "json")}
           className="rounded-md border border-ink-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-ink-800"
@@ -155,7 +187,9 @@ export function SimulationBaselinePanel({
             {rows.map((s, idx) => (
               <tr
                 key={`${s.settingId}-${idx}`}
-                className={`border-t border-ink-800 ${s.isConflict ? "bg-amber-500/10" : ""}`}
+                className={`border-t border-ink-800 ${
+                  s.rowKind === "conflict" ? "bg-amber-500/10" : s.rowKind === "overlap" ? "bg-sky-500/10" : ""
+                }`}
               >
                 <td className="px-3 py-2 text-slate-400">{s.cspArea}</td>
                 <td className="px-3 py-2 text-slate-200">{s.displayName}</td>
@@ -164,7 +198,8 @@ export function SimulationBaselinePanel({
                 </td>
                 <td className="px-3 py-2 text-slate-400">
                   {s.sourcePolicyName}
-                  {s.isConflict && <span className="ml-1.5 text-amber-400">⚠</span>}
+                  {s.rowKind === "conflict" && <span className="ml-1.5 text-amber-400">⚠</span>}
+                  {s.rowKind === "overlap" && <span className="ml-1.5 text-sky-400">⇄</span>}
                 </td>
               </tr>
             ))}

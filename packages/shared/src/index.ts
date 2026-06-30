@@ -69,11 +69,21 @@ export interface AutopilotProfile {
   assignedGroupIds: string[];
 }
 
+/** Two or more applied policies set the same CSP setting to DIFFERENT values -- a real disagreement. */
 export interface ConflictingSetting {
   settingId: string;
   cspArea: string;
   displayName: string;
   values: { value: string; sourcePolicyId: string; sourcePolicyName: string; sourceKind: PolicyKind }[];
+}
+
+/** Two or more applied policies set the same CSP setting to the SAME value -- redundant, not a disagreement. */
+export interface PolicyOverlap {
+  settingId: string;
+  cspArea: string;
+  displayName: string;
+  value: string;
+  sourcePolicies: { sourcePolicyId: string; sourcePolicyName: string; sourceKind: PolicyKind }[];
 }
 
 export interface BaselineSetting extends CspSetting {
@@ -120,4 +130,5 @@ export interface SimulationResult {
   excludedPolicies: SimulationPolicy[];
   settings: BaselineSetting[];
   conflicts: ConflictingSetting[];
+  overlaps: PolicyOverlap[];
 }
