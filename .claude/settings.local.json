@@ -22,7 +22,8 @@
       "Bash(pkill -f vite)",
       "Bash(curl -s \"localhost:4000/api/simulate?platform=windows\")",
       "Bash(curl -s \"localhost:4000/api/simulate?platform=macos\")",
-      "Bash(curl -s \"localhost:4000/api/simulate?platform=ios\")"
+      "Bash(curl -s \"localhost:4000/api/simulate?platform=ios\")",
+      "Bash(platforms)"
     ]
   }
 }
