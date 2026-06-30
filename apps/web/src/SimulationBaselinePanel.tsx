@@ -70,6 +70,32 @@ export function SimulationBaselinePanel({
         </div>
       )}
 
+      {simulation.conflicts.length > 0 && (
+        <div className="border-b border-ink-700 bg-amber-500/5 p-3">
+          <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-300">
+            Conflicting settings — two or more applied policies disagree (the table below only shows one value per
+            setting)
+          </div>
+          <ul className="space-y-2">
+            {simulation.conflicts.map((c) => (
+              <li key={c.settingId} className="text-xs">
+                <div className="font-medium text-amber-300">
+                  {c.cspArea} — {c.displayName}
+                </div>
+                <ul className="ml-3 mt-0.5 space-y-0.5">
+                  {c.values.map((v, idx) => (
+                    <li key={idx} className="text-slate-400">
+                      <span className="text-slate-200">{v.sourcePolicyName}</span> sets{" "}
+                      <span className="break-all text-slate-300">{v.value}</span>
+                    </li>
+                  ))}
+                </ul>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="flex gap-2 border-b border-ink-700 p-3">
         <input
           value={filter}
