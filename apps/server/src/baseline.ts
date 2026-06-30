@@ -53,6 +53,7 @@ function mergeSettings(policies: IntunePolicy[]): { settings: BaselineSetting[];
           value: e.value,
           sourcePolicyId: e.sourcePolicyId,
           sourcePolicyName: e.sourcePolicyName,
+          sourceKind: e.sourceKind,
         })),
       });
     }
@@ -146,15 +147,23 @@ export function computeSimulation(
 
 export function simulationToCsv(simulation: SimulationResult): string {
   const header = ["CSP Area", "Setting", "Value", "Source Policy", "Policy Type", "Conflict"];
-  const conflictIds = new Set(simulation.conflicts.map((c) => c.settingId));
-  const rows = simulation.settings.map((s) => [
-    s.cspArea,
-    s.displayName,
-    s.value,
-    s.sourcePolicyName,
-    s.sourceKind,
-    conflictIds.has(s.settingId) ? "yes" : "no",
-  ]);
+  const conflictsBySettingId = new Map(simulation.conflicts.map((c) => [c.settingId, c]));
+
+  const rows: string[][] = [];
+  for (const s of simulation.settings) {
+    const conflict = conflictsBySettingId.get(s.settingId);
+    if (!conflict) {
+      rows.push([s.cspArea, s.displayName, s.value, s.sourcePolicyName, s.sourceKind, "no"]);
+      continue;
+    }
+    // One row per conflicting policy/value, all sharing the same setting --
+    // so both sides of the disagreement are visible directly in the export,
+    // not just flagged on a single row.
+    for (const v of conflict.values) {
+      rows.push([conflict.cspArea, conflict.displayName, v.value, v.sourcePolicyName, v.sourceKind, "yes"]);
+    }
+  }
+
   const escape = (v: string) => `"${v.replace(/"/g, '""')}"`;
   return [header, ...rows].map((row) => row.map(escape).join(",")).join("\n");
 }

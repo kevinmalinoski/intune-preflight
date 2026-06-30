@@ -56,7 +56,7 @@ export interface ConflictingSetting {
   settingId: string;
   cspArea: string;
   displayName: string;
-  values: { value: string; sourcePolicyId: string; sourcePolicyName: string }[];
+  values: { value: string; sourcePolicyId: string; sourcePolicyName: string; sourceKind: PolicyKind }[];
 }
 
 export interface BaselineSetting extends CspSetting {
