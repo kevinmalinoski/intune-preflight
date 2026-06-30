@@ -110,12 +110,29 @@ async function fetchCompliancePolicies(): Promise<IntunePolicy[]> {
   return result;
 }
 
+/**
+ * Settings Catalog also surfaces enrollment-time configuration (Device
+ * Preparation policies, ESP, etc.) through the same `configurationPolicies`
+ * endpoint. These aren't device baseline settings -- they only run once
+ * during enrollment -- and Intune tags them distinctly via `technologies`
+ * and `templateReference.templateFamily`, so they can be filtered out
+ * without relying on the policy's display name.
+ */
+function isEnrollmentTimePolicy(item: Record<string, unknown>): boolean {
+  const technologies = ((item.technologies as string) ?? "").toLowerCase();
+  const templateFamily = (
+    (item.templateReference as Record<string, unknown> | undefined)?.templateFamily as string | undefined
+  )?.toLowerCase();
+  return technologies.includes("enrollment") || templateFamily === "enrollmentconfiguration";
+}
+
 async function fetchSettingsCatalogPolicies(): Promise<IntunePolicy[]> {
   const { items, useBeta } = await getCollectionWithBetaFallback<Record<string, unknown>>(
     "/deviceManagement/configurationPolicies"
   );
   const result: IntunePolicy[] = [];
   for (const item of items) {
+    if (isEnrollmentTimePolicy(item)) continue;
     const id = item.id as string;
     const displayName = (item.name as string) ?? (item.displayName as string) ?? "Untitled";
     const [assignments, settingEntries] = await Promise.all([
