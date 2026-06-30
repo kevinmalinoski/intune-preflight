@@ -1,6 +1,37 @@
-import { useState } from "react";
-import type { Platform, SimulationResult } from "@intune-baseline/shared";
+import { useMemo, useState } from "react";
+import type { BaselineSetting, Platform, SimulationResult } from "@intune-baseline/shared";
 import { api } from "./api.ts";
+
+interface DisplayRow extends BaselineSetting {
+  isConflict: boolean;
+}
+
+/** Expands conflicting settings into one row per disagreeing policy, instead of hiding all but the first. */
+function buildRows(simulation: SimulationResult): DisplayRow[] {
+  const conflictsBySettingId = new Map(simulation.conflicts.map((c) => [c.settingId, c]));
+  const rows: DisplayRow[] = [];
+
+  for (const s of simulation.settings) {
+    const conflict = conflictsBySettingId.get(s.settingId);
+    if (!conflict) {
+      rows.push({ ...s, isConflict: false });
+      continue;
+    }
+    for (const v of conflict.values) {
+      rows.push({
+        settingId: s.settingId,
+        cspArea: conflict.cspArea,
+        displayName: conflict.displayName,
+        value: v.value,
+        sourcePolicyId: v.sourcePolicyId,
+        sourcePolicyName: v.sourcePolicyName,
+        sourceKind: v.sourceKind,
+        isConflict: true,
+      });
+    }
+  }
+  return rows;
+}
 
 export function SimulationBaselinePanel({
   simulation,
@@ -14,13 +45,16 @@ export function SimulationBaselinePanel({
   onClose: () => void;
 }) {
   const [filter, setFilter] = useState("");
-  const conflictIds = new Set(simulation.conflicts.map((c) => c.settingId));
-  const rows = simulation.settings.filter(
+  const [conflictsOnly, setConflictsOnly] = useState(false);
+
+  const allRows = useMemo(() => buildRows(simulation), [simulation]);
+  const rows = allRows.filter(
     (s) =>
-      !filter ||
-      s.displayName.toLowerCase().includes(filter.toLowerCase()) ||
-      s.cspArea.toLowerCase().includes(filter.toLowerCase()) ||
-      s.sourcePolicyName.toLowerCase().includes(filter.toLowerCase())
+      (!conflictsOnly || s.isConflict) &&
+      (!filter ||
+        s.displayName.toLowerCase().includes(filter.toLowerCase()) ||
+        s.cspArea.toLowerCase().includes(filter.toLowerCase()) ||
+        s.sourcePolicyName.toLowerCase().includes(filter.toLowerCase()))
   );
 
   return (
@@ -70,39 +104,23 @@ export function SimulationBaselinePanel({
         </div>
       )}
 
-      {simulation.conflicts.length > 0 && (
-        <div className="border-b border-ink-700 bg-amber-500/5 p-3">
-          <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-300">
-            Conflicting settings — two or more applied policies disagree (the table below only shows one value per
-            setting)
-          </div>
-          <ul className="space-y-2">
-            {simulation.conflicts.map((c) => (
-              <li key={c.settingId} className="text-xs">
-                <div className="font-medium text-amber-300">
-                  {c.cspArea} — {c.displayName}
-                </div>
-                <ul className="ml-3 mt-0.5 space-y-0.5">
-                  {c.values.map((v, idx) => (
-                    <li key={idx} className="text-slate-400">
-                      <span className="text-slate-200">{v.sourcePolicyName}</span> sets{" "}
-                      <span className="break-all text-slate-300">{v.value}</span>
-                    </li>
-                  ))}
-                </ul>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <div className="flex gap-2 border-b border-ink-700 p-3">
+      <div className="flex flex-wrap items-center gap-2 border-b border-ink-700 p-3">
         <input
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
           placeholder="Filter settings…"
           className="flex-1 rounded-md border border-ink-700 bg-ink-800 px-3 py-1.5 text-sm text-slate-200 placeholder:text-slate-500 focus:border-emerald-400 focus:outline-none"
         />
+        <label className="flex items-center gap-1.5 whitespace-nowrap text-xs text-slate-300">
+          <input
+            type="checkbox"
+            checked={conflictsOnly}
+            onChange={(e) => setConflictsOnly(e.target.checked)}
+            className="accent-amber-400"
+            disabled={simulation.conflicts.length === 0}
+          />
+          Conflicts only
+        </label>
         <a
           href={api.simulateExportUrl(groupIds, platform, "json")}
           className="rounded-md border border-ink-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-ink-800"
@@ -128,14 +146,20 @@ export function SimulationBaselinePanel({
             </tr>
           </thead>
           <tbody>
-            {rows.map((s) => (
-              <tr key={s.settingId} className={`border-t border-ink-800 ${conflictIds.has(s.settingId) ? "bg-amber-500/10" : ""}`}>
+            {rows.map((s, idx) => (
+              <tr
+                key={`${s.settingId}-${idx}`}
+                className={`border-t border-ink-800 ${s.isConflict ? "bg-amber-500/10" : ""}`}
+              >
                 <td className="px-3 py-2 text-slate-400">{s.cspArea}</td>
                 <td className="px-3 py-2 text-slate-200">{s.displayName}</td>
                 <td className="max-w-[12rem] truncate px-3 py-2 text-slate-300" title={s.value}>
                   {s.value}
                 </td>
-                <td className="px-3 py-2 text-slate-400">{s.sourcePolicyName}</td>
+                <td className="px-3 py-2 text-slate-400">
+                  {s.sourcePolicyName}
+                  {s.isConflict && <span className="ml-1.5 text-amber-400">⚠</span>}
+                </td>
               </tr>
             ))}
             {rows.length === 0 && (
