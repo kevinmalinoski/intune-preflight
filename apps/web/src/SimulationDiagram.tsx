@@ -8,6 +8,7 @@ const KIND_COLOR: Record<string, string> = {
   settingsCatalog: "#a78bfa",
   compliancePolicy: "#f97316",
   adminTemplate: "#facc15",
+  platformScript: "#34d399",
 };
 
 const SOURCE_STYLE: Record<SimulationGroup["source"], { border: string; bg: string; label: string }> = {

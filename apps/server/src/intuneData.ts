@@ -1,6 +1,7 @@
-import type { AutopilotProfile, IntuneGroup, IntunePolicy, PolicyKind } from "@intune-baseline/shared";
+import type { AutopilotProfile, IntuneGroup, IntunePolicy } from "@intune-baseline/shared";
 import { graphGetCollection } from "./graphClient.js";
 import {
+  flattenScriptToCspSettings,
   flattenSettingsCatalogEntries,
   flattenToCspSettings,
   parseAssignmentTarget,
@@ -194,6 +195,78 @@ async function fetchAdminTemplates(): Promise<IntunePolicy[]> {
   return result;
 }
 
+interface RawGroupAssignment {
+  targetGroupId?: string;
+}
+
+/**
+ * macOS shell scripts (`deviceShellScripts`) don't support the standard
+ * assignment model -- no excludes, no All Devices/All Users -- only plain
+ * group targeting via a separate `groupAssignments` sub-resource shaped as
+ * `{ targetGroupId }` rather than `{ target: {...} }`.
+ */
+function resolveGroupAssignmentIds(assignments: RawGroupAssignment[]): string[] {
+  return [...new Set(assignments.map((a) => a.targetGroupId).filter((id): id is string => Boolean(id)))];
+}
+
+/**
+ * Platform Scripts: Windows PowerShell scripts (`deviceManagementScripts`,
+ * standard assignment model) and macOS shell scripts (`deviceShellScripts`,
+ * group-only assignment via `groupAssignments`). Deliberately excludes
+ * Proactive Remediations (`deviceHealthScripts`, detection+remediation
+ * script pairs) -- a separate, broader feature out of scope for now.
+ */
+async function fetchPlatformScripts(): Promise<IntunePolicy[]> {
+  const sources: { path: string; platform: "windows" | "macos"; assignmentStyle: "standard" | "groupOnly" }[] = [
+    { path: "/deviceManagement/deviceManagementScripts", platform: "windows", assignmentStyle: "standard" },
+    { path: "/deviceManagement/deviceShellScripts", platform: "macos", assignmentStyle: "groupOnly" },
+  ];
+
+  const result: IntunePolicy[] = [];
+  for (const source of sources) {
+    let items: Record<string, unknown>[];
+    let useBeta: boolean;
+    try {
+      ({ items, useBeta } = await getCollectionWithBetaFallback<Record<string, unknown>>(source.path));
+    } catch (err) {
+      // Platform scripts require an extra Graph permission
+      // (DeviceManagementScripts.Read.All) beyond the core set. Treat this
+      // as optional rather than failing the whole tenant load.
+      console.warn(
+        `Skipping ${source.path}: ${(err as Error).message}. Grant the app DeviceManagementScripts.Read.All permission to enable Platform Scripts.`
+      );
+      continue;
+    }
+    for (const item of items) {
+      const id = item.id as string;
+      const displayName = (item.displayName as string) ?? (item.fileName as string) ?? "Untitled";
+
+      let includedGroupIds: string[];
+      let excludedGroupIds: string[];
+      if (source.assignmentStyle === "groupOnly") {
+        const assignments = await graphGetCollection<RawGroupAssignment>(`${source.path}/${id}/groupAssignments`, useBeta);
+        includedGroupIds = resolveGroupAssignmentIds(assignments);
+        excludedGroupIds = [];
+      } else {
+        const assignments = await graphGetCollection<RawAssignment>(`${source.path}/${id}/assignments`, useBeta);
+        ({ includedGroupIds, excludedGroupIds } = resolveAssignmentGroupIds(assignments));
+      }
+
+      result.push({
+        id,
+        kind: "platformScript",
+        displayName,
+        description: item.description as string | undefined,
+        platform: source.platform,
+        settings: flattenScriptToCspSettings(item, displayName),
+        assignedGroupIds: includedGroupIds,
+        excludedGroupIds,
+      });
+    }
+  }
+  return result;
+}
+
 async function fetchAutopilotProfiles(): Promise<AutopilotProfile[]> {
   let items: Record<string, unknown>[];
   let useBeta: boolean;
@@ -235,15 +308,17 @@ export interface TenantData {
 
 export async function loadTenantData(): Promise<TenantData> {
   return cache.getOrFetch("tenant-data", async () => {
-    const [deviceConfigs, compliance, settingsCatalog, adminTemplates, autopilotProfiles] = await Promise.all([
-      fetchDeviceConfigurations(),
-      fetchCompliancePolicies(),
-      fetchSettingsCatalogPolicies(),
-      fetchAdminTemplates(),
-      fetchAutopilotProfiles(),
-    ]);
+    const [deviceConfigs, compliance, settingsCatalog, adminTemplates, platformScripts, autopilotProfiles] =
+      await Promise.all([
+        fetchDeviceConfigurations(),
+        fetchCompliancePolicies(),
+        fetchSettingsCatalogPolicies(),
+        fetchAdminTemplates(),
+        fetchPlatformScripts(),
+        fetchAutopilotProfiles(),
+      ]);
 
-    const policies = [...deviceConfigs, ...compliance, ...settingsCatalog, ...adminTemplates];
+    const policies = [...deviceConfigs, ...compliance, ...settingsCatalog, ...adminTemplates, ...platformScripts];
 
     const groupIds = new Set<string>();
     for (const p of policies) {
@@ -285,10 +360,3 @@ export async function loadTenantData(): Promise<TenantData> {
 export function clearTenantDataCache() {
   cache.clear();
 }
-
-export const PolicyKindLabel: Record<PolicyKind, string> = {
-  deviceConfiguration: "Device Configuration",
-  settingsCatalog: "Settings Catalog",
-  compliancePolicy: "Compliance Policy",
-  adminTemplate: "Administrative Template",
-};

@@ -23,7 +23,8 @@
       "Bash(curl -s \"localhost:4000/api/simulate?platform=windows\")",
       "Bash(curl -s \"localhost:4000/api/simulate?platform=macos\")",
       "Bash(curl -s \"localhost:4000/api/simulate?platform=ios\")",
-      "Bash(platforms)"
+      "Bash(platforms)",
+      "Bash(pkill -f \"tsx.*index.ts\" 2>/dev/null; rm /tmp/inspect.mjs)"
     ]
   }
 }

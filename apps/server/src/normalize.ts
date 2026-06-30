@@ -91,6 +91,38 @@ export function flattenSettingsCatalogEntries(
   return settings;
 }
 
+/**
+ * Platform Scripts (Windows PowerShell `deviceManagementScripts`, macOS shell
+ * `deviceShellScripts`) don't have CSP-style settings -- they're a script
+ * plus a handful of execution options. `scriptContent` is base64-encoded in
+ * Graph and needs decoding to be human-readable; everything else is flattened
+ * the same schema-agnostic way as other policy types.
+ */
+export function flattenScriptToCspSettings(raw: Record<string, unknown>, cspArea: string): CspSetting[] {
+  const settings: CspSetting[] = [];
+  for (const [key, value] of Object.entries(raw)) {
+    if (METADATA_KEYS.has(key)) continue;
+    let stringValue: string | undefined;
+    if (key === "scriptContent" && typeof value === "string") {
+      try {
+        stringValue = Buffer.from(value, "base64").toString("utf-8");
+      } catch {
+        stringValue = value;
+      }
+    } else {
+      stringValue = stringifyValue(value);
+    }
+    if (stringValue === undefined) continue;
+    settings.push({
+      settingId: `${cspArea}:${key}`,
+      cspArea,
+      displayName: key === "scriptContent" ? "Script content" : friendlyLabel(key),
+      value: stringValue,
+    });
+  }
+  return settings;
+}
+
 export interface AssignmentTarget {
   groupId?: string;
   isAllDevices?: boolean;
@@ -152,4 +184,5 @@ export const KIND_LABELS: Record<PolicyKind, string> = {
   settingsCatalog: "Settings Catalog",
   compliancePolicy: "Compliance Policy",
   adminTemplate: "Administrative Template",
+  platformScript: "Platform Script",
 };

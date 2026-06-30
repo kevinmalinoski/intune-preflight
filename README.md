@@ -31,6 +31,7 @@ The server authenticates to Microsoft Graph using an Azure AD **app registration
    - `Group.Read.All`
    - `Device.Read.All`
    - `DeviceManagementServiceConfig.Read.All` (optional — only needed to discover groups targeted by Windows Autopilot deployment profiles; the app skips this gracefully if omitted)
+   - `DeviceManagementScripts.Read.All` (optional — only needed for Platform Scripts, i.e. Windows PowerShell / macOS shell scripts; the app skips them gracefully if omitted. Proactive Remediations are intentionally not included.)
 4. Click **Grant admin consent** for your tenant.
 5. Under **Certificates & secrets → New client secret**, create a secret and copy its value immediately (it's only shown once).
 6. Note your **Application (client) ID**, **Directory (tenant) ID**, and the **client secret** value.

@@ -5,7 +5,8 @@ export type PolicyKind =
   | "deviceConfiguration"
   | "settingsCatalog"
   | "compliancePolicy"
-  | "adminTemplate";
+  | "adminTemplate"
+  | "platformScript";
 
 /** Target OS platform for a policy. "other" covers resource types we can't confidently classify. */
 export type Platform = "windows" | "macos" | "ios" | "android" | "other";
