@@ -108,6 +108,47 @@ function parseCatalogDefinitionId(definitionId: string): { area: string; name: s
 }
 
 /**
+ * A Settings Catalog *choice* value is itself an option id of the form
+ * "<settingDefinitionId>_<option>" (e.g. "..._allowautoupdate_3", "..._block").
+ * Strip the shared definition prefix so the value shows just the selected
+ * option ("3", "block") rather than the full CSP string. (Fully human option
+ * labels would require a separate settings-catalog definition lookup.)
+ */
+function cleanChoiceOptionId(optionId: string, definitionId: string): string {
+  if (definitionId && optionId.startsWith(definitionId)) {
+    return optionId.slice(definitionId.length).replace(/^_+/, "") || optionId;
+  }
+  const parts = optionId.split("_");
+  return parts[parts.length - 1] || optionId;
+}
+
+/**
+ * Extracts a human-readable value from a Settings Catalog settingInstance,
+ * which comes in several shapes. Choice settings carry an option-id string
+ * (cleaned above); simple settings a real scalar; simple/group collections a
+ * list. Without this, choice settings leak the raw CSP option id while simple
+ * settings show a normal value -- the inconsistency this fixes.
+ */
+function extractCatalogValue(instance: Record<string, unknown>, definitionId: string): string | undefined {
+  const choice = instance["choiceSettingValue"] as { value?: unknown } | undefined;
+  if (choice && typeof choice.value === "string") return cleanChoiceOptionId(choice.value, definitionId);
+
+  const simple = instance["simpleSettingValue"] as { value?: unknown } | undefined;
+  if (simple && "value" in simple) return stringifyValue(simple.value);
+
+  const simpleCollection = instance["simpleSettingCollectionValue"] as Array<{ value?: unknown }> | undefined;
+  if (Array.isArray(simpleCollection)) {
+    const values = simpleCollection.map((v) => stringifyValue(v?.value)).filter((v): v is string => v !== undefined);
+    return values.length ? values.join(", ") : undefined;
+  }
+
+  const groupCollection = instance["groupSettingCollectionValue"] as unknown[] | undefined;
+  if (Array.isArray(groupCollection)) return groupCollection.length ? `${groupCollection.length} configured item(s)` : undefined;
+
+  return stringifyValue(instance["value"] ?? instance);
+}
+
+/**
  * Settings Catalog policies expose settings via a separate /settings
  * sub-collection. Graph only returns settings that are actually configured
  * here (unlike legacy device configurations), so these merge cleanly. The
@@ -123,12 +164,7 @@ export function flattenSettingsCatalogEntries(
     const instance = entry.settingInstance;
     if (!instance) continue;
     const definitionId = (instance.settingDefinitionId as string) ?? "unknown";
-    const valueHolder =
-      (instance["choiceSettingValue"] as Record<string, unknown> | undefined) ??
-      (instance["simpleSettingValue"] as Record<string, unknown> | undefined) ??
-      (instance["groupSettingCollectionValue"] as unknown) ??
-      instance;
-    const stringValue = stringifyValue((valueHolder as Record<string, unknown>)?.value ?? valueHolder);
+    const stringValue = extractCatalogValue(instance, definitionId);
     if (stringValue === undefined) continue;
     const { area, name } = parseCatalogDefinitionId(definitionId);
     settings.push({
