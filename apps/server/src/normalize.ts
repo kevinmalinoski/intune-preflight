@@ -40,6 +40,12 @@ function stringifyValue(value: unknown): string | undefined {
   return undefined;
 }
 
+/** Strips the `#microsoft.graph.` prefix from an @odata.type, e.g. -> "windowsUpdateForBusinessConfiguration". */
+function odataTypeKey(raw: Record<string, unknown>): string {
+  const odataType = (raw["@odata.type"] as string | undefined) ?? "";
+  return odataType.replace(/^#?microsoft\.graph\./i, "") || "deviceConfiguration";
+}
+
 /**
  * Flattens a raw Graph device-management resource (deviceConfiguration,
  * deviceCompliancePolicy, etc.) into a normalized list of CSP-level settings.
@@ -47,15 +53,25 @@ function stringifyValue(value: unknown): string | undefined {
  * top-level field, so flattening the object is a reasonable, schema-agnostic
  * way to get "every CSP setting in one place" without hand-mapping every
  * Intune profile type.
+ *
+ * The settingId is keyed on the resource's @odata.type plus the property name --
+ * NOT the policy's display name. Two policies of the same type that set the same
+ * property therefore share one settingId, which is what lets the merge step flag
+ * it as a conflict (different values) or overlap (same value). Keying on the
+ * policy name instead makes every setting unique per policy and silently hides
+ * every cross-policy conflict -- e.g. two Windows Update rings targeting the same
+ * device would never be reported as conflicting.
  */
-export function flattenToCspSettings(raw: Record<string, unknown>, cspArea: string): CspSetting[] {
+export function flattenToCspSettings(raw: Record<string, unknown>): CspSetting[] {
+  const typeKey = odataTypeKey(raw);
+  const cspArea = friendlyLabel(typeKey);
   const settings: CspSetting[] = [];
   for (const [key, value] of Object.entries(raw)) {
     if (METADATA_KEYS.has(key)) continue;
     const stringValue = stringifyValue(value);
     if (stringValue === undefined) continue;
     settings.push({
-      settingId: `${cspArea}:${key}`,
+      settingId: `${typeKey}:${key}`,
       cspArea,
       displayName: friendlyLabel(key),
       value: stringValue,
