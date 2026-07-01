@@ -10,7 +10,7 @@ import type {
   SimulationGroup,
   SimulationPolicy,
   SimulationResult,
-} from "@intune-baseline/shared";
+} from "@intune-preflight/shared";
 import type { TenantData } from "./intuneData.js";
 import { ruleImplies, VIRTUAL_GROUP_ALL_DEVICES, VIRTUAL_GROUP_ALL_USERS } from "./normalize.js";
 

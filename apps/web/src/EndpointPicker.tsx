@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import { groupTagMatchesRule, isGroupTagRule, isDefaultAutopilotJoinedRule } from "@intune-baseline/shared";
-import type { AssignmentFilter, GroupSummary, Platform } from "@intune-baseline/shared";
+import { groupTagMatchesRule, isGroupTagRule, isDefaultAutopilotJoinedRule } from "@intune-preflight/shared";
+import type { AssignmentFilter, GroupSummary, Platform } from "@intune-preflight/shared";
 
 const PLATFORM_OPTIONS: { value: Platform; label: string }[] = [
   { value: "windows", label: "Windows" },

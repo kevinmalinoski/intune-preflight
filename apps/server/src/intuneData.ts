@@ -1,4 +1,4 @@
-import type { AssignmentFilter, AssignmentFilterRef, AutopilotProfile, IntuneGroup, IntunePolicy } from "@intune-baseline/shared";
+import type { AssignmentFilter, AssignmentFilterRef, AutopilotProfile, IntuneGroup, IntunePolicy } from "@intune-preflight/shared";
 import { graphGetCollection } from "./graphClient.js";
 import {
   flattenScriptToCspSettings,

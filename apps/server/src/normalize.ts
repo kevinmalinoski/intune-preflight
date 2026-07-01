@@ -1,4 +1,4 @@
-import type { CspSetting, PolicyKind, Platform } from "@intune-baseline/shared";
+import type { CspSetting, PolicyKind, Platform } from "@intune-preflight/shared";
 
 // Metadata fields present on most Graph device-management resources that aren't
 // actual configuration settings -- excluded when flattening a policy into CSP settings.

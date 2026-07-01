@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { ReactFlow, Background, Controls, MiniMap, type Node, type Edge, Handle, Position } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import type { SimulationGroup, SimulationResult } from "@intune-baseline/shared";
+import type { SimulationGroup, SimulationResult } from "@intune-preflight/shared";
 
 const KIND_COLOR: Record<string, string> = {
   deviceConfiguration: "#38bdf8",

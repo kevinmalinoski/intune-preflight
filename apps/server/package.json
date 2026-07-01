@@ -1,5 +1,5 @@
 {
-  "name": "@intune-baseline/server",
+  "name": "@intune-preflight/server",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,7 +12,7 @@
   "dependencies": {
     "@azure/msal-node": "^2.16.0",
     "@fastify/cors": "^10.0.1",
-    "@intune-baseline/shared": "*",
+    "@intune-preflight/shared": "*",
     "dotenv": "^17.4.2",
     "fastify": "^5.1.0"
   },

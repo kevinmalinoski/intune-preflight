@@ -1,4 +1,4 @@
-import type { AssignmentFilter, GroupSummary, Platform, SimulationResult } from "@intune-baseline/shared";
+import type { AssignmentFilter, GroupSummary, Platform, SimulationResult } from "@intune-preflight/shared";
 
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(`/api${path}`);

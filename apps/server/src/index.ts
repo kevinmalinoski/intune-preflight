@@ -1,6 +1,6 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
-import type { Platform } from "@intune-baseline/shared";
+import type { Platform } from "@intune-preflight/shared";
 import { config } from "./config.js";
 import { loadTenantData, clearTenantDataCache } from "./intuneData.js";
 import { computeSimulation, listAssignmentFilters, listGroupSummaries, simulationToCsv } from "./baseline.js";

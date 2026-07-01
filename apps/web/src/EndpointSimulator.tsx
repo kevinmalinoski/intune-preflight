@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { groupTagMatchesRule, isGroupTagRule, isDefaultAutopilotJoinedRule } from "@intune-baseline/shared";
-import type { AssignmentFilter, GroupSummary, Platform, SimulationResult } from "@intune-baseline/shared";
+import { groupTagMatchesRule, isGroupTagRule, isDefaultAutopilotJoinedRule } from "@intune-preflight/shared";
+import type { AssignmentFilter, GroupSummary, Platform, SimulationResult } from "@intune-preflight/shared";
 import { api } from "./api.ts";
 import { EndpointPicker } from "./EndpointPicker.tsx";
 import { SimulationDiagram } from "./SimulationDiagram.tsx";

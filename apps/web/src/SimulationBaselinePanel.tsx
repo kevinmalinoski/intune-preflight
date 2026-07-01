@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { BaselineSetting, Platform, SimulationResult } from "@intune-baseline/shared";
+import type { BaselineSetting, Platform, SimulationResult } from "@intune-preflight/shared";
 import { api } from "./api.ts";
 
 type RowKind = "normal" | "conflict" | "overlap";
