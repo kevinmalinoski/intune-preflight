@@ -169,7 +169,7 @@ async function fetchSettingsCatalogPolicies(): Promise<IntunePolicy[]> {
       displayName,
       description: item.description as string | undefined,
       platform: platformFromSettingsCatalog(item.platforms as string | undefined),
-      settings: flattenSettingsCatalogEntries(settingEntries, displayName),
+      settings: flattenSettingsCatalogEntries(settingEntries),
       assignedGroupIds: includedGroupIds,
       excludedGroupIds,
       assignmentFilters,
@@ -188,17 +188,26 @@ async function fetchAdminTemplates(): Promise<IntunePolicy[]> {
     const displayName = (item.displayName as string) ?? "Untitled";
     const [assignments, definitionValues] = await Promise.all([
       graphGetCollection<RawAssignment>(`/deviceManagement/groupPolicyConfigurations/${id}/assignments`, useBeta),
+      // Expand the ADMX definition so each setting carries its real name and
+      // category path (a genuine CSP-style area) instead of a bare index, and
+      // so its settingId keys on the definition -- letting the same ADMX
+      // setting configured by two policies be detected as a conflict/overlap.
       graphGetCollection<Record<string, unknown>>(
-        `/deviceManagement/groupPolicyConfigurations/${id}/definitionValues`,
+        `/deviceManagement/groupPolicyConfigurations/${id}/definitionValues?$expand=definition`,
         useBeta
       ),
     ]);
-    const settings = definitionValues.map((dv, idx) => ({
-      settingId: (dv.id as string) ?? `${id}-${idx}`,
-      cspArea: displayName,
-      displayName: `Policy setting ${idx + 1}`,
-      value: dv.enabled ? "Enabled" : "Disabled",
-    }));
+    const settings = definitionValues.map((dv, idx) => {
+      const def = (dv.definition as Record<string, unknown> | undefined) ?? {};
+      const defId = (def.id as string) ?? (dv.id as string) ?? `${id}-${idx}`;
+      const category = ((def.categoryPath as string) ?? "").replace(/^\\+/, "").trim();
+      return {
+        settingId: `adminTemplate:${defId}`,
+        cspArea: category || "Administrative Templates",
+        displayName: (def.displayName as string) ?? `Policy setting ${idx + 1}`,
+        value: dv.enabled ? "Enabled" : "Disabled",
+      };
+    });
     const { includedGroupIds, excludedGroupIds, assignmentFilters } = resolveAssignmentGroupIds(assignments);
     result.push({
       id,
@@ -281,7 +290,7 @@ async function fetchPlatformScripts(): Promise<IntunePolicy[]> {
         displayName,
         description: item.description as string | undefined,
         platform: source.platform,
-        settings: flattenScriptToCspSettings(item, displayName),
+        settings: flattenScriptToCspSettings(item, id),
         assignedGroupIds: includedGroupIds,
         excludedGroupIds,
         assignmentFilters,

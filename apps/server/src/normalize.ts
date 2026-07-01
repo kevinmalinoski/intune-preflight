@@ -70,6 +70,11 @@ export function flattenToCspSettings(raw: Record<string, unknown>): CspSetting[]
     if (METADATA_KEYS.has(key)) continue;
     const stringValue = stringifyValue(value);
     if (stringValue === undefined) continue;
+    // "notConfigured" is Intune's sentinel for "this legacy setting isn't set".
+    // Dropping it keeps unset defaults out of the baseline and, crucially, out
+    // of conflict/overlap detection -- a policy that leaves a setting unset does
+    // not actually disagree with one that sets it.
+    if (stringValue.toLowerCase() === "notconfigured") continue;
     settings.push({
       settingId: `${typeKey}:${key}`,
       cspArea,
@@ -80,10 +85,38 @@ export function flattenToCspSettings(raw: Record<string, unknown>): CspSetting[]
   return settings;
 }
 
-/** Settings Catalog policies expose settings via a separate /settings sub-collection. */
+function titleCase(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/**
+ * Derives a human CSP area and setting name from a Settings Catalog
+ * settingDefinitionId, e.g.
+ *   device_vendor_msft_policy_config_update_configuredeadlineforqualityupdates
+ * -> { area: "Update", name: "configuredeadlineforqualityupdates" }.
+ * The boilerplate scope/vendor tokens are dropped; the first remaining segment
+ * is the CSP area and the rest is the setting name. The setting names in these
+ * ids are lowercase-concatenated with no word boundaries, so `name` can't be
+ * perfectly prettified -- but it's accurate and, together with the full
+ * definitionId used as settingId, uniquely identifies the setting.
+ */
+function parseCatalogDefinitionId(definitionId: string): { area: string; name: string } {
+  const boilerplate = new Set(["device", "user", "vendor", "msft", "policy", "config", "admx"]);
+  const parts = definitionId.split("_").filter((p) => p && !boilerplate.has(p.toLowerCase()));
+  if (parts.length === 0) return { area: "Settings Catalog", name: definitionId };
+  return { area: titleCase(parts[0]), name: parts.length > 1 ? parts.slice(1).join(" ") : parts[0] };
+}
+
+/**
+ * Settings Catalog policies expose settings via a separate /settings
+ * sub-collection. Graph only returns settings that are actually configured
+ * here (unlike legacy device configurations), so these merge cleanly. The
+ * settingDefinitionId is a stable, policy-independent id -- used directly as
+ * the settingId so the same setting across policies is detected as a conflict
+ * or overlap -- and also yields the CSP area and setting name for display.
+ */
 export function flattenSettingsCatalogEntries(
-  entries: Array<{ settingInstance?: Record<string, unknown> }>,
-  cspArea: string
+  entries: Array<{ settingInstance?: Record<string, unknown> }>
 ): CspSetting[] {
   const settings: CspSetting[] = [];
   for (const entry of entries) {
@@ -97,10 +130,11 @@ export function flattenSettingsCatalogEntries(
       instance;
     const stringValue = stringifyValue((valueHolder as Record<string, unknown>)?.value ?? valueHolder);
     if (stringValue === undefined) continue;
+    const { area, name } = parseCatalogDefinitionId(definitionId);
     settings.push({
       settingId: definitionId,
-      cspArea,
-      displayName: definitionId.split("_").slice(-2).join(" "),
+      cspArea: area,
+      displayName: name,
       value: stringValue,
     });
   }
@@ -113,8 +147,13 @@ export function flattenSettingsCatalogEntries(
  * plus a handful of execution options. `scriptContent` is base64-encoded in
  * Graph and needs decoding to be human-readable; everything else is flattened
  * the same schema-agnostic way as other policy types.
+ *
+ * settingId is namespaced with the policy id so two unrelated scripts never
+ * collapse into one setting -- scripts don't "conflict" the way a shared CSP
+ * setting does, and treating identical run options across different scripts as
+ * an overlap would just be noise.
  */
-export function flattenScriptToCspSettings(raw: Record<string, unknown>, cspArea: string): CspSetting[] {
+export function flattenScriptToCspSettings(raw: Record<string, unknown>, policyId: string): CspSetting[] {
   const settings: CspSetting[] = [];
   for (const [key, value] of Object.entries(raw)) {
     if (METADATA_KEYS.has(key)) continue;
@@ -130,8 +169,8 @@ export function flattenScriptToCspSettings(raw: Record<string, unknown>, cspArea
     }
     if (stringValue === undefined) continue;
     settings.push({
-      settingId: `${cspArea}:${key}`,
-      cspArea,
+      settingId: `platformScript:${policyId}:${key}`,
+      cspArea: "Platform Script",
       displayName: key === "scriptContent" ? "Script content" : friendlyLabel(key),
       value: stringValue,
     });
