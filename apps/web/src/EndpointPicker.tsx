@@ -45,16 +45,10 @@ export function EndpointPicker({
   );
 
   const trimmedGroupTag = groupTag.trim();
-  // A group scoped to a specific Autopilot GroupTag (via an [OrderID]-tagged
-  // devicePhysicalIds clause) can't represent this endpoint if the entered
-  // Group Tag doesn't match -- a real device only carries one GroupTag value.
-  // Groups with no such clause are never restricted.
+  // Surfaced as a badge next to each group's name (when detected) so a Group
+  // Tag match is visible at a glance -- selection itself is driven entirely
+  // by EndpointSimulator's auto-select effect, not by disabling anything here.
   const groupTagById = useMemo(() => new Map(groups.map((g) => [g.id, extractOrderIdGroupTag(g.membershipRule)])), [groups]);
-  const isGroupDisabled = (g: GroupSummary) => {
-    if (!trimmedGroupTag) return false;
-    const tag = groupTagById.get(g.id);
-    return Boolean(tag) && tag !== trimmedGroupTag;
-  };
 
   const platformFilters = useMemo(() => filters.filter((f) => f.platform === platform), [filters, platform]);
 
@@ -155,7 +149,7 @@ export function EndpointPicker({
                 onChange={(e) => onGroupTagChange(e.target.value)}
                 disabled={!isAutopilotDevice}
                 placeholder="Group Tag (optional)"
-                title="Auto-selects every dynamic group scoped to this exact Group Tag, in real time as you type, and drops any selected group scoped to a different one -- a real device only carries one GroupTag value."
+                title="Auto-selects every dynamic group scoped to this exact Group Tag, in real time as you type (marked with a tag badge below), and drops any selected group scoped to a different one -- a real device only carries one GroupTag value. Nothing is disabled; you can still adjust the selection manually."
                 className="mt-1.5 w-full rounded-md border border-ink-700 bg-ink-900 px-2 py-1 text-xs text-slate-200 placeholder:text-slate-500 focus:border-amber-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
               />
             </div>
@@ -216,29 +210,31 @@ export function EndpointPicker({
           />
           <div className="overflow-y-auto rounded-md border border-ink-700" style={{ maxHeight: "140px" }}>
             {filteredGroups.map((g) => {
-              const disabled = isGroupDisabled(g);
               const groupsTag = groupTagById.get(g.id);
-              const title = disabled
-                ? `Disabled — scoped to Group Tag "${groupsTag}", which doesn't match the entered Group Tag "${trimmedGroupTag}"`
+              const isTagMatch = Boolean(trimmedGroupTag) && groupsTag === trimmedGroupTag;
+              const title = groupsTag
+                ? `Group Tag: ${groupsTag}${g.membershipRule ? ` — rule: ${g.membershipRule}` : ""}`
                 : g.isDynamic
                   ? `Dynamic — rule: ${g.membershipRule ?? "unknown"}`
                   : undefined;
               return (
                 <label
                   key={g.id}
-                  className={`flex items-start gap-2 border-b border-ink-800 px-2.5 py-1.5 text-xs last:border-b-0 ${
-                    disabled ? "cursor-not-allowed opacity-40" : "cursor-pointer hover:bg-ink-800"
-                  }`}
+                  className="flex cursor-pointer items-start gap-2 border-b border-ink-800 px-2.5 py-1.5 text-xs last:border-b-0 hover:bg-ink-800"
                   title={title}
                 >
                   <input
                     type="checkbox"
                     checked={selectedGroupIds.includes(g.id)}
                     onChange={() => onToggleGroup(g.id)}
-                    disabled={disabled}
                     className="mt-0.5 shrink-0 accent-sky-400"
                   />
                   <span className="min-w-0 flex-1 break-words leading-snug text-slate-200">{g.displayName}</span>
+                  {isTagMatch && (
+                    <span className="shrink-0 rounded bg-amber-500/20 px-1 py-0.5 text-[9px] font-medium text-amber-300">
+                      tag: {groupsTag}
+                    </span>
+                  )}
                   {g.isDynamic && (
                     <span className="shrink-0 rounded bg-violet-500/20 px-1 py-0.5 text-[9px] font-medium text-violet-300">
                       dynamic
