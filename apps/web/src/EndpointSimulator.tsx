@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { extractOrderIdGroupTag } from "@intune-baseline/shared";
 import type { AssignmentFilter, GroupSummary, Platform, SimulationResult } from "@intune-baseline/shared";
 import { api } from "./api.ts";
 import { EndpointPicker } from "./EndpointPicker.tsx";
@@ -11,6 +12,8 @@ export function EndpointSimulator() {
   const [platform, setPlatform] = useState<Platform>("windows");
   const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
   const [deviceFilterIds, setDeviceFilterIds] = useState<string[]>([]);
+  const [isAutopilotDevice, setIsAutopilotDevice] = useState(false);
+  const [groupTag, setGroupTag] = useState("");
   const [simulation, setSimulation] = useState<SimulationResult | null>(null);
   const [showBaseline, setShowBaseline] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -29,12 +32,27 @@ export function EndpointSimulator() {
     setDeviceFilterIds([]);
   }, [platform]);
 
+  // If a selected group's rule turns out to be scoped to a different Group
+  // Tag than the one just entered, it can no longer represent this simulated
+  // endpoint -- drop it rather than silently keep simulating a mismatched group.
+  useEffect(() => {
+    const trimmedTag = groupTag.trim();
+    if (!trimmedTag) return;
+    setSelectedGroupIds((prev) =>
+      prev.filter((id) => {
+        const group = groups.find((g) => g.id === id);
+        const groupsTag = extractOrderIdGroupTag(group?.membershipRule);
+        return !groupsTag || groupsTag === trimmedTag;
+      })
+    );
+  }, [groupTag, groups]);
+
   useEffect(() => {
     api
-      .simulate(selectedGroupIds, platform, deviceFilterIds)
+      .simulate(selectedGroupIds, platform, deviceFilterIds, isAutopilotDevice)
       .then(setSimulation)
       .catch((e) => setError(e.message));
-  }, [selectedGroupIds, platform, deviceFilterIds]);
+  }, [selectedGroupIds, platform, deviceFilterIds, isAutopilotDevice]);
 
   const toggleGroup = (id: string) => {
     setSelectedGroupIds((prev) => (prev.includes(id) ? prev.filter((g) => g !== id) : [...prev, id]));
@@ -59,6 +77,10 @@ export function EndpointSimulator() {
         filters={filters}
         deviceFilterIds={deviceFilterIds}
         onToggleDeviceFilter={toggleDeviceFilter}
+        isAutopilotDevice={isAutopilotDevice}
+        onToggleAutopilotDevice={() => setIsAutopilotDevice((v) => !v)}
+        groupTag={groupTag}
+        onGroupTagChange={setGroupTag}
       />
 
       <div className="relative flex-1 bg-ink-950">
@@ -95,6 +117,7 @@ export function EndpointSimulator() {
           groupIds={selectedGroupIds}
           platform={platform}
           deviceFilterIds={deviceFilterIds}
+          isAutopilotDevice={isAutopilotDevice}
           onClose={() => setShowBaseline(false)}
         />
       )}

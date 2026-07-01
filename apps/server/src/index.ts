@@ -32,7 +32,12 @@ app.get("/api/filters", async (_req, reply) => {
   }
 });
 
-function parseSimulationQuery(query: { groups?: string; platform?: string; deviceFilterIds?: string }) {
+function parseSimulationQuery(query: {
+  groups?: string;
+  platform?: string;
+  deviceFilterIds?: string;
+  isAutopilotDevice?: string;
+}) {
   const selectedGroupIds = (query.groups ?? "")
     .split(",")
     .map((g) => g.trim())
@@ -42,10 +47,11 @@ function parseSimulationQuery(query: { groups?: string; platform?: string; devic
     .split(",")
     .map((f) => f.trim())
     .filter(Boolean);
-  return { selectedGroupIds, platform, deviceFilterIds };
+  const isAutopilotDevice = query.isAutopilotDevice === "true";
+  return { selectedGroupIds, platform, deviceFilterIds, isAutopilotDevice };
 }
 
-app.get<{ Querystring: { groups?: string; platform?: string; deviceFilterIds?: string } }>(
+app.get<{ Querystring: { groups?: string; platform?: string; deviceFilterIds?: string; isAutopilotDevice?: string } }>(
   "/api/simulate",
   async (req, reply) => {
     try {
@@ -58,7 +64,9 @@ app.get<{ Querystring: { groups?: string; platform?: string; deviceFilterIds?: s
   }
 );
 
-app.get<{ Querystring: { groups?: string; platform?: string; deviceFilterIds?: string; format?: string } }>(
+app.get<{
+  Querystring: { groups?: string; platform?: string; deviceFilterIds?: string; isAutopilotDevice?: string; format?: string };
+}>(
   "/api/simulate/export",
   async (req, reply) => {
     try {

@@ -63,12 +63,14 @@ export function SimulationBaselinePanel({
   groupIds,
   platform,
   deviceFilterIds,
+  isAutopilotDevice,
   onClose,
 }: {
   simulation: SimulationResult;
   groupIds: string[];
   platform: Platform;
   deviceFilterIds?: string[];
+  isAutopilotDevice?: boolean;
   onClose: () => void;
 }) {
   const [filter, setFilter] = useState("");
@@ -160,13 +162,13 @@ export function SimulationBaselinePanel({
           </option>
         </select>
         <a
-          href={api.simulateExportUrl(groupIds, platform, deviceFilterIds, "json")}
+          href={api.simulateExportUrl(groupIds, platform, deviceFilterIds, "json", isAutopilotDevice)}
           className="rounded-md border border-ink-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-ink-800"
         >
           Export JSON
         </a>
         <a
-          href={api.simulateExportUrl(groupIds, platform, deviceFilterIds, "csv")}
+          href={api.simulateExportUrl(groupIds, platform, deviceFilterIds, "csv", isAutopilotDevice)}
           className="rounded-md border border-ink-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-ink-800"
         >
           Export CSV

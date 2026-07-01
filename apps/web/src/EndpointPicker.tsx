@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { extractOrderIdGroupTag } from "@intune-baseline/shared";
 import type { AssignmentFilter, GroupSummary, Platform } from "@intune-baseline/shared";
 
 const PLATFORM_OPTIONS: { value: Platform; label: string }[] = [
@@ -17,6 +18,10 @@ export function EndpointPicker({
   filters,
   deviceFilterIds,
   onToggleDeviceFilter,
+  isAutopilotDevice,
+  onToggleAutopilotDevice,
+  groupTag,
+  onGroupTagChange,
 }: {
   groups: GroupSummary[];
   selectedGroupIds: string[];
@@ -26,6 +31,10 @@ export function EndpointPicker({
   filters: AssignmentFilter[];
   deviceFilterIds: string[];
   onToggleDeviceFilter: (id: string) => void;
+  isAutopilotDevice: boolean;
+  onToggleAutopilotDevice: () => void;
+  groupTag: string;
+  onGroupTagChange: (value: string) => void;
 }) {
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState(false);
@@ -34,6 +43,18 @@ export function EndpointPicker({
     () => groups.filter((g) => g.displayName.toLowerCase().includes(search.toLowerCase())),
     [groups, search]
   );
+
+  const trimmedGroupTag = groupTag.trim();
+  // A group scoped to a specific Autopilot GroupTag (via an [OrderID]-tagged
+  // devicePhysicalIds clause) can't represent this endpoint if the entered
+  // Group Tag doesn't match -- a real device only carries one GroupTag value.
+  // Groups with no such clause are never restricted.
+  const groupTagById = useMemo(() => new Map(groups.map((g) => [g.id, extractOrderIdGroupTag(g.membershipRule)])), [groups]);
+  const isGroupDisabled = (g: GroupSummary) => {
+    if (!trimmedGroupTag) return false;
+    const tag = groupTagById.get(g.id);
+    return Boolean(tag) && tag !== trimmedGroupTag;
+  };
 
   const platformFilters = useMemo(() => filters.filter((f) => f.platform === platform), [filters, platform]);
 
@@ -51,6 +72,9 @@ export function EndpointPicker({
         <span className="text-base" aria-hidden>💻</span>
         <div className="min-w-0 flex-1 truncate text-xs text-slate-300">
           <span className="font-medium text-slate-100">{platformLabel}</span>
+          {isAutopilotDevice && (
+            <span className="text-amber-300"> · Autopilot{trimmedGroupTag ? ` (${trimmedGroupTag})` : ""}</span>
+          )}
           {deviceFilterLabels.length > 0 && (
             <span className="text-violet-300"> · {deviceFilterLabels.join(", ")}</span>
           )}
@@ -89,7 +113,7 @@ export function EndpointPicker({
 
       {/* 3-column control row */}
       <div className="flex gap-4">
-        {/* Col 1: Platform + Device Filters */}
+        {/* Col 1: Platform + Autopilot */}
         <div className="flex flex-col gap-2 w-48 shrink-0">
           <div>
             <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-500">Platform</div>
@@ -106,6 +130,34 @@ export function EndpointPicker({
                   {opt.label}
                 </button>
               ))}
+            </div>
+          </div>
+
+          <div>
+            <div
+              className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-500"
+              title="Marks the simulated endpoint as Autopilot-enrolled. Any dynamic group scoped to a generic Autopilot check (e.g. 'has a ZTDid entry') is auto-included, regardless of which other groups are selected."
+            >
+              Autopilot
+            </div>
+            <div className="rounded-lg border border-ink-700 bg-ink-800 p-1.5">
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={isAutopilotDevice}
+                  onChange={onToggleAutopilotDevice}
+                  className="shrink-0 accent-amber-400"
+                />
+                Autopilot device
+              </label>
+              <input
+                value={groupTag}
+                onChange={(e) => onGroupTagChange(e.target.value)}
+                disabled={!isAutopilotDevice}
+                placeholder="Group Tag (optional)"
+                title="Restricts selectable groups to only those whose dynamic rule is unscoped or matches this Group Tag exactly -- a real device only carries one GroupTag value."
+                className="mt-1.5 w-full rounded-md border border-ink-700 bg-ink-900 px-2 py-1 text-xs text-slate-200 placeholder:text-slate-500 focus:border-amber-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+              />
             </div>
           </div>
         </div>
@@ -163,26 +215,38 @@ export function EndpointPicker({
             className="mb-1 w-full rounded-md border border-ink-700 bg-ink-800 px-2.5 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 focus:border-sky-400 focus:outline-none"
           />
           <div className="overflow-y-auto rounded-md border border-ink-700" style={{ maxHeight: "140px" }}>
-            {filteredGroups.map((g) => (
-              <label
-                key={g.id}
-                className="flex cursor-pointer items-start gap-2 border-b border-ink-800 px-2.5 py-1.5 text-xs last:border-b-0 hover:bg-ink-800"
-                title={g.isDynamic ? `Dynamic — rule: ${g.membershipRule ?? "unknown"}` : undefined}
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedGroupIds.includes(g.id)}
-                  onChange={() => onToggleGroup(g.id)}
-                  className="mt-0.5 shrink-0 accent-sky-400"
-                />
-                <span className="min-w-0 flex-1 break-words leading-snug text-slate-200">{g.displayName}</span>
-                {g.isDynamic && (
-                  <span className="shrink-0 rounded bg-violet-500/20 px-1 py-0.5 text-[9px] font-medium text-violet-300">
-                    dynamic
-                  </span>
-                )}
-              </label>
-            ))}
+            {filteredGroups.map((g) => {
+              const disabled = isGroupDisabled(g);
+              const groupsTag = groupTagById.get(g.id);
+              const title = disabled
+                ? `Disabled — scoped to Group Tag "${groupsTag}", which doesn't match the entered Group Tag "${trimmedGroupTag}"`
+                : g.isDynamic
+                  ? `Dynamic — rule: ${g.membershipRule ?? "unknown"}`
+                  : undefined;
+              return (
+                <label
+                  key={g.id}
+                  className={`flex items-start gap-2 border-b border-ink-800 px-2.5 py-1.5 text-xs last:border-b-0 ${
+                    disabled ? "cursor-not-allowed opacity-40" : "cursor-pointer hover:bg-ink-800"
+                  }`}
+                  title={title}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedGroupIds.includes(g.id)}
+                    onChange={() => onToggleGroup(g.id)}
+                    disabled={disabled}
+                    className="mt-0.5 shrink-0 accent-sky-400"
+                  />
+                  <span className="min-w-0 flex-1 break-words leading-snug text-slate-200">{g.displayName}</span>
+                  {g.isDynamic && (
+                    <span className="shrink-0 rounded bg-violet-500/20 px-1 py-0.5 text-[9px] font-medium text-violet-300">
+                      dynamic
+                    </span>
+                  )}
+                </label>
+              );
+            })}
             {filteredGroups.length === 0 && (
               <div className="px-3 py-2 text-center text-xs text-slate-500">No groups found.</div>
             )}

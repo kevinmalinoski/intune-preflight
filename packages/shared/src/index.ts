@@ -140,3 +140,17 @@ export interface SimulationResult {
   conflicts: ConflictingSetting[];
   overlaps: PolicyOverlap[];
 }
+
+/**
+ * Extracts the Autopilot GroupTag value from an Entra dynamic membership
+ * rule, if the rule scopes on one. Group Tag values are (confusingly) stored
+ * in the `devicePhysicalIds` collection under the `[OrderID]` tag prefix --
+ * a legacy naming quirk in Autopilot/Entra, not this app's convention -- e.g.
+ * `(device.devicePhysicalIds -any (_ -eq "[OrderID]:MALO-KIOSK"))` scopes to
+ * GroupTag "MALO-KIOSK". Returns null for rules that don't reference it.
+ */
+export function extractOrderIdGroupTag(membershipRule: string | undefined): string | null {
+  if (!membershipRule) return null;
+  const match = /devicePhysicalIds?\s*-any\s*\(\s*_\s*-(?:eq|startsWith)\s*"\[OrderID\]:([^"]+)"/i.exec(membershipRule);
+  return match ? match[1] : null;
+}
