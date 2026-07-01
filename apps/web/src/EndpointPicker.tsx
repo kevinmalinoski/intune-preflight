@@ -155,7 +155,7 @@ export function EndpointPicker({
                 onChange={(e) => onGroupTagChange(e.target.value)}
                 disabled={!isAutopilotDevice}
                 placeholder="Group Tag (optional)"
-                title="Restricts selectable groups to only those whose dynamic rule is unscoped or matches this Group Tag exactly -- a real device only carries one GroupTag value."
+                title="Auto-selects every dynamic group scoped to this exact Group Tag, in real time as you type, and drops any selected group scoped to a different one -- a real device only carries one GroupTag value."
                 className="mt-1.5 w-full rounded-md border border-ink-700 bg-ink-900 px-2 py-1 text-xs text-slate-200 placeholder:text-slate-500 focus:border-amber-400 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
               />
             </div>
@@ -199,7 +199,7 @@ export function EndpointPicker({
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <div
             className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-500"
-            title="Entra security groups this device/user belongs to. Dynamic groups show their membership rule on hover. If a selected group's rule logically implies membership in another dynamic group (e.g. a narrower OrderID prefix), that group is added automatically and shown in amber in the diagram."
+            title="Entra security groups this device/user belongs to. Dynamic groups show their membership rule on hover. If a selected group's rule logically implies membership in another dynamic group (e.g. a narrower OrderID prefix), that group is added automatically and shown in amber in the diagram. Entering a Group Tag above auto-selects groups scoped to it."
           >
             Entra security groups
             {selectedGroupIds.length > 0 && (

@@ -32,19 +32,28 @@ export function EndpointSimulator() {
     setDeviceFilterIds([]);
   }, [platform]);
 
-  // If a selected group's rule turns out to be scoped to a different Group
-  // Tag than the one just entered, it can no longer represent this simulated
-  // endpoint -- drop it rather than silently keep simulating a mismatched group.
+  // Entering a Group Tag drives selection directly, in real time: any dynamic
+  // group scoped to that exact Group Tag (via its [OrderID]-tagged
+  // devicePhysicalIds clause) is auto-selected, and any previously selected
+  // group scoped to a DIFFERENT Group Tag is dropped -- a real device only
+  // carries one GroupTag value, so it can't be a member of both.
   useEffect(() => {
     const trimmedTag = groupTag.trim();
     if (!trimmedTag) return;
-    setSelectedGroupIds((prev) =>
-      prev.filter((id) => {
-        const group = groups.find((g) => g.id === id);
-        const groupsTag = extractOrderIdGroupTag(group?.membershipRule);
+    const matchingIds = groups
+      .filter((g) => extractOrderIdGroupTag(g.membershipRule) === trimmedTag)
+      .map((g) => g.id);
+    setSelectedGroupIds((prev) => {
+      const withoutMismatched = prev.filter((id) => {
+        const groupsTag = extractOrderIdGroupTag(groups.find((g) => g.id === id)?.membershipRule);
         return !groupsTag || groupsTag === trimmedTag;
-      })
-    );
+      });
+      const merged = [...withoutMismatched];
+      for (const id of matchingIds) {
+        if (!merged.includes(id)) merged.push(id);
+      }
+      return merged;
+    });
   }, [groupTag, groups]);
 
   useEffect(() => {
