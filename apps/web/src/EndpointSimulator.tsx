@@ -89,6 +89,24 @@ export function EndpointSimulator() {
     setDeviceFilterIds((prev) => (prev.includes(id) ? prev.filter((f) => f !== id) : [...prev, id]));
   };
 
+  // Unchecking "Autopilot device" turns the endpoint back into a non-Autopilot
+  // device: it has no Group Tag and can't belong to any Autopilot-joined or
+  // Group Tag group. So clear the tag and drop both kinds of auto-selected
+  // groups, rather than leaving stale tag selections behind.
+  const toggleAutopilotDevice = () => {
+    const nowOn = !isAutopilotDevice;
+    setIsAutopilotDevice(nowOn);
+    if (!nowOn) {
+      setGroupTag("");
+      setSelectedGroupIds((prev) =>
+        prev.filter((id) => {
+          const rule = groups.find((g) => g.id === id)?.membershipRule;
+          return !isGroupTagRule(rule) && !isDefaultAutopilotJoinedRule(rule);
+        })
+      );
+    }
+  };
+
   const deviceFilterNames = deviceFilterIds
     .map((id) => filters.find((f) => f.id === id)?.displayName)
     .filter((name): name is string => Boolean(name));
@@ -105,7 +123,7 @@ export function EndpointSimulator() {
         deviceFilterIds={deviceFilterIds}
         onToggleDeviceFilter={toggleDeviceFilter}
         isAutopilotDevice={isAutopilotDevice}
-        onToggleAutopilotDevice={() => setIsAutopilotDevice((v) => !v)}
+        onToggleAutopilotDevice={toggleAutopilotDevice}
         groupTag={groupTag}
         onGroupTagChange={setGroupTag}
       />
