@@ -310,22 +310,6 @@ export function ruleImplies(selectedRule: string | undefined, otherRule: string 
   );
 }
 
-/**
- * Whether a dynamic membership rule has a bare-tag `-any` clause against a
- * multi-tag identity collection (currently just devicePhysicalIds), e.g.
- * `(device.devicePhysicalIds -any (_ -eq "[ZTDid]"))` -- a generic "is this
- * device Autopilot-enrolled" check with no specific tag value, as opposed to
- * a clause scoped to a specific OrderID/GroupTag. Used to auto-imply these
- * generic Autopilot groups when the simulated endpoint is flagged as an
- * Autopilot device, without requiring a specific narrower group to be
- * selected first.
- */
-export function hasBareAutopilotAnyClause(rule: string | undefined): boolean {
-  return parseMembershipRuleClauses(rule).some(
-    (clause) => clause.isAnyCollection && MULTI_TAG_COLLECTION_PROPERTIES.has(clause.property) && BARE_TAG.test(clause.value)
-  );
-}
-
 export const VIRTUAL_GROUP_ALL_DEVICES = { id: "virtual-all-devices", displayName: "All Devices", isVirtual: true };
 export const VIRTUAL_GROUP_ALL_USERS = { id: "virtual-all-users", displayName: "All Users", isVirtual: true };
 

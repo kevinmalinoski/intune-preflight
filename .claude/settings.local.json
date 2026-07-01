@@ -36,7 +36,9 @@
       "Bash(curl -s \"localhost:4000/api/simulate?groups=4b09c3d9-dd40-4749-9345-567a97dc0284\")",
       "Bash(curl -s \"localhost:4000/api/simulate?groups=22251098-0354-4a16-90f0-29dde4b7be4b\")",
       "Bash(curl -s \"localhost:4000/api/simulate?groups=8781b54e-5079-4a97-a288-73b11aac44d8\")",
-      "Bash(curl -s \"localhost:4000/api/simulate?groups=4b09c3d9-dd40-4749-9345-567a97dc0284&platform=windows\")"
+      "Bash(curl -s \"localhost:4000/api/simulate?groups=4b09c3d9-dd40-4749-9345-567a97dc0284&platform=windows\")",
+      "Bash(curl -s http://localhost:4000/api/groups)",
+      "Bash(node --input-type=module -e ' *)"
     ]
   }
 }

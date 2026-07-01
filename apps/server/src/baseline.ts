@@ -12,7 +12,7 @@ import type {
   SimulationResult,
 } from "@intune-baseline/shared";
 import type { TenantData } from "./intuneData.js";
-import { hasBareAutopilotAnyClause, ruleImplies, VIRTUAL_GROUP_ALL_DEVICES, VIRTUAL_GROUP_ALL_USERS } from "./normalize.js";
+import { ruleImplies, VIRTUAL_GROUP_ALL_DEVICES, VIRTUAL_GROUP_ALL_USERS } from "./normalize.js";
 
 /**
  * Whether a single group assignment's filter allows it to apply, given which
@@ -143,7 +143,7 @@ export function listAssignmentFilters(data: TenantData): AssignmentFilter[] {
  */
 export function computeSimulation(
   data: TenantData,
-  options: { selectedGroupIds: string[]; platform?: Platform; deviceFilterIds?: string[]; isAutopilotDevice?: boolean }
+  options: { selectedGroupIds: string[]; platform?: Platform; deviceFilterIds?: string[] }
 ): SimulationResult {
   const deviceFilterIds = options.deviceFilterIds ?? [];
   const groupMap = new Map(data.groups.map((g) => [g.id, g]));
@@ -184,21 +184,6 @@ export function computeSimulation(
       if (seen.has(candidate.id) || candidate.id === selectedGroup.id) continue;
       if (ruleImplies(selectedGroup.membershipRule, candidate.membershipRule)) {
         addGroup(candidate.id, "implied", [selectedGroup.displayName]);
-      }
-    }
-  }
-
-  // A device flagged as Autopilot-enrolled always carries a devicePhysicalIds
-  // entry (ZTDid at minimum), so any dynamic group scoped to a bare tag check
-  // against that collection (e.g. "has any ZTDid entry") applies regardless
-  // of which specific groups were selected -- unlike the OrderID/GroupTag-
-  // scoped groups above, this doesn't require a narrower selected group to
-  // imply from.
-  if (options.isAutopilotDevice) {
-    for (const candidate of dynamicGroups) {
-      if (seen.has(candidate.id)) continue;
-      if (hasBareAutopilotAnyClause(candidate.membershipRule)) {
-        addGroup(candidate.id, "implied", ["Autopilot-enrolled device"]);
       }
     }
   }

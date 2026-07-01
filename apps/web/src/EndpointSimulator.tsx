@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { extractOrderIdGroupTag } from "@intune-baseline/shared";
+import { groupTagMatchesRule, isGroupTagRule, isDefaultAutopilotJoinedRule } from "@intune-baseline/shared";
 import type { AssignmentFilter, GroupSummary, Platform, SimulationResult } from "@intune-baseline/shared";
 import { api } from "./api.ts";
 import { EndpointPicker } from "./EndpointPicker.tsx";
@@ -32,23 +32,23 @@ export function EndpointSimulator() {
     setDeviceFilterIds([]);
   }, [platform]);
 
-  // Entering a Group Tag drives selection directly, in real time: any dynamic
-  // group scoped to that exact Group Tag (via its [OrderID]-tagged
-  // devicePhysicalIds clause) is auto-selected, and any previously selected
-  // group scoped to a DIFFERENT Group Tag is dropped -- a real device only
-  // carries one GroupTag value, so it can't be a member of both.
+  // Entering a Group Tag drives selection directly, in real time: every group
+  // a device carrying that tag would be a member of (evaluating its [OrderID]
+  // clauses -- -eq, -startsWith, and or/and combinations) is auto-selected. A
+  // device tagged "MALO-KIOSK-VM" is a member of both a startsWith "MALO-KIOSK"
+  // group and an -eq "MALO-KIOSK-VM" group, so both get selected. Group Tag
+  // groups the tag no longer matches are dropped; groups with no Group Tag
+  // rule are left untouched.
   useEffect(() => {
     const trimmedTag = groupTag.trim();
     if (!trimmedTag) return;
-    const matchingIds = groups
-      .filter((g) => extractOrderIdGroupTag(g.membershipRule) === trimmedTag)
-      .map((g) => g.id);
+    const matchingIds = groups.filter((g) => groupTagMatchesRule(g.membershipRule, trimmedTag)).map((g) => g.id);
     setSelectedGroupIds((prev) => {
-      const withoutMismatched = prev.filter((id) => {
-        const groupsTag = extractOrderIdGroupTag(groups.find((g) => g.id === id)?.membershipRule);
-        return !groupsTag || groupsTag === trimmedTag;
+      const kept = prev.filter((id) => {
+        const rule = groups.find((g) => g.id === id)?.membershipRule;
+        return !isGroupTagRule(rule) || groupTagMatchesRule(rule, trimmedTag);
       });
-      const merged = [...withoutMismatched];
+      const merged = [...kept];
       for (const id of matchingIds) {
         if (!merged.includes(id)) merged.push(id);
       }
@@ -56,12 +56,30 @@ export function EndpointSimulator() {
     });
   }, [groupTag, groups]);
 
+  // Checking "Autopilot device" links the endpoint to every default
+  // Autopilot-joined dynamic group (bare "[ZTDId]" startsWith rule) by
+  // selecting them directly, the same way a Group Tag drives selection;
+  // unchecking removes them again. This keeps all group selection on the
+  // client and the server a pure "given these groups, compute the baseline".
+  useEffect(() => {
+    const autopilotGroupIds = groups.filter((g) => isDefaultAutopilotJoinedRule(g.membershipRule)).map((g) => g.id);
+    if (autopilotGroupIds.length === 0) return;
+    setSelectedGroupIds((prev) => {
+      if (isAutopilotDevice) {
+        const merged = [...prev];
+        for (const id of autopilotGroupIds) if (!merged.includes(id)) merged.push(id);
+        return merged;
+      }
+      return prev.filter((id) => !autopilotGroupIds.includes(id));
+    });
+  }, [isAutopilotDevice, groups]);
+
   useEffect(() => {
     api
-      .simulate(selectedGroupIds, platform, deviceFilterIds, isAutopilotDevice)
+      .simulate(selectedGroupIds, platform, deviceFilterIds)
       .then(setSimulation)
       .catch((e) => setError(e.message));
-  }, [selectedGroupIds, platform, deviceFilterIds, isAutopilotDevice]);
+  }, [selectedGroupIds, platform, deviceFilterIds]);
 
   const toggleGroup = (id: string) => {
     setSelectedGroupIds((prev) => (prev.includes(id) ? prev.filter((g) => g !== id) : [...prev, id]));
@@ -126,7 +144,6 @@ export function EndpointSimulator() {
           groupIds={selectedGroupIds}
           platform={platform}
           deviceFilterIds={deviceFilterIds}
-          isAutopilotDevice={isAutopilotDevice}
           onClose={() => setShowBaseline(false)}
         />
       )}

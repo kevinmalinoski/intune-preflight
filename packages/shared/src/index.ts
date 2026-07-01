@@ -141,16 +141,88 @@ export interface SimulationResult {
   overlaps: PolicyOverlap[];
 }
 
+interface PhysicalIdClause {
+  /** Lowercased physical-id tag name, e.g. "orderid" (Group Tag) or "ztdid" (Autopilot). */
+  tag: string;
+  op: "eq" | "startswith";
+  /** Text after "[Tag]:" -- the Group Tag value; "" for bare tags like "[ZTDid]". */
+  value: string;
+}
+
 /**
- * Extracts the Autopilot GroupTag value from an Entra dynamic membership
- * rule, if the rule scopes on one. Group Tag values are (confusingly) stored
- * in the `devicePhysicalIds` collection under the `[OrderID]` tag prefix --
- * a legacy naming quirk in Autopilot/Entra, not this app's convention -- e.g.
- * `(device.devicePhysicalIds -any (_ -eq "[OrderID]:MALO-KIOSK"))` scopes to
- * GroupTag "MALO-KIOSK". Returns null for rules that don't reference it.
+ * Pulls every `device.devicePhysicalIds -any (_ -eq/-startsWith "[Tag]:value")`
+ * clause out of a membership rule. Autopilot writes several tagged entries
+ * into the `devicePhysicalIds` collection -- the Group Tag lives under the
+ * `[OrderID]` tag (a legacy Autopilot/Entra naming quirk), the Autopilot
+ * device id under `[ZTDId]`, etc. Boolean structure isn't parsed here; see
+ * groupTagMatchesRule for how the clauses are combined.
  */
-export function extractOrderIdGroupTag(membershipRule: string | undefined): string | null {
-  if (!membershipRule) return null;
-  const match = /devicePhysicalIds?\s*-any\s*\(\s*_\s*-(?:eq|startsWith)\s*"\[OrderID\]:([^"]+)"/i.exec(membershipRule);
-  return match ? match[1] : null;
+function parsePhysicalIdClauses(rule: string): PhysicalIdClause[] {
+  const pattern = /device\.devicePhysicalIDs?\s+-any\s*\(\s*_\s*-(eq|startsWith)\s+"\[([^\]]+)\](?::([^"]*))?"/gi;
+  const clauses: PhysicalIdClause[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(rule))) {
+    clauses.push({ tag: match[2].toLowerCase(), op: match[1].toLowerCase() as "eq" | "startswith", value: match[3] ?? "" });
+  }
+  return clauses;
+}
+
+/** Whether a membership rule scopes on an Autopilot Group Tag ([OrderID]) at all. */
+export function isGroupTagRule(membershipRule: string | undefined): boolean {
+  if (!membershipRule) return false;
+  return parsePhysicalIdClauses(membershipRule).some((c) => c.tag === "orderid");
+}
+
+/**
+ * Whether a device carrying Autopilot Group Tag `groupTag` would be a member
+ * of the group with this membership rule, evaluated over its `[OrderID]`
+ * (Group Tag) clauses:
+ *
+ *   -eq "[OrderID]:X"         matches when groupTag === X
+ *   -startsWith "[OrderID]:X" matches when groupTag starts with X
+ *
+ * so e.g. a device tagged "MALO-KIOSK-VM" is a member of both a
+ * `-startsWith "[OrderID]:MALO-KIOSK"` group and a `-eq "[OrderID]:MALO-KIOSK-VM"`
+ * group. All matching is case-insensitive (Entra treats Group Tags that way).
+ *
+ * Clauses are combined with OR by default (the common `(... ) or (... )`
+ * shape); if the rule joins clauses with `and`, all must match. Non-Group-Tag
+ * clauses (e.g. a bare `[ZTDId]` Autopilot check) are treated as satisfied,
+ * since the Group Tag field is only usable once the endpoint is already
+ * flagged as an Autopilot device. This is a best-effort evaluator for the flat
+ * clause shapes Autopilot Group Tag groups actually use -- it does not parse
+ * arbitrarily nested boolean expressions.
+ */
+export function groupTagMatchesRule(membershipRule: string | undefined, groupTag: string): boolean {
+  if (!membershipRule || !groupTag.trim()) return false;
+  const clauses = parsePhysicalIdClauses(membershipRule);
+  if (!clauses.some((c) => c.tag === "orderid")) return false;
+  const gt = groupTag.trim().toLowerCase();
+  const evaluate = (c: PhysicalIdClause): boolean => {
+    if (c.tag !== "orderid") return true;
+    const v = c.value.toLowerCase();
+    return c.op === "eq" ? gt === v : gt.startsWith(v);
+  };
+  const combinesWithAnd = /\)\s+and\s+\(/i.test(membershipRule);
+  return combinesWithAnd ? clauses.every(evaluate) : clauses.some(evaluate);
+}
+
+/**
+ * Whether a membership rule is the default Autopilot-joined dynamic group,
+ * i.e. the syntax Microsoft documents for "every Autopilot-registered device":
+ *
+ *   (device.devicePhysicalIds -any (_ -startsWith "[ZTDId]"))
+ *
+ * Every Autopilot device is assigned a ZTDId (Zero-Touch Device ID) written
+ * into `devicePhysicalIds`, so this bare `[ZTDId]` startsWith check is what
+ * "is this an Autopilot device" groups use. Like extractGroupTagStartsWithPrefix
+ * this is anchored to match ONLY this single clause -- compound rules, `-eq`,
+ * and other physical-id tags return false -- so the "Autopilot device" toggle
+ * links to exactly these groups and nothing else.
+ */
+export function isDefaultAutopilotJoinedRule(membershipRule: string | undefined): boolean {
+  if (!membershipRule) return false;
+  return /^\s*\(?\s*device\.devicePhysicalIDs?\s+-any\s*\(\s*_\s*-startsWith\s+"\[ZTDId\]"\s*\)\s*\)?\s*$/i.test(
+    membershipRule.trim()
+  );
 }

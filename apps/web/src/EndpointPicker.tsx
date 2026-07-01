@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { extractOrderIdGroupTag } from "@intune-baseline/shared";
+import { groupTagMatchesRule, isGroupTagRule, isDefaultAutopilotJoinedRule } from "@intune-baseline/shared";
 import type { AssignmentFilter, GroupSummary, Platform } from "@intune-baseline/shared";
 
 const PLATFORM_OPTIONS: { value: Platform; label: string }[] = [
@@ -45,10 +45,6 @@ export function EndpointPicker({
   );
 
   const trimmedGroupTag = groupTag.trim();
-  // Surfaced as a badge next to each group's name (when detected) so a Group
-  // Tag match is visible at a glance -- selection itself is driven entirely
-  // by EndpointSimulator's auto-select effect, not by disabling anything here.
-  const groupTagById = useMemo(() => new Map(groups.map((g) => [g.id, extractOrderIdGroupTag(g.membershipRule)])), [groups]);
 
   const platformFilters = useMemo(() => filters.filter((f) => f.platform === platform), [filters, platform]);
 
@@ -210,13 +206,15 @@ export function EndpointPicker({
           />
           <div className="overflow-y-auto rounded-md border border-ink-700" style={{ maxHeight: "140px" }}>
             {filteredGroups.map((g) => {
-              const groupsTag = groupTagById.get(g.id);
-              const isTagMatch = Boolean(trimmedGroupTag) && groupsTag === trimmedGroupTag;
-              const title = groupsTag
-                ? `Group Tag: ${groupsTag}${g.membershipRule ? ` — rule: ${g.membershipRule}` : ""}`
-                : g.isDynamic
-                  ? `Dynamic — rule: ${g.membershipRule ?? "unknown"}`
-                  : undefined;
+              const isTagMatch = Boolean(trimmedGroupTag) && groupTagMatchesRule(g.membershipRule, trimmedGroupTag);
+              const isAutopilotJoined = isDefaultAutopilotJoinedRule(g.membershipRule);
+              const title = isGroupTagRule(g.membershipRule)
+                ? `Autopilot Group Tag group — rule: ${g.membershipRule}`
+                : isAutopilotJoined
+                  ? `Default Autopilot-joined group — rule: ${g.membershipRule}`
+                  : g.isDynamic
+                    ? `Dynamic — rule: ${g.membershipRule ?? "unknown"}`
+                    : undefined;
               return (
                 <label
                   key={g.id}
@@ -232,7 +230,12 @@ export function EndpointPicker({
                   <span className="min-w-0 flex-1 break-words leading-snug text-slate-200">{g.displayName}</span>
                   {isTagMatch && (
                     <span className="shrink-0 rounded bg-amber-500/20 px-1 py-0.5 text-[9px] font-medium text-amber-300">
-                      tag: {groupsTag}
+                      group tag
+                    </span>
+                  )}
+                  {isAutopilotJoined && isAutopilotDevice && (
+                    <span className="shrink-0 rounded bg-amber-500/20 px-1 py-0.5 text-[9px] font-medium text-amber-300">
+                      autopilot
                     </span>
                   )}
                   {g.isDynamic && (
