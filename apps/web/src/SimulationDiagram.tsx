@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { ReactFlow, Background, Controls, MiniMap, type Node, type Edge, Handle, Position } from "@xyflow/react";
+import { ReactFlow, Background, Controls, type Node, type Edge, Handle, Position } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { SimulationGroup, SimulationResult } from "@intune-preflight/shared";
 
@@ -138,7 +138,10 @@ function PolicyNode({
   );
 }
 
-const nodeTypes = { device: DeviceNode, group: GroupNode, policy: PolicyNode };
+// NB: the node type must not be "group" -- React Flow reserves that name for a
+// built-in grouping node whose default CSS paints a translucent light-gray box
+// behind the node (most visible on the plain All Devices / All Users cards).
+const nodeTypes = { device: DeviceNode, entraGroup: GroupNode, policy: PolicyNode };
 
 const COLUMN_GAP = 140;
 
@@ -153,7 +156,7 @@ function layout(simulation: SimulationResult, deviceFilterNames: string[]) {
   for (const g of simulation.groups) {
     nodes.push({
       id: `group:${g.id}`,
-      type: "group",
+      type: "entraGroup",
       position: { x: groupX, y: groupY },
       data: { label: g.displayName, source: g.source, isDynamic: g.isDynamic, impliedByGroupNames: g.impliedByGroupNames },
     });
@@ -182,8 +185,8 @@ function layout(simulation: SimulationResult, deviceFilterNames: string[]) {
       id: `device->${g.id}`,
       source: "device",
       target: `group:${g.id}`,
-      type: "smoothstep",
-      style: { stroke: SOURCE_STYLE[g.source].border, opacity: 0.45, strokeWidth: 1.5 },
+      type: "default",
+      style: { stroke: SOURCE_STYLE[g.source].border, opacity: 0.5, strokeWidth: 2 },
     });
   }
   for (const p of simulation.policies) {
@@ -192,8 +195,8 @@ function layout(simulation: SimulationResult, deviceFilterNames: string[]) {
         id: `${groupId}->${p.id}`,
         source: `group:${groupId}`,
         target: `policy:${p.id}`,
-        type: "smoothstep",
-        style: { stroke: "#475569", opacity: 0.6, strokeWidth: 1.25 },
+        type: "default",
+        style: { stroke: "#64748b", opacity: 0.4, strokeWidth: 1.5 },
       });
     }
   }
@@ -206,8 +209,8 @@ function layout(simulation: SimulationResult, deviceFilterNames: string[]) {
         id: `exclude-${groupId}->${p.id}`,
         source: `group:${groupId}`,
         target: `policy:${p.id}`,
-        type: "smoothstep",
-        style: { stroke: "#fb7185", strokeDasharray: "4 4", opacity: 0.6, strokeWidth: 1.25 },
+        type: "default",
+        style: { stroke: "#fb7185", strokeDasharray: "5 5", opacity: 0.55, strokeWidth: 1.5 },
       });
     }
   }
@@ -270,17 +273,10 @@ export function SimulationDiagram({
         proOptions={{ hideAttribution: true }}
         selectNodesOnDrag={false}
         minZoom={0.2}
-        defaultEdgeOptions={{ type: "smoothstep" }}
+        defaultEdgeOptions={{ type: "default" }}
       >
         <Background color="#1e293b" gap={28} size={1} />
-        <Controls showInteractive={false} />
-        <MiniMap
-          pannable
-          zoomable
-          maskColor="rgba(11,15,23,0.75)"
-          className="!border !border-ink-700 !bg-ink-900"
-          nodeColor={(n) => (n.type === "device" ? "#34d399" : n.type === "group" ? "#64748b" : "#475569")}
-        />
+        <Controls showInteractive={false} position="bottom-right" />
       </ReactFlow>
       <Legend />
     </div>

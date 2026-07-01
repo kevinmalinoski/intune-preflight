@@ -11,3 +11,34 @@ body,
 body {
   @apply bg-ink-950 text-slate-200;
 }
+
+/* --- React Flow: match the dark theme, drop default chrome --- */
+
+/* Kill the focus outline / selection box-shadow React Flow puts on nodes. */
+.react-flow__node:focus,
+.react-flow__node:focus-visible,
+.react-flow__node.selected {
+  outline: none;
+  box-shadow: none;
+}
+
+/* Dark-theme the zoom controls (they ship as white buttons by default). */
+.react-flow__controls {
+  border: 1px solid #242c3d;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.react-flow__controls-button {
+  background: #11161f;
+  border-bottom: 1px solid #242c3d;
+}
+
+.react-flow__controls-button:hover {
+  background: #1a2130;
+}
+
+.react-flow__controls-button svg {
+  fill: #cbd5e1;
+}
