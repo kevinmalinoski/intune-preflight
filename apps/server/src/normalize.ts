@@ -279,8 +279,8 @@ function parseMembershipRuleClauses(rule: string | undefined): RuleClause[] {
  * 1. Same property, prefix relationship: if the selected clause's value
  *    starts with the other clause's value, anything matching the (narrower)
  *    selected clause necessarily matches the (broader) other clause too --
- *    e.g. selecting a group scoped to OrderID "MALO-KIOSK-SINGLE" implies
- *    membership in a broader group scoped to "MALO-KIOSK".
+ *    e.g. selecting a group scoped to OrderID "SALES-KIOSK-SINGLE" implies
+ *    membership in a broader group scoped to "SALES-KIOSK".
  *
  * 2. Same multi-tag identity collection (e.g. devicePhysicalIds), other
  *    clause is a bare tag wildcard ("[ZTDid]" with nothing after it, i.e.

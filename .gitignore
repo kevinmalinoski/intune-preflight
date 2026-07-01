@@ -4,4 +4,8 @@ build/
 .env
 .env.local
 *.log
+*.tsbuildinfo
 .DS_Store
+
+# Local Claude Code tooling / machine-specific permission allowlist
+.claude/settings.local.json

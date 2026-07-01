@@ -114,6 +114,15 @@ packages/shared/  TypeScript types + rule helpers shared by both apps
 
 > Autopilot "device" and Group Tag selection are resolved in the web UI (they drive which group ids get sent in `groups`), so the API surface stays a simple "given these groups, compute the baseline."
 
+## Security
+
+Read this before you host it anywhere other than your own machine:
+
+- **No built-in authentication.** Intune Preflight has no login and does not authenticate API callers. Anyone who can reach the web UI or the API port can read the policy data it surfaces.
+- **The server listens on all interfaces** (`0.0.0.0`) so it can be reached from other devices. Combined with the point above, that means you should **run it on localhost or a trusted private network / VPN, and never expose the server or web port directly to the internet** without putting your own authentication in front of it (e.g. a reverse proxy with access control).
+- **Credentials stay server-side.** `TENANT_ID` / `CLIENT_ID` / `CLIENT_SECRET` live only in the server's `.env`, are never sent to the browser, and `.env` is gitignored — keep it out of source control.
+- **Read-only.** The Graph permissions are all `*.Read.All`; the tool never writes to your tenant.
+
 ## Notes & limitations
 
 - **Read-only.** This tool never writes to your tenant — the Graph permissions used are all `*.Read.All`.
@@ -125,6 +134,10 @@ packages/shared/  TypeScript types + rule helpers shared by both apps
 
   Implied and auto-selected groups are always surfaced in the UI so you can verify them — always double-check against the real rules in Entra before relying on the result.
 - **Tested against a sandbox Microsoft 365 tenant.** Always verify against the Intune admin center before relying on the computed baseline for compliance decisions.
+
+## Disclaimer
+
+Intune Preflight is an independent, community-built tool. It is **not affiliated with, endorsed by, or sponsored by Microsoft**. Microsoft, Intune, and Entra are trademarks of the Microsoft group of companies, used here only to describe what the tool works with.
 
 ## License
 

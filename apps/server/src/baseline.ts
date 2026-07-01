@@ -172,7 +172,7 @@ export function computeSimulation(
 
   // A dynamic group's membership rule can logically guarantee membership in
   // another dynamic group too (e.g. a group scoped to OrderID prefix
-  // "MALO-KIOSK-SINGLE" is always a subset of one scoped to "MALO-KIOSK").
+  // "SALES-KIOSK-SINGLE" is always a subset of one scoped to "SALES-KIOSK").
   // Surface those as "implied" rather than silently folding them into the
   // selection, since rule-implication detection here is best-effort (see
   // ruleImplies in normalize.ts) and should be eyeballed against Entra.

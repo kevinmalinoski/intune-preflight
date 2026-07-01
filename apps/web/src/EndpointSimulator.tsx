@@ -35,8 +35,8 @@ export function EndpointSimulator() {
   // Entering a Group Tag drives selection directly, in real time: every group
   // a device carrying that tag would be a member of (evaluating its [OrderID]
   // clauses -- -eq, -startsWith, and or/and combinations) is auto-selected. A
-  // device tagged "MALO-KIOSK-VM" is a member of both a startsWith "MALO-KIOSK"
-  // group and an -eq "MALO-KIOSK-VM" group, so both get selected. Group Tag
+  // device tagged "SALES-KIOSK-VM" is a member of both a startsWith "SALES-KIOSK"
+  // group and an -eq "SALES-KIOSK-VM" group, so both get selected. Group Tag
   // groups the tag no longer matches are dropped; groups with no Group Tag
   // rule are left untouched.
   useEffect(() => {

@@ -15,10 +15,20 @@ function required(name: string): string {
   return value;
 }
 
+// Browsers only hit the API cross-origin in the split dev setup (web :5173 ->
+// api :4000); in production the web app is served same-origin behind a proxy,
+// so CORS isn't exercised there. Default to the local dev origins and allow an
+// explicit override for anyone serving the web UI from a different host.
+const corsOrigins = (process.env.CORS_ORIGIN ?? "http://localhost:5173,http://127.0.0.1:5173")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
 export const config = {
   tenantId: required("TENANT_ID"),
   clientId: required("CLIENT_ID"),
   clientSecret: required("CLIENT_SECRET"),
   port: Number(process.env.PORT ?? 4000),
   cacheTtlSeconds: Number(process.env.CACHE_TTL_SECONDS ?? 300),
+  corsOrigins,
 };

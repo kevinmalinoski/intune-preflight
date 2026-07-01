@@ -6,7 +6,7 @@ import { loadTenantData, clearTenantDataCache } from "./intuneData.js";
 import { computeSimulation, listAssignmentFilters, listGroupSummaries, simulationToCsv } from "./baseline.js";
 
 const app = Fastify({ logger: true });
-await app.register(cors, { origin: true });
+await app.register(cors, { origin: config.corsOrigins });
 
 const VALID_PLATFORMS: Platform[] = ["windows", "macos", "ios", "android", "other"];
 

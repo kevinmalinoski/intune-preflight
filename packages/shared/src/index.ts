@@ -110,8 +110,8 @@ export interface SimulationGroup extends IntuneGroup {
   /**
    * Set when source is "implied": the selected group(s) whose dynamic
    * membership rule logically implies membership in this one too (e.g.
-   * selecting a group scoped to OrderID "MALO-KIOSK-SINGLE" implies
-   * membership in a broader "MALO-KIOSK" group). Best-effort -- verify
+   * selecting a group scoped to OrderID "SALES-KIOSK-SINGLE" implies
+   * membership in a broader "SALES-KIOSK" group). Best-effort -- verify
    * against the actual rules in Entra before relying on it.
    */
   impliedByGroupNames?: string[];
@@ -181,8 +181,8 @@ export function isGroupTagRule(membershipRule: string | undefined): boolean {
  *   -eq "[OrderID]:X"         matches when groupTag === X
  *   -startsWith "[OrderID]:X" matches when groupTag starts with X
  *
- * so e.g. a device tagged "MALO-KIOSK-VM" is a member of both a
- * `-startsWith "[OrderID]:MALO-KIOSK"` group and a `-eq "[OrderID]:MALO-KIOSK-VM"`
+ * so e.g. a device tagged "SALES-KIOSK-VM" is a member of both a
+ * `-startsWith "[OrderID]:SALES-KIOSK"` group and a `-eq "[OrderID]:SALES-KIOSK-VM"`
  * group. All matching is case-insensitive (Entra treats Group Tags that way).
  *
  * Clauses are combined with OR by default (the common `(... ) or (... )`
