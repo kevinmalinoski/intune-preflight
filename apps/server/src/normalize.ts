@@ -133,6 +133,14 @@ function extractCatalogValue(instance: Record<string, unknown>, definitionId: st
   const choice = instance["choiceSettingValue"] as { value?: unknown } | undefined;
   if (choice && typeof choice.value === "string") return cleanChoiceOptionId(choice.value, definitionId);
 
+  const choiceCollection = instance["choiceSettingCollectionValue"] as Array<{ value?: unknown }> | undefined;
+  if (Array.isArray(choiceCollection)) {
+    const values = choiceCollection
+      .map((c) => (typeof c.value === "string" ? cleanChoiceOptionId(c.value, definitionId) : undefined))
+      .filter((v): v is string => v !== undefined);
+    return values.length ? values.join(", ") : undefined;
+  }
+
   const simple = instance["simpleSettingValue"] as { value?: unknown } | undefined;
   if (simple && "value" in simple) return stringifyValue(simple.value);
 
@@ -142,10 +150,10 @@ function extractCatalogValue(instance: Record<string, unknown>, definitionId: st
     return values.length ? values.join(", ") : undefined;
   }
 
-  const groupCollection = instance["groupSettingCollectionValue"] as unknown[] | undefined;
-  if (Array.isArray(groupCollection)) return groupCollection.length ? `${groupCollection.length} configured item(s)` : undefined;
-
-  return stringifyValue(instance["value"] ?? instance);
+  // Group collections (and any container without a direct value) hold their
+  // real settings as child instances -- those are pulled out by the recursive
+  // walk in flattenSettingsCatalogEntries, so there's no scalar value here.
+  return undefined;
 }
 
 /**
@@ -159,22 +167,31 @@ function extractCatalogValue(instance: Record<string, unknown>, definitionId: st
 export function flattenSettingsCatalogEntries(
   entries: Array<{ settingInstance?: Record<string, unknown> }>
 ): CspSetting[] {
-  const settings: CspSetting[] = [];
-  for (const entry of entries) {
-    const instance = entry.settingInstance;
-    if (!instance) continue;
-    const definitionId = (instance.settingDefinitionId as string) ?? "unknown";
-    const stringValue = extractCatalogValue(instance, definitionId);
-    if (stringValue === undefined) continue;
-    const { area, name } = parseCatalogDefinitionId(definitionId);
-    settings.push({
-      settingId: definitionId,
-      cspArea: area,
-      displayName: name,
-      value: stringValue,
-    });
-  }
-  return settings;
+  const bySettingId = new Map<string, CspSetting>();
+
+  const visit = (instance: Record<string, unknown> | undefined): void => {
+    if (!instance) return;
+    const definitionId = instance["settingDefinitionId"] as string | undefined;
+    if (definitionId) {
+      const value = extractCatalogValue(instance, definitionId);
+      if (value !== undefined && !bySettingId.has(definitionId)) {
+        const { area, name } = parseCatalogDefinitionId(definitionId);
+        bySettingId.set(definitionId, { settingId: definitionId, cspArea: area, displayName: name, value });
+      }
+    }
+    // Settings Catalog settings are hierarchical -- a choice or group can carry
+    // dependent child settings (e.g. a "Device Lock" parent -> "Max Inactivity
+    // Time Device Lock"). Walk every nesting so those children aren't dropped.
+    const choice = instance["choiceSettingValue"] as { children?: unknown[] } | undefined;
+    choice?.children?.forEach((c) => visit(c as Record<string, unknown>));
+    const choiceCollection = instance["choiceSettingCollectionValue"] as Array<{ children?: unknown[] }> | undefined;
+    choiceCollection?.forEach((c) => c.children?.forEach((child) => visit(child as Record<string, unknown>)));
+    const groupCollection = instance["groupSettingCollectionValue"] as Array<{ children?: unknown[] }> | undefined;
+    groupCollection?.forEach((g) => g.children?.forEach((child) => visit(child as Record<string, unknown>)));
+  };
+
+  for (const entry of entries) visit(entry.settingInstance);
+  return [...bySettingId.values()];
 }
 
 /**
