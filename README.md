@@ -1,17 +1,25 @@
-# Intune Policy Baseline
+# Intune Preflight
 
-**Intune Policy Sets, without Policy Sets.**
+**Run the assignment check before your devices ever take off.**
 
-Intune makes you click into every Configuration Profile, Compliance Policy, Settings Catalog policy, and Administrative Template one at a time to see what's actually applied to a device group. This tool connects to your tenant, reads every policy and its assignments, and computes — automatically — the full merged CSP-level baseline for each device group. No manual Policy Set authoring required.
+Intune makes you click into every Configuration Profile, Compliance Policy, Settings Catalog policy, and Administrative Template one at a time to work out what actually lands on a device. Intune Preflight connects to your tenant, reads every policy and its assignments, and lets you **simulate an endpoint** — pick an OS, the Entra groups it belongs to, its Autopilot Group Tag, and any Assignment Filters it matches — then computes the full merged CSP-level baseline that endpoint would receive. No hardware, no enrollment, no Policy Sets.
 
-- 🖥️ **Endpoint simulator** — pick an OS platform and the Entra security groups an endpoint belongs to, and see exactly which policies apply as a connected diagram: device → groups → policies
-- 🚫 **Include/exclude aware** — Intune assignments can explicitly *exclude* a group from a policy; this is resolved correctly (excludes always win) and shown directly in the diagram and baseline, not silently dropped
-- 🎯 **Assignment Filter aware** — pick the Intune Assignment Filter(s) your simulated endpoint matches (e.g. "Kiosk Devices"), and policies whose assignment includes/excludes a filter are resolved correctly — not just group membership
-- 🔗 **Dynamic group implication** — selecting a dynamic group whose membership rule logically guarantees membership in another dynamic group too (e.g. a narrower OrderID prefix) automatically adds that group, flagged "Implied by rule" so it can be eyeballed against Entra
-- 🌐 **Platform filter** — Windows, macOS, iOS/iPadOS, and Android policies are scoped separately so e.g. macOS compliance policies don't clutter a Windows simulation
-- 🔍 **Drill-down baseline** — every CSP setting from every applied policy, merged into one filterable table, with conflicting settings flagged
-- 📤 **Export** — JSON or CSV export of the simulated endpoint's full baseline
-- 🪶 **Lightweight** — no database, no build pipeline beyond Vite/TypeScript, runs as two small Node processes (or two containers)
+It's a read-only, self-hosted tool meant for validating and understanding assignments in a sandbox or production tenant before you roll changes out to real devices.
+
+## Features
+
+- 🛫 **Endpoint simulator** — pick an OS platform and the Entra security groups an endpoint belongs to, and see exactly which policies apply as a connected diagram: device → groups → policies.
+- 🏷️ **Autopilot Group Tag aware** — flag the endpoint as an Autopilot device and type its Group Tag; every dynamic group whose rule that tag satisfies (evaluating the `[OrderID]` `-eq` / `-startsWith` clauses, combined with `or`/`and`) is auto-selected in real time. The "Autopilot device" toggle also links the default Autopilot-joined groups (bare `[ZTDId]` rule).
+- 🔗 **Dynamic group implication** — selecting a dynamic group whose membership rule logically guarantees membership in another dynamic group too (e.g. a narrower `[OrderID]` prefix) automatically adds that group, flagged "Implied by rule" so it can be eyeballed against Entra.
+- 🚫 **Include/exclude aware** — Intune assignments can explicitly *exclude* a group from a policy; this is resolved correctly (excludes always win) and shown directly in the diagram and baseline, not silently dropped.
+- 🎯 **Assignment Filter aware** — pick the Intune Assignment Filter(s) your simulated endpoint matches (e.g. "Kiosk Devices"); policies whose assignment includes/excludes a filter are resolved correctly, not just by group membership. A device can match several filters at once.
+- 🌐 **Platform filter** — Windows, macOS, iOS/iPadOS, and Android policies are scoped separately so e.g. macOS compliance policies don't clutter a Windows simulation.
+- 🔍 **Merged baseline drill-down** — every CSP setting from every applied policy, merged into one filterable table, with genuine **conflicts** (same setting, different values) and **policy overlaps** (same setting, same value) surfaced separately.
+- 📤 **Export** — JSON or CSV export of the simulated endpoint's full baseline.
+- 🔄 **Refresh from Intune** — an in-memory cache keeps things fast; one click clears it and re-reads the tenant after you make changes in the admin center.
+- 🪶 **Lightweight** — no database, runs as one small API process + one static web app (or two containers via Docker).
+
+Policy types read today: **Device Configuration profiles, Settings Catalog, Compliance policies, Administrative Templates, and Platform Scripts** (Windows PowerShell + macOS shell). Proactive Remediations and enrollment-time policies (Device Preparation / ESP) are intentionally excluded.
 
 ## How it works
 
@@ -21,20 +29,33 @@ Microsoft Graph  --->  apps/server (Fastify)  --->  apps/web (React + React Flow
                          simulation engine
 ```
 
-The server authenticates to Microsoft Graph using an Azure AD **app registration** (client-credentials flow — no per-user sign-in needed), pulls every device configuration, compliance policy, Settings Catalog policy, and administrative template along with their group assignments (both included and excluded), and computes a merged baseline for whatever combination of groups/platform you select. Results are cached in memory for `CACHE_TTL_SECONDS` (default 5 minutes) — there is intentionally no database, to keep the app easy to run and reason about. `POST /api/refresh` clears the cache on demand.
+The server authenticates to Microsoft Graph using an Entra **app registration** (client-credentials flow — no per-user sign-in), pulls every policy along with its group assignments (both included and excluded), the assignment filters, the Autopilot deployment profiles, and the security groups (with their dynamic membership rules), then computes a merged baseline for whatever combination of groups / platform / filters you select. Results are cached in memory for `CACHE_TTL_SECONDS` (default 300s) — there is intentionally no database, to keep the app easy to run and reason about. The **Refresh from Intune** button (or `POST /api/refresh`) clears the cache on demand.
 
-## 1. Create an Azure AD app registration
+<!-- Add a screenshot or short GIF of the simulator here before publishing. -->
+
+## Who can install this — required Entra roles
+
+The app uses **application (app-only) permissions**, which require **admin consent**. Granting that consent is a privileged action:
+
+- **Reading the data** afterwards only needs the read-only Graph scopes below — well within what an **Intune Administrator** can see.
+- **Creating the app registration and granting admin consent** needs a higher role: **Global Administrator**, or **Privileged Role Administrator** / **Cloud Application Administrator** / **Application Administrator**.
+
+So if you are *only* an Intune Administrator, you will need a Global Admin (or one of the roles above) to create the app registration and click **Grant admin consent** once. After that, day-to-day use needs no elevated role.
+
+## 1. Create an Entra app registration
 
 1. Go to [entra.microsoft.com](https://entra.microsoft.com) → **Identity → Applications → App registrations → New registration**.
-2. Name it something like `intune-policy-baseline`, leave redirect URI blank, click **Register**.
+2. Name it something like `intune-preflight`, leave the redirect URI blank, click **Register**.
 3. Under **API permissions → Add a permission → Microsoft Graph → Application permissions**, add:
-   - `DeviceManagementConfiguration.Read.All`
-   - `DeviceManagementManagedDevices.Read.All`
-   - `Group.Read.All`
-   - `Device.Read.All`
-   - `DeviceManagementServiceConfig.Read.All` (optional — only needed to discover groups targeted by Windows Autopilot deployment profiles; the app skips this gracefully if omitted)
-   - `DeviceManagementScripts.Read.All` (optional — only needed for Platform Scripts, i.e. Windows PowerShell / macOS shell scripts; the app skips them gracefully if omitted. Proactive Remediations are intentionally not included.)
-4. Click **Grant admin consent** for your tenant.
+
+   | Permission | Needed for | Required? |
+   |---|---|---|
+   | `DeviceManagementConfiguration.Read.All` | Configuration profiles, Compliance, Settings Catalog, Administrative Templates, Assignment Filters | **Required** |
+   | `Group.Read.All` | Resolving group names and reading dynamic membership rules | **Required** |
+   | `DeviceManagementServiceConfig.Read.All` | Windows Autopilot deployment profiles | Optional — skipped gracefully if omitted |
+   | `DeviceManagementScripts.Read.All` | Platform Scripts (Windows PowerShell + macOS shell) | Optional — skipped gracefully if omitted |
+
+4. Click **Grant admin consent** for your tenant (needs one of the roles noted above).
 5. Under **Certificates & secrets → New client secret**, create a secret and copy its value immediately (it's only shown once).
 6. Note your **Application (client) ID**, **Directory (tenant) ID**, and the **client secret** value.
 
@@ -46,21 +67,11 @@ Full reference: [Microsoft Graph permissions reference](https://learn.microsoft.
 cp .env.example .env
 ```
 
-Fill in `TENANT_ID`, `CLIENT_ID`, and `CLIENT_SECRET` from step 1.
+Fill in `TENANT_ID`, `CLIENT_ID`, and `CLIENT_SECRET` from step 1. `PORT` (default 4000) and `CACHE_TTL_SECONDS` (default 300) are optional.
 
 ## 3. Run
 
-### Option A: npm (requires Node.js 20+)
-
-```bash
-npm install
-npm run dev
-```
-
-- Server: http://localhost:4000
-- Web UI: http://localhost:5173
-
-### Option B: Docker
+### Option A: Docker (recommended — closest to a real deployment)
 
 ```bash
 docker compose up --build
@@ -68,31 +79,52 @@ docker compose up --build
 
 - Web UI: http://localhost:8080
 
+This builds and runs both the compiled API and the static web app — the same packaging anyone cloning the repo gets.
+
+### Option B: npm (for local development, requires Node.js 20+)
+
+```bash
+npm install
+npm run dev
+```
+
+- Web UI: http://localhost:5173 (the dev server, with hot reload)
+- API: http://localhost:4000 (the UI proxies `/api` calls here automatically)
+
+`npm run dev` runs both processes together and reloads on every file change — ideal while iterating. To test the production build locally instead, run `npm run build`, then `npm start -w apps/server` and `npm run preview -w apps/web`.
+
 ## Project layout
 
 ```
-apps/server/    Fastify API — Graph auth, data fetch, simulation engine
-apps/web/       React + Vite UI — endpoint simulator (React Flow) + drill-down panel
-packages/shared/  TypeScript types shared by both apps
+apps/server/      Fastify API — Graph auth, data fetch, simulation engine
+apps/web/         React + Vite UI — endpoint simulator (React Flow) + drill-down panel
+packages/shared/  TypeScript types + rule helpers shared by both apps
 ```
 
 ## API
 
 | Endpoint | Description |
 |---|---|
-| `GET /api/groups` | Device groups with policy/setting/conflict counts |
+| `GET /api/health` | Liveness check |
+| `GET /api/groups` | Security groups referenced by assignments, with policy/setting/conflict counts and membership rules |
 | `GET /api/filters` | Intune Assignment Filters available in the tenant |
-| `GET /api/simulate?groups=id1,id2&platform=windows&deviceFilterIds=id1,id2` | Simulated endpoint baseline for the given groups, platform (`windows`\|`macos`\|`ios`\|`android`), and Assignment Filter(s) -- a device can match more than one filter at once |
+| `GET /api/simulate?groups=id1,id2&platform=windows&deviceFilterIds=id1,id2` | Simulated endpoint baseline for the given groups, platform (`windows`\|`macos`\|`ios`\|`android`), and Assignment Filter(s) |
 | `GET /api/simulate/export?groups=...&platform=...&deviceFilterIds=...&format=json\|csv` | Download the simulated baseline |
 | `POST /api/refresh` | Clear the in-memory cache and re-fetch from Graph |
 
+> Autopilot "device" and Group Tag selection are resolved in the web UI (they drive which group ids get sent in `groups`), so the API surface stays a simple "given these groups, compute the baseline."
+
 ## Notes & limitations
 
-- **Read-only.** This tool never writes to your tenant — application permissions used are all `*.Read.All`.
-- **In-memory cache, no database.** Data is re-fetched from Graph on first request after each cache expiry or server restart. If you need persistence across restarts or multiple instances, swap `apps/server/src/cache.ts` for Redis or SQLite.
-- **Settings flattening is schema-agnostic.** Device Configuration and Compliance Policy settings are derived directly from each Graph resource's own properties rather than a hand-maintained CSP schema per profile type — this keeps the tool maintainable as Intune adds new policy types, at the cost of raw Graph field names showing up as setting names in some cases.
-- **Dynamic group membership rules are surfaced, not fully evaluated.** The app shows you a dynamic group's actual membership rule so you can verify it, but it doesn't check whether a specific device/user actually matches that rule — confirm in Entra directly. The "implied group" feature is a best-effort heuristic limited to simple same-property `-startsWith`/`-eq` clauses (the common case for OrderID/serial-prefix-scoped groups); it doesn't parse the full Entra dynamic-membership-rule language (boolean structure, other operators, non-device properties), so always double-check an implied group against the real rules before relying on it.
-- Tested against a sandbox Microsoft 365 tenant. Always verify against the Intune admin center before relying on the computed baseline for compliance decisions.
+- **Read-only.** This tool never writes to your tenant — the Graph permissions used are all `*.Read.All`.
+- **In-memory cache, no database.** Data is re-fetched from Graph on the first request after each cache expiry, a refresh, or a server restart. If you need persistence across restarts or multiple instances, swap `apps/server/src/cache.ts` for Redis or SQLite.
+- **Settings flattening is schema-agnostic.** Configuration and Compliance settings are derived directly from each Graph resource's own properties rather than a hand-maintained CSP schema per profile type — this keeps the tool maintainable as Intune adds new policy types, at the cost of raw Graph field names showing up as setting names in some cases.
+- **Dynamic membership is evaluated best-effort, not queried.** The app does not ask Graph whether a specific device/user is in a group; it reasons over the membership *rules*:
+  - **Group Tag matching** evaluates a group's `[OrderID]` clauses (`-eq` / `-startsWith`, combined with a single level of `or` / `and`). Arbitrarily nested boolean expressions are not parsed.
+  - **Rule implication** and the **Autopilot-joined** link (`[ZTDId]`) are heuristics over the same clause shapes.
+
+  Implied and auto-selected groups are always surfaced in the UI so you can verify them — always double-check against the real rules in Entra before relying on the result.
+- **Tested against a sandbox Microsoft 365 tenant.** Always verify against the Intune admin center before relying on the computed baseline for compliance decisions.
 
 ## License
 
