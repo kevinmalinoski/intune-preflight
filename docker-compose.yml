@@ -4,6 +4,14 @@ services:
       context: .
       dockerfile: apps/server/Dockerfile
     env_file: .env
+    # Disable IPv6 in the container. Docker Desktop / WSL2 often assign an IPv6
+    # address with no working IPv6 route, which makes MSAL's token request to
+    # login.microsoftonline.com fail with ENETUNREACH even though IPv4 works.
+    # Forcing IPv4-only outbound avoids that. Remove only if you know your
+    # container has a working IPv6 route.
+    sysctls:
+      - net.ipv6.conf.all.disable_ipv6=1
+      - net.ipv6.conf.default.disable_ipv6=1
     ports:
       - "4000:4000"
     restart: unless-stopped
