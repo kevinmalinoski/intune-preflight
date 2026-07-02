@@ -40,6 +40,19 @@ async function getCollectionWithBetaFallback<T>(path: string): Promise<{ items: 
   }
 }
 
+/**
+ * Builds the log line for an optional resource that failed to load. The cause
+ * is usually one of two very different things -- a missing Graph permission
+ * (403) or a network failure (the server can't reach Graph at all) -- so the
+ * message must not assume "grant a permission" when it's really connectivity.
+ */
+function skipReason(err: Error, grantHint: string): string {
+  if (/network|ENETUNREACH|ENOTFOUND|ETIMEDOUT|ECONNREFUSED|ECONNRESET|fetch failed/i.test(err.message)) {
+    return `${err.message} -- this is a network error reaching Microsoft Graph, NOT a permissions problem; check the server's outbound connectivity.`;
+  }
+  return `${err.message}. ${grantHint}`;
+}
+
 interface ResolvedAssignments {
   includedGroupIds: string[];
   excludedGroupIds: string[];
@@ -263,7 +276,7 @@ async function fetchPlatformScripts(): Promise<IntunePolicy[]> {
       // (DeviceManagementScripts.Read.All) beyond the core set. Treat this
       // as optional rather than failing the whole tenant load.
       console.warn(
-        `Skipping ${source.path}: ${(err as Error).message}. Grant the app DeviceManagementScripts.Read.All permission to enable Platform Scripts.`
+        `Skipping ${source.path}: ${skipReason(err as Error, "If this is a 403, grant DeviceManagementScripts.Read.All to enable Platform Scripts.")}`
       );
       continue;
     }
@@ -312,7 +325,7 @@ async function fetchAutopilotProfiles(): Promise<AutopilotProfile[]> {
     // (DeviceManagementServiceConfig.Read.All) beyond the core set. Treat this
     // as optional rather than failing the whole tenant load.
     console.warn(
-      `Skipping Autopilot profiles: ${(err as Error).message}. Grant the app DeviceManagementServiceConfig.Read.All permission to enable them.`
+      `Skipping Autopilot profiles: ${skipReason(err as Error, "If this is a 403, grant DeviceManagementServiceConfig.Read.All to enable them.")}`
     );
     return [];
   }
@@ -338,7 +351,7 @@ async function fetchAssignmentFilters(): Promise<AssignmentFilter[]> {
   try {
     items = (await getCollectionWithBetaFallback<Record<string, unknown>>("/deviceManagement/assignmentFilters")).items;
   } catch (err) {
-    console.warn(`Skipping Assignment Filters: ${(err as Error).message}.`);
+    console.warn(`Skipping Assignment Filters: ${skipReason(err as Error, "If this is a 403, grant the required permission to enable them.")}`);
     return [];
   }
   return items.map((item) => ({
