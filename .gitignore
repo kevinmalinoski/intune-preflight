@@ -1,8 +1,9 @@
 node_modules/
 dist/
 build/
-.env
-.env.local
+# Ignore every .env variant (incl. backups like .envmalosandboxbackup); keep the example.
+.env*
+!.env.example
 *.log
 *.tsbuildinfo
 .DS_Store

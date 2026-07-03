@@ -1,4 +1,4 @@
-import type { CspSetting, PolicyKind, Platform } from "@intune-preflight/shared";
+import type { CspSetting, Platform } from "@intune-preflight/shared";
 
 // Metadata fields present on most Graph device-management resources that aren't
 // actual configuration settings -- excluded when flattening a policy into CSP settings.
@@ -327,7 +327,16 @@ export interface AssignmentTarget {
  * scopes it to devices matching a rule -- e.g. a policy assigned to All
  * Devices but with an `exclude` filter for "Kiosk Devices" does NOT apply to
  * kiosks, even though the group-level logic alone would say it does.
+ *
+ * Finally, some assignments reference the built-in All Devices / All Users
+ * targets via a plain `groupAssignmentTarget` carrying Intune's well-known
+ * GUIDs, rather than the dedicated `allDevices`/`allLicensedUsers` OData types.
+ * Those GUIDs aren't real Entra groups, so treating them as one leaves an
+ * unresolvable raw GUID in the UI -- map them to the virtual targets instead.
  */
+const WELL_KNOWN_ALL_DEVICES_GUID = "adadadad-808e-44e2-905a-0b7873a8a531";
+const WELL_KNOWN_ALL_USERS_GUID = "acacacac-9df4-4c7d-9d50-4ef0226f57a9";
+
 export function parseAssignmentTarget(assignment: {
   target?: {
     "@odata.type"?: string;
@@ -338,6 +347,8 @@ export function parseAssignmentTarget(assignment: {
 }): AssignmentTarget {
   const target = assignment.target;
   const type = target?.["@odata.type"] ?? "";
+  const groupId = target?.groupId;
+  const wellKnown = groupId?.toLowerCase();
   const filterId = target?.deviceAndAppManagementAssignmentFilterId ?? undefined;
   const filterType =
     target?.deviceAndAppManagementAssignmentFilterType === "include" ||
@@ -346,10 +357,10 @@ export function parseAssignmentTarget(assignment: {
       : undefined;
   const filter: Pick<AssignmentTarget, "filterId" | "filterType"> = filterId && filterType ? { filterId, filterType } : {};
 
-  if (type.includes("exclusionGroupAssignmentTarget")) return { groupId: target?.groupId, isExclude: true, ...filter };
-  if (type.includes("allDevices")) return { isAllDevices: true, ...filter };
-  if (type.includes("allLicensedUsers")) return { isAllUsers: true, ...filter };
-  return { groupId: target?.groupId, ...filter };
+  if (type.includes("exclusionGroupAssignmentTarget")) return { groupId, isExclude: true, ...filter };
+  if (type.includes("allDevices") || wellKnown === WELL_KNOWN_ALL_DEVICES_GUID) return { isAllDevices: true, ...filter };
+  if (type.includes("allLicensedUsers") || wellKnown === WELL_KNOWN_ALL_USERS_GUID) return { isAllUsers: true, ...filter };
+  return { groupId, ...filter };
 }
 
 /**
@@ -494,10 +505,16 @@ export function ruleImplies(selectedRule: string | undefined, otherRule: string 
 export const VIRTUAL_GROUP_ALL_DEVICES = { id: "virtual-all-devices", displayName: "All Devices", isVirtual: true };
 export const VIRTUAL_GROUP_ALL_USERS = { id: "virtual-all-users", displayName: "All Users", isVirtual: true };
 
-export const KIND_LABELS: Record<PolicyKind, string> = {
-  deviceConfiguration: "Device Configuration",
-  settingsCatalog: "Settings Catalog",
-  compliancePolicy: "Compliance Policy",
-  adminTemplate: "Administrative Template",
-  platformScript: "Platform Script",
-};
+/**
+ * Maps Intune's well-known All Devices / All Users GUIDs to the virtual group
+ * ids. Use this on any groupId collected straight from Graph (e.g. the macOS
+ * shell-script `groupAssignments` shape, which carries a raw `targetGroupId`
+ * and never passes through parseAssignmentTarget) so those built-in targets
+ * don't surface as unresolvable raw GUIDs. Any other id is returned unchanged.
+ */
+export function mapWellKnownGroupId(groupId: string): string {
+  const g = groupId.toLowerCase();
+  if (g === WELL_KNOWN_ALL_DEVICES_GUID) return VIRTUAL_GROUP_ALL_DEVICES.id;
+  if (g === WELL_KNOWN_ALL_USERS_GUID) return VIRTUAL_GROUP_ALL_USERS.id;
+  return groupId;
+}

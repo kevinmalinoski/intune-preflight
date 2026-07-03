@@ -54,8 +54,3 @@ export async function graphGetCollection<T>(path: string, useBeta = false): Prom
 
   return items;
 }
-
-export async function graphGet<T>(path: string, useBeta = false): Promise<T> {
-  const base = useBeta ? GRAPH_BETA : GRAPH_BASE;
-  return (await graphFetch(`${base}${path}`)) as T;
-}

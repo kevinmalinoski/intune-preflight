@@ -111,6 +111,15 @@ export function listGroupSummaries(data: TenantData): GroupSummary[] {
     .map((group) => {
       const applied = data.policies.filter((p) => appliesTo(p, [group.id]));
       const { settings, conflicts } = mergeSettings(applied);
+      // Every OS platform this group is meaningfully involved with -- either
+      // included or excluded by a policy of that platform. Autopilot profiles
+      // are Windows-only, so a group assigned to one counts as Windows. Used by
+      // the picker to hide groups that are irrelevant to the simulated OS.
+      const platforms = new Set<Platform>();
+      for (const p of data.policies) {
+        if (p.assignedGroupIds.includes(group.id) || p.excludedGroupIds.includes(group.id)) platforms.add(p.platform);
+      }
+      if (data.autopilotProfiles.some((a) => a.assignedGroupIds.includes(group.id))) platforms.add("windows");
       return {
         id: group.id,
         displayName: group.displayName,
@@ -119,6 +128,7 @@ export function listGroupSummaries(data: TenantData): GroupSummary[] {
         conflictCount: conflicts.length,
         isDynamic: group.isDynamic,
         membershipRule: group.membershipRule,
+        platforms: [...platforms],
       };
     })
     .sort((a, b) => b.settingsCount - a.settingsCount);

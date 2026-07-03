@@ -39,9 +39,14 @@ export function EndpointPicker({
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState(false);
 
+  // Only show groups that actually have policies (included or excluded) for the
+  // simulated OS -- a Windows-only group is noise when simulating macOS, etc.
   const filteredGroups = useMemo(
-    () => groups.filter((g) => g.displayName.toLowerCase().includes(search.toLowerCase())),
-    [groups, search]
+    () =>
+      groups.filter(
+        (g) => (g.platforms ?? []).includes(platform) && g.displayName.toLowerCase().includes(search.toLowerCase())
+      ),
+    [groups, search, platform]
   );
 
   const trimmedGroupTag = groupTag.trim();

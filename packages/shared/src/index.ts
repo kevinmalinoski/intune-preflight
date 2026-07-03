@@ -100,6 +100,8 @@ export interface GroupSummary {
   conflictCount: number;
   isDynamic?: boolean;
   membershipRule?: string;
+  /** OS platforms this group has assigned (or excluded) policies for -- used to hide it when a different OS is simulated. */
+  platforms: Platform[];
 }
 
 /** Why a group is part of an endpoint simulation. */
@@ -156,6 +158,11 @@ interface PhysicalIdClause {
  * `[OrderID]` tag (a legacy Autopilot/Entra naming quirk), the Autopilot
  * device id under `[ZTDId]`, etc. Boolean structure isn't parsed here; see
  * groupTagMatchesRule for how the clauses are combined.
+ *
+ * NOTE (v1): this regex-based extraction only handles flat clauses. Combined /
+ * nested dynamic-group rules (nested parens, mixed device properties, operators
+ * beyond -eq/-startsWith) are not fully evaluated -- a proper rule-expression
+ * parser/evaluator is the planned replacement. See ROADMAP.md.
  */
 function parsePhysicalIdClauses(rule: string): PhysicalIdClause[] {
   const pattern = /device\.devicePhysicalIDs?\s+-any\s*\(\s*_\s*-(eq|startsWith)\s+"\[([^\]]+)\](?::([^"]*))?"/gi;
