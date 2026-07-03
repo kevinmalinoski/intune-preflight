@@ -32,6 +32,17 @@ export function EndpointSimulator() {
     setDeviceFilterIds([]);
   }, [platform]);
 
+  // Drop selected groups that have no policies for the newly-selected OS, so the
+  // selection stays consistent with the (platform-filtered) group list.
+  useEffect(() => {
+    setSelectedGroupIds((prev) =>
+      prev.filter((id) => {
+        const g = groups.find((x) => x.id === id);
+        return !g || g.platforms.includes(platform);
+      })
+    );
+  }, [platform, groups]);
+
   // Entering a Group Tag drives selection directly, in real time: every group
   // a device carrying that tag would be a member of (evaluating its [OrderID]
   // clauses -- -eq, -startsWith, and or/and combinations) is auto-selected. A

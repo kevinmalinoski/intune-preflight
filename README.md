@@ -150,11 +150,13 @@ Read this before you host it anywhere other than your own machine:
 - **In-memory cache, no database.** Data is re-fetched from Graph on the first request after each cache expiry, a refresh, or a server restart. If you need persistence across restarts or multiple instances, swap `apps/server/src/cache.ts` for Redis or SQLite.
 - **Settings flattening is schema-agnostic.** Configuration and Compliance settings are derived directly from each Graph resource's own properties rather than a hand-maintained CSP schema per profile type — this keeps the tool maintainable as Intune adds new policy types, at the cost of raw Graph field names showing up as setting names in some cases.
 - **Dynamic membership is evaluated best-effort, not queried.** The app does not ask Graph whether a specific device/user is in a group; it reasons over the membership *rules*:
-  - **Group Tag matching** evaluates a group's `[OrderID]` clauses (`-eq` / `-startsWith`, combined with a single level of `or` / `and`). Arbitrarily nested boolean expressions are not parsed.
+  - **Group Tag matching** evaluates a group's `[OrderID]` clauses (`-eq` / `-startsWith`, combined with a single level of `or` / `and`).
   - **Rule implication** and the **Autopilot-joined** link (`[ZTDId]`) are heuristics over the same clause shapes.
+  - **Combined / nested dynamic-group rules are not fully evaluated** — rules that nest parentheses, mix device properties (e.g. an `[OrderID]` clause `and` a `deviceOSType` check), or use operators beyond `-eq`/`-startsWith` may be missed or over-matched by the Autopilot/Group Tag auto-selection. A proper rule-expression evaluator is planned for v1 — see [ROADMAP.md](ROADMAP.md).
 
   Implied and auto-selected groups are always surfaced in the UI so you can verify them — always double-check against the real rules in Entra before relying on the result.
-- **Tested against a sandbox Microsoft 365 tenant.** Always verify against the Intune admin center before relying on the computed baseline for compliance decisions.
+- **Overlap detection is Windows-only** for now (other platforms surface false overlaps from shared profile metadata); conflicts apply on all platforms. See [ROADMAP.md](ROADMAP.md) for the full list of known limitations and planned v1 work.
+- **Tested against sandbox Microsoft 365 tenants.** Always verify against the Intune admin center before relying on the computed baseline for compliance decisions.
 
 ## Disclaimer
 

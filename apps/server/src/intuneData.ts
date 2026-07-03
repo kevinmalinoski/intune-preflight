@@ -4,6 +4,7 @@ import {
   flattenScriptToCspSettings,
   flattenSettingsCatalogEntries,
   flattenToCspSettings,
+  mapWellKnownGroupId,
   parseAssignmentTarget,
   platformFromAssignmentFilter,
   platformFromOdataType,
@@ -87,30 +88,39 @@ function resolveAssignmentGroupIds(assignments: RawAssignment[]): ResolvedAssign
   return { includedGroupIds: [...included], excludedGroupIds: [...excluded], assignmentFilters };
 }
 
+/** Logs and skips a single malformed/failed item so it doesn't drop its whole category. */
+function warnSkippedItem(kind: string, id: unknown, err: unknown): void {
+  console.warn(`Skipping one ${kind} (${(id as string) ?? "unknown"}): ${(err as Error).message}`);
+}
+
 async function fetchDeviceConfigurations(): Promise<IntunePolicy[]> {
   const { items, useBeta } = await getCollectionWithBetaFallback<Record<string, unknown>>(
     "/deviceManagement/deviceConfigurations"
   );
   const result: IntunePolicy[] = [];
   for (const item of items) {
-    const id = item.id as string;
-    const displayName = (item.displayName as string) ?? "Untitled";
-    const assignments = await graphGetCollection<RawAssignment>(
-      `/deviceManagement/deviceConfigurations/${id}/assignments`,
-      useBeta
-    );
-    const { includedGroupIds, excludedGroupIds, assignmentFilters } = resolveAssignmentGroupIds(assignments);
-    result.push({
-      id,
-      kind: "deviceConfiguration",
-      displayName,
-      description: item.description as string | undefined,
-      platform: platformFromOdataType(item["@odata.type"] as string | undefined),
-      settings: flattenToCspSettings(item),
-      assignedGroupIds: includedGroupIds,
-      excludedGroupIds,
-      assignmentFilters,
-    });
+    try {
+      const id = item.id as string;
+      const displayName = (item.displayName as string) ?? "Untitled";
+      const assignments = await graphGetCollection<RawAssignment>(
+        `/deviceManagement/deviceConfigurations/${id}/assignments`,
+        useBeta
+      );
+      const { includedGroupIds, excludedGroupIds, assignmentFilters } = resolveAssignmentGroupIds(assignments);
+      result.push({
+        id,
+        kind: "deviceConfiguration",
+        displayName,
+        description: item.description as string | undefined,
+        platform: platformFromOdataType(item["@odata.type"] as string | undefined),
+        settings: flattenToCspSettings(item),
+        assignedGroupIds: includedGroupIds,
+        excludedGroupIds,
+        assignmentFilters,
+      });
+    } catch (err) {
+      warnSkippedItem("device configuration", item.id, err);
+    }
   }
   return result;
 }
@@ -121,24 +131,28 @@ async function fetchCompliancePolicies(): Promise<IntunePolicy[]> {
   );
   const result: IntunePolicy[] = [];
   for (const item of items) {
-    const id = item.id as string;
-    const displayName = (item.displayName as string) ?? "Untitled";
-    const assignments = await graphGetCollection<RawAssignment>(
-      `/deviceManagement/deviceCompliancePolicies/${id}/assignments`,
-      useBeta
-    );
-    const { includedGroupIds, excludedGroupIds, assignmentFilters } = resolveAssignmentGroupIds(assignments);
-    result.push({
-      id,
-      kind: "compliancePolicy",
-      displayName,
-      description: item.description as string | undefined,
-      platform: platformFromOdataType(item["@odata.type"] as string | undefined),
-      settings: flattenToCspSettings(item),
-      assignedGroupIds: includedGroupIds,
-      excludedGroupIds,
-      assignmentFilters,
-    });
+    try {
+      const id = item.id as string;
+      const displayName = (item.displayName as string) ?? "Untitled";
+      const assignments = await graphGetCollection<RawAssignment>(
+        `/deviceManagement/deviceCompliancePolicies/${id}/assignments`,
+        useBeta
+      );
+      const { includedGroupIds, excludedGroupIds, assignmentFilters } = resolveAssignmentGroupIds(assignments);
+      result.push({
+        id,
+        kind: "compliancePolicy",
+        displayName,
+        description: item.description as string | undefined,
+        platform: platformFromOdataType(item["@odata.type"] as string | undefined),
+        settings: flattenToCspSettings(item),
+        assignedGroupIds: includedGroupIds,
+        excludedGroupIds,
+        assignmentFilters,
+      });
+    } catch (err) {
+      warnSkippedItem("compliance policy", item.id, err);
+    }
   }
   return result;
 }
@@ -166,27 +180,31 @@ async function fetchSettingsCatalogPolicies(): Promise<IntunePolicy[]> {
   const result: IntunePolicy[] = [];
   for (const item of items) {
     if (isEnrollmentTimePolicy(item)) continue;
-    const id = item.id as string;
-    const displayName = (item.name as string) ?? (item.displayName as string) ?? "Untitled";
-    const [assignments, settingEntries] = await Promise.all([
-      graphGetCollection<RawAssignment>(`/deviceManagement/configurationPolicies/${id}/assignments`, useBeta),
-      graphGetCollection<{ settingInstance?: Record<string, unknown> }>(
-        `/deviceManagement/configurationPolicies/${id}/settings`,
-        useBeta
-      ),
-    ]);
-    const { includedGroupIds, excludedGroupIds, assignmentFilters } = resolveAssignmentGroupIds(assignments);
-    result.push({
-      id,
-      kind: "settingsCatalog",
-      displayName,
-      description: item.description as string | undefined,
-      platform: platformFromSettingsCatalog(item.platforms as string | undefined),
-      settings: flattenSettingsCatalogEntries(settingEntries),
-      assignedGroupIds: includedGroupIds,
-      excludedGroupIds,
-      assignmentFilters,
-    });
+    try {
+      const id = item.id as string;
+      const displayName = (item.name as string) ?? (item.displayName as string) ?? "Untitled";
+      const [assignments, settingEntries] = await Promise.all([
+        graphGetCollection<RawAssignment>(`/deviceManagement/configurationPolicies/${id}/assignments`, useBeta),
+        graphGetCollection<{ settingInstance?: Record<string, unknown> }>(
+          `/deviceManagement/configurationPolicies/${id}/settings`,
+          useBeta
+        ),
+      ]);
+      const { includedGroupIds, excludedGroupIds, assignmentFilters } = resolveAssignmentGroupIds(assignments);
+      result.push({
+        id,
+        kind: "settingsCatalog",
+        displayName,
+        description: item.description as string | undefined,
+        platform: platformFromSettingsCatalog(item.platforms as string | undefined),
+        settings: flattenSettingsCatalogEntries(settingEntries),
+        assignedGroupIds: includedGroupIds,
+        excludedGroupIds,
+        assignmentFilters,
+      });
+    } catch (err) {
+      warnSkippedItem("Settings Catalog policy", item.id, err);
+    }
   }
   return result;
 }
@@ -197,43 +215,47 @@ async function fetchAdminTemplates(): Promise<IntunePolicy[]> {
   );
   const result: IntunePolicy[] = [];
   for (const item of items) {
-    const id = item.id as string;
-    const displayName = (item.displayName as string) ?? "Untitled";
-    const [assignments, definitionValues] = await Promise.all([
-      graphGetCollection<RawAssignment>(`/deviceManagement/groupPolicyConfigurations/${id}/assignments`, useBeta),
-      // Expand the ADMX definition so each setting carries its real name and
-      // category path (a genuine CSP-style area) instead of a bare index, and
-      // so its settingId keys on the definition -- letting the same ADMX
-      // setting configured by two policies be detected as a conflict/overlap.
-      graphGetCollection<Record<string, unknown>>(
-        `/deviceManagement/groupPolicyConfigurations/${id}/definitionValues?$expand=definition`,
-        useBeta
-      ),
-    ]);
-    const settings = definitionValues.map((dv, idx) => {
-      const def = (dv.definition as Record<string, unknown> | undefined) ?? {};
-      const defId = (def.id as string) ?? (dv.id as string) ?? `${id}-${idx}`;
-      const category = ((def.categoryPath as string) ?? "").replace(/^\\+/, "").trim();
-      return {
-        settingId: `adminTemplate:${defId}`,
-        cspArea: category || "Administrative Templates",
-        displayName: (def.displayName as string) ?? `Policy setting ${idx + 1}`,
-        value: dv.enabled ? "Enabled" : "Disabled",
-      };
-    });
-    const { includedGroupIds, excludedGroupIds, assignmentFilters } = resolveAssignmentGroupIds(assignments);
-    result.push({
-      id,
-      kind: "adminTemplate",
-      displayName,
-      description: item.description as string | undefined,
-      // Administrative Templates (ADMX-backed) are Windows-only by design.
-      platform: "windows",
-      settings,
-      assignedGroupIds: includedGroupIds,
-      excludedGroupIds,
-      assignmentFilters,
-    });
+    try {
+      const id = item.id as string;
+      const displayName = (item.displayName as string) ?? "Untitled";
+      const [assignments, definitionValues] = await Promise.all([
+        graphGetCollection<RawAssignment>(`/deviceManagement/groupPolicyConfigurations/${id}/assignments`, useBeta),
+        // Expand the ADMX definition so each setting carries its real name and
+        // category path (a genuine CSP-style area) instead of a bare index, and
+        // so its settingId keys on the definition -- letting the same ADMX
+        // setting configured by two policies be detected as a conflict/overlap.
+        graphGetCollection<Record<string, unknown>>(
+          `/deviceManagement/groupPolicyConfigurations/${id}/definitionValues?$expand=definition`,
+          useBeta
+        ),
+      ]);
+      const settings = definitionValues.map((dv, idx) => {
+        const def = (dv.definition as Record<string, unknown> | undefined) ?? {};
+        const defId = (def.id as string) ?? (dv.id as string) ?? `${id}-${idx}`;
+        const category = ((def.categoryPath as string) ?? "").replace(/^\\+/, "").trim();
+        return {
+          settingId: `adminTemplate:${defId}`,
+          cspArea: category || "Administrative Templates",
+          displayName: (def.displayName as string) ?? `Policy setting ${idx + 1}`,
+          value: dv.enabled ? "Enabled" : "Disabled",
+        };
+      });
+      const { includedGroupIds, excludedGroupIds, assignmentFilters } = resolveAssignmentGroupIds(assignments);
+      result.push({
+        id,
+        kind: "adminTemplate",
+        displayName,
+        description: item.description as string | undefined,
+        // Administrative Templates (ADMX-backed) are Windows-only by design.
+        platform: "windows",
+        settings,
+        assignedGroupIds: includedGroupIds,
+        excludedGroupIds,
+        assignmentFilters,
+      });
+    } catch (err) {
+      warnSkippedItem("administrative template", item.id, err);
+    }
   }
   return result;
 }
@@ -249,7 +271,14 @@ interface RawGroupAssignment {
  * `{ targetGroupId }` rather than `{ target: {...} }`.
  */
 function resolveGroupAssignmentIds(assignments: RawGroupAssignment[]): string[] {
-  return [...new Set(assignments.map((a) => a.targetGroupId).filter((id): id is string => Boolean(id)))];
+  return [
+    ...new Set(
+      assignments
+        .map((a) => a.targetGroupId)
+        .filter((id): id is string => Boolean(id))
+        .map(mapWellKnownGroupId)
+    ),
+  ];
 }
 
 /**
@@ -281,33 +310,37 @@ async function fetchPlatformScripts(): Promise<IntunePolicy[]> {
       continue;
     }
     for (const item of items) {
-      const id = item.id as string;
-      const displayName = (item.displayName as string) ?? (item.fileName as string) ?? "Untitled";
+      try {
+        const id = item.id as string;
+        const displayName = (item.displayName as string) ?? (item.fileName as string) ?? "Untitled";
 
-      let includedGroupIds: string[];
-      let excludedGroupIds: string[];
-      let assignmentFilters: AssignmentFilterRef[];
-      if (source.assignmentStyle === "groupOnly") {
-        const assignments = await graphGetCollection<RawGroupAssignment>(`${source.path}/${id}/groupAssignments`, useBeta);
-        includedGroupIds = resolveGroupAssignmentIds(assignments);
-        excludedGroupIds = [];
-        assignmentFilters = [];
-      } else {
-        const assignments = await graphGetCollection<RawAssignment>(`${source.path}/${id}/assignments`, useBeta);
-        ({ includedGroupIds, excludedGroupIds, assignmentFilters } = resolveAssignmentGroupIds(assignments));
+        let includedGroupIds: string[];
+        let excludedGroupIds: string[];
+        let assignmentFilters: AssignmentFilterRef[];
+        if (source.assignmentStyle === "groupOnly") {
+          const assignments = await graphGetCollection<RawGroupAssignment>(`${source.path}/${id}/groupAssignments`, useBeta);
+          includedGroupIds = resolveGroupAssignmentIds(assignments);
+          excludedGroupIds = [];
+          assignmentFilters = [];
+        } else {
+          const assignments = await graphGetCollection<RawAssignment>(`${source.path}/${id}/assignments`, useBeta);
+          ({ includedGroupIds, excludedGroupIds, assignmentFilters } = resolveAssignmentGroupIds(assignments));
+        }
+
+        result.push({
+          id,
+          kind: "platformScript",
+          displayName,
+          description: item.description as string | undefined,
+          platform: source.platform,
+          settings: flattenScriptToCspSettings(item, id),
+          assignedGroupIds: includedGroupIds,
+          excludedGroupIds,
+          assignmentFilters,
+        });
+      } catch (err) {
+        warnSkippedItem("platform script", item.id, err);
       }
-
-      result.push({
-        id,
-        kind: "platformScript",
-        displayName,
-        description: item.description as string | undefined,
-        platform: source.platform,
-        settings: flattenScriptToCspSettings(item, id),
-        assignedGroupIds: includedGroupIds,
-        excludedGroupIds,
-        assignmentFilters,
-      });
     }
   }
   return result;
@@ -331,17 +364,21 @@ async function fetchAutopilotProfiles(): Promise<AutopilotProfile[]> {
   }
   const result: AutopilotProfile[] = [];
   for (const item of items) {
-    const id = item.id as string;
-    const assignments = await graphGetCollection<RawAssignment>(
-      `/deviceManagement/windowsAutopilotDeploymentProfiles/${id}/assignments`,
-      useBeta
-    );
-    result.push({
-      id,
-      displayName: (item.displayName as string) ?? "Untitled",
-      osLabel: "Windows 11",
-      assignedGroupIds: resolveAssignmentGroupIds(assignments).includedGroupIds,
-    });
+    try {
+      const id = item.id as string;
+      const assignments = await graphGetCollection<RawAssignment>(
+        `/deviceManagement/windowsAutopilotDeploymentProfiles/${id}/assignments`,
+        useBeta
+      );
+      result.push({
+        id,
+        displayName: (item.displayName as string) ?? "Untitled",
+        osLabel: "Windows 11",
+        assignedGroupIds: resolveAssignmentGroupIds(assignments).includedGroupIds,
+      });
+    } catch (err) {
+      warnSkippedItem("Autopilot profile", item.id, err);
+    }
   }
   return result;
 }
@@ -369,17 +406,33 @@ export interface TenantData {
   assignmentFilters: AssignmentFilter[];
 }
 
+/**
+ * Wraps a top-level resource fetch so one failing category -- a missing
+ * permission, a transient Graph error, a malformed policy -- degrades to empty
+ * instead of failing the entire tenant load with a 502. Each category is
+ * independent, so the rest of the baseline still renders and the failure is
+ * logged rather than swallowed silently.
+ */
+async function safeFetch<T>(label: string, fn: () => Promise<T[]>): Promise<T[]> {
+  try {
+    return await fn();
+  } catch (err) {
+    console.warn(`Could not load ${label}: ${(err as Error).message}. Continuing without it.`);
+    return [];
+  }
+}
+
 export async function loadTenantData(): Promise<TenantData> {
   return cache.getOrFetch("tenant-data", async () => {
     const [deviceConfigs, compliance, settingsCatalog, adminTemplates, platformScripts, autopilotProfiles, assignmentFilters] =
       await Promise.all([
-        fetchDeviceConfigurations(),
-        fetchCompliancePolicies(),
-        fetchSettingsCatalogPolicies(),
-        fetchAdminTemplates(),
-        fetchPlatformScripts(),
-        fetchAutopilotProfiles(),
-        fetchAssignmentFilters(),
+        safeFetch("device configurations", fetchDeviceConfigurations),
+        safeFetch("compliance policies", fetchCompliancePolicies),
+        safeFetch("Settings Catalog policies", fetchSettingsCatalogPolicies),
+        safeFetch("administrative templates", fetchAdminTemplates),
+        safeFetch("platform scripts", fetchPlatformScripts),
+        safeFetch("Autopilot profiles", fetchAutopilotProfiles),
+        safeFetch("assignment filters", fetchAssignmentFilters),
       ]);
 
     const policies = [...deviceConfigs, ...compliance, ...settingsCatalog, ...adminTemplates, ...platformScripts];
@@ -400,6 +453,10 @@ export async function loadTenantData(): Promise<TenantData> {
     if (groupIds.has(VIRTUAL_GROUP_ALL_USERS.id)) groups.push(VIRTUAL_GROUP_ALL_USERS);
 
     for (const id of realGroupIds) {
+      // A referenced group can be gone (a policy still assigned to a deleted
+      // group) or unreadable -- in both cases Graph returns no match. Label it
+      // clearly rather than leaving a bare GUID that looks like a real group.
+      const unresolvedLabel = `⚠ Deleted or inaccessible group (${id.slice(0, 8)}…)`;
       try {
         const group = await graphGetCollection<Record<string, unknown>>(
           `/groups?$filter=id eq '${id}'&$select=id,displayName,groupTypes,membershipRule`
@@ -408,12 +465,12 @@ export async function loadTenantData(): Promise<TenantData> {
         const groupTypes = (match?.groupTypes as string[] | undefined) ?? [];
         groups.push({
           id,
-          displayName: (match?.displayName as string) ?? id,
+          displayName: (match?.displayName as string) ?? unresolvedLabel,
           isDynamic: groupTypes.includes("DynamicMembership"),
           membershipRule: match?.membershipRule as string | undefined,
         });
       } catch {
-        groups.push({ id, displayName: id });
+        groups.push({ id, displayName: unresolvedLabel });
       }
     }
 
