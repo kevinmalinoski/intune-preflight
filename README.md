@@ -63,11 +63,22 @@ Full reference: [Microsoft Graph permissions reference](https://learn.microsoft.
 
 ## 2. Configure
 
+Copy the example env file to `.env`:
+
 ```bash
+# macOS / Linux
 cp .env.example .env
 ```
+```powershell
+# Windows (PowerShell)
+Copy-Item .env.example .env
+```
+```bat
+:: Windows (Command Prompt)
+copy .env.example .env
+```
 
-Fill in `TENANT_ID`, `CLIENT_ID`, and `CLIENT_SECRET` from step 1. `PORT` (default 4000) and `CACHE_TTL_SECONDS` (default 300) are optional.
+Fill in `TENANT_ID`, `CLIENT_ID`, and `CLIENT_SECRET` from step 1. `PORT` (default 4000) and `CACHE_TTL_SECONDS` (default 300) are optional. On Windows, save `.env` with **LF** line endings and bare `KEY=value` (no quotes) so Docker reads the values cleanly.
 
 ## 3. Run
 

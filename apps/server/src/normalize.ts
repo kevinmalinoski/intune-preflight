@@ -47,6 +47,40 @@ function odataTypeKey(raw: Record<string, unknown>): string {
 }
 
 /**
+ * ADDITIVE profile types: a device can legitimately carry many of them at once,
+ * so two instances are NOT a conflict or overlap -- pushing several is normal,
+ * expected configuration. Wi-Fi networks, VPNs, certificates, email accounts,
+ * and custom (OMA-URI / .mobileconfig) profiles all belong here. Their settings
+ * still show in the baseline, but are namespaced per policy so they never merge
+ * into a false conflict/overlap. Only singleton "system config" settings
+ * (device restrictions, endpoint protection, Windows Update, Windows Hello,
+ * Settings Catalog CSPs, Administrative Templates, ...) are compared.
+ *
+ * Matched as substrings against the @odata.type so it covers every platform's
+ * variant (windowsWifiConfiguration, iosWiFiConfiguration, macOSWiFiConfiguration,
+ * ...) without enumerating them all.
+ */
+const ADDITIVE_TYPE_KEYWORDS = [
+  "wifi",
+  "vpn",
+  "certificate",
+  "scep",
+  "pkcs",
+  "trustedroot",
+  "importedpfx",
+  "pfxcertificate",
+  "derivedcredential",
+  "custom", // OMA-URI (Windows) / .mobileconfig (macOS, iOS) custom profiles
+  "email",
+  "wirednetwork",
+];
+
+function isAdditivePolicyType(odataType: string | undefined): boolean {
+  const type = (odataType ?? "").toLowerCase();
+  return ADDITIVE_TYPE_KEYWORDS.some((keyword) => type.includes(keyword));
+}
+
+/**
  * Flattens a raw Graph device-management resource (deviceConfiguration,
  * deviceCompliancePolicy, etc.) into a normalized list of CSP-level settings.
  * Intune's own resource shapes already expose each configurable property as a
@@ -62,9 +96,48 @@ function odataTypeKey(raw: Record<string, unknown>): string {
  * every cross-policy conflict -- e.g. two Windows Update rings targeting the same
  * device would never be reported as conflicting.
  */
+/**
+ * Windows Custom (OMA-URI) profiles carry their settings in an `omaSettings`
+ * array, where each entry targets a specific CSP path (`omaUri`). Unlike an
+ * opaque macOS/iOS .mobileconfig payload, an OMA-URI IS a real CSP setting, so
+ * two custom profiles setting the same URI genuinely overlap (same value) or
+ * conflict (different values). Keying each on its URI -- stable across policies
+ * -- makes that detection work, which is why OMA-URI custom profiles are
+ * exempt from the additive treatment that opaque custom payloads get.
+ */
+function flattenOmaSettings(omaSettings: Array<Record<string, unknown>>): CspSetting[] {
+  const settings: CspSetting[] = [];
+  for (const oma of omaSettings) {
+    const uri = oma["omaUri"] as string | undefined;
+    if (!uri) continue;
+    const value = stringifyValue(oma["value"]);
+    if (value === undefined) continue;
+    const lastSegment = uri.split("/").filter(Boolean).pop() ?? uri;
+    settings.push({
+      settingId: `omaUri:${uri}`,
+      cspArea: "Custom (OMA-URI)",
+      displayName: (oma["displayName"] as string) || lastSegment,
+      value,
+    });
+  }
+  return settings;
+}
+
 export function flattenToCspSettings(raw: Record<string, unknown>): CspSetting[] {
+  // Windows Custom (OMA-URI) profiles are the one "custom" type worth comparing
+  // -- their omaSettings target real CSP paths. Opaque .mobileconfig payloads
+  // (macOS/iOS) have no omaSettings and fall through to the additive path below.
+  const omaSettings = raw["omaSettings"];
+  if (Array.isArray(omaSettings)) return flattenOmaSettings(omaSettings as Array<Record<string, unknown>>);
+
   const typeKey = odataTypeKey(raw);
   const cspArea = friendlyLabel(typeKey);
+  // Additive profiles (Wi-Fi, VPN, certificates, custom, ...) are namespaced by
+  // policy id so multiple instances never collapse into a false conflict/overlap;
+  // singleton system-config types keep a shared "<type>:<key>" id so genuine
+  // cross-policy disagreements are still detected.
+  const additive = isAdditivePolicyType(raw["@odata.type"] as string | undefined);
+  const policyId = (raw["id"] as string) ?? "";
   const settings: CspSetting[] = [];
   for (const [key, value] of Object.entries(raw)) {
     if (METADATA_KEYS.has(key)) continue;
@@ -76,7 +149,7 @@ export function flattenToCspSettings(raw: Record<string, unknown>): CspSetting[]
     // not actually disagree with one that sets it.
     if (stringValue.toLowerCase() === "notconfigured") continue;
     settings.push({
-      settingId: `${typeKey}:${key}`,
+      settingId: additive ? `${typeKey}:${policyId}:${key}` : `${typeKey}:${key}`,
       cspArea,
       displayName: friendlyLabel(key),
       value: stringValue,

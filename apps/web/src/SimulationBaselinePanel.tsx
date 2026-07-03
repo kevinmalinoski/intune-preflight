@@ -1,19 +1,20 @@
 import { useMemo, useState } from "react";
-import type { BaselineSetting, Platform, SimulationResult } from "@intune-preflight/shared";
+import type { Platform, SimulationResult } from "@intune-preflight/shared";
 import { api } from "./api.ts";
-
-type RowKind = "normal" | "conflict" | "overlap";
-
-interface DisplayRow extends BaselineSetting {
-  rowKind: RowKind;
-}
 
 type ViewFilter = "all" | "conflicts" | "overlaps";
 
+type DisplayRow =
+  | { kind: "normal"; settingId: string; cspArea: string; displayName: string; value: string; sourcePolicyName: string }
+  | { kind: "conflict"; settingId: string; cspArea: string; displayName: string; values: { value: string; sourcePolicyName: string }[] }
+  | { kind: "overlap"; settingId: string; cspArea: string; displayName: string; value: string; sources: string[] };
+
 /**
- * Expands conflicting AND overlapping settings into one row per source
- * policy, instead of hiding everything but the first. Conflicts (different
- * values) and overlaps (same value, redundant) are kept visually distinct.
+ * One display row per setting. Conflicts (genuine value disagreements) stay
+ * expanded so both sides are visible. Overlaps (same value across multiple
+ * policies) collapse into a single row that can be expanded to reveal the
+ * overlapping policies -- otherwise a layered baseline drowns the table in
+ * redundant rows.
  */
 function buildRows(simulation: SimulationResult): DisplayRow[] {
   const conflictsBySettingId = new Map(simulation.conflicts.map((c) => [c.settingId, c]));
@@ -23,39 +24,45 @@ function buildRows(simulation: SimulationResult): DisplayRow[] {
   for (const s of simulation.settings) {
     const conflict = conflictsBySettingId.get(s.settingId);
     if (conflict) {
-      for (const v of conflict.values) {
-        rows.push({
-          settingId: s.settingId,
-          cspArea: conflict.cspArea,
-          displayName: conflict.displayName,
-          value: v.value,
-          sourcePolicyId: v.sourcePolicyId,
-          sourcePolicyName: v.sourcePolicyName,
-          sourceKind: v.sourceKind,
-          rowKind: "conflict",
-        });
-      }
+      rows.push({
+        kind: "conflict",
+        settingId: s.settingId,
+        cspArea: conflict.cspArea,
+        displayName: conflict.displayName,
+        values: conflict.values.map((v) => ({ value: v.value, sourcePolicyName: v.sourcePolicyName })),
+      });
       continue;
     }
     const overlap = overlapsBySettingId.get(s.settingId);
     if (overlap) {
-      for (const sp of overlap.sourcePolicies) {
-        rows.push({
-          settingId: s.settingId,
-          cspArea: overlap.cspArea,
-          displayName: overlap.displayName,
-          value: overlap.value,
-          sourcePolicyId: sp.sourcePolicyId,
-          sourcePolicyName: sp.sourcePolicyName,
-          sourceKind: sp.sourceKind,
-          rowKind: "overlap",
-        });
-      }
+      rows.push({
+        kind: "overlap",
+        settingId: s.settingId,
+        cspArea: overlap.cspArea,
+        displayName: overlap.displayName,
+        value: overlap.value,
+        sources: overlap.sourcePolicies.map((sp) => sp.sourcePolicyName),
+      });
       continue;
     }
-    rows.push({ ...s, rowKind: "normal" });
+    rows.push({
+      kind: "normal",
+      settingId: s.settingId,
+      cspArea: s.cspArea,
+      displayName: s.displayName,
+      value: s.value,
+      sourcePolicyName: s.sourcePolicyName,
+    });
   }
   return rows;
+}
+
+function rowMatchesText(row: DisplayRow, needle: string): boolean {
+  const hay = [row.cspArea, row.displayName];
+  if (row.kind === "normal") hay.push(row.sourcePolicyName, row.value);
+  if (row.kind === "conflict") for (const v of row.values) hay.push(v.value, v.sourcePolicyName);
+  if (row.kind === "overlap") hay.push(row.value, ...row.sources);
+  return hay.some((h) => h.toLowerCase().includes(needle));
 }
 
 export function SimulationBaselinePanel({
@@ -73,16 +80,85 @@ export function SimulationBaselinePanel({
 }) {
   const [filter, setFilter] = useState("");
   const [view, setView] = useState<ViewFilter>("all");
+  const [expandedOverlaps, setExpandedOverlaps] = useState<Set<string>>(new Set());
+
+  const toggleOverlap = (id: string) =>
+    setExpandedOverlaps((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
 
   const allRows = useMemo(() => buildRows(simulation), [simulation]);
+  const needle = filter.toLowerCase();
   const rows = allRows.filter(
-    (s) =>
-      (view === "all" || (view === "conflicts" && s.rowKind === "conflict") || (view === "overlaps" && s.rowKind === "overlap")) &&
-      (!filter ||
-        s.displayName.toLowerCase().includes(filter.toLowerCase()) ||
-        s.cspArea.toLowerCase().includes(filter.toLowerCase()) ||
-        s.sourcePolicyName.toLowerCase().includes(filter.toLowerCase()))
+    (r) =>
+      (view === "all" || (view === "conflicts" && r.kind === "conflict") || (view === "overlaps" && r.kind === "overlap")) &&
+      (!filter || rowMatchesText(r, needle))
   );
+
+  const renderRow = (r: DisplayRow) => {
+    if (r.kind === "normal") {
+      return [
+        <tr key={r.settingId} className="border-t border-ink-800">
+          <td className="px-3 py-2 text-slate-400">{r.cspArea}</td>
+          <td className="px-3 py-2 text-slate-200">{r.displayName}</td>
+          <td className="max-w-[12rem] truncate px-3 py-2 text-slate-300" title={r.value}>
+            {r.value}
+          </td>
+          <td className="px-3 py-2 text-slate-400">{r.sourcePolicyName}</td>
+        </tr>,
+      ];
+    }
+    if (r.kind === "conflict") {
+      return r.values.map((v, i) => (
+        <tr key={`${r.settingId}-c-${i}`} className="border-t border-ink-800 bg-amber-500/10">
+          <td className="px-3 py-2 text-slate-400">{i === 0 ? r.cspArea : ""}</td>
+          <td className="px-3 py-2 text-slate-200">{i === 0 ? r.displayName : ""}</td>
+          <td className="max-w-[12rem] truncate px-3 py-2 text-slate-300" title={v.value}>
+            {v.value}
+          </td>
+          <td className="px-3 py-2 text-slate-400">
+            {v.sourcePolicyName}
+            <span className="ml-1.5 text-amber-400">⚠</span>
+          </td>
+        </tr>
+      ));
+    }
+    // overlap -- collapsible
+    const isExpanded = expandedOverlaps.has(r.settingId);
+    const out = [
+      <tr
+        key={`${r.settingId}-o`}
+        className="cursor-pointer border-t border-ink-800 bg-sky-500/10 hover:bg-sky-500/15"
+        onClick={() => toggleOverlap(r.settingId)}
+      >
+        <td className="px-3 py-2 text-slate-400">{r.cspArea}</td>
+        <td className="px-3 py-2 text-slate-200">{r.displayName}</td>
+        <td className="max-w-[12rem] truncate px-3 py-2 text-slate-300" title={r.value}>
+          {r.value}
+        </td>
+        <td className="px-3 py-2 text-sky-300">
+          <span className="mr-1 inline-block w-3 text-sky-400">{isExpanded ? "▾" : "▸"}</span>
+          {r.sources.length} policies
+          <span className="ml-1.5 text-sky-400">⇄</span>
+        </td>
+      </tr>,
+    ];
+    if (isExpanded) {
+      r.sources.forEach((src, i) => {
+        out.push(
+          <tr key={`${r.settingId}-o-${i}`} className="border-t border-ink-800/50 bg-sky-500/[0.04]">
+            <td className="px-3 py-1.5" />
+            <td className="px-3 py-1.5" />
+            <td className="px-3 py-1.5 text-[11px] text-slate-500">same value</td>
+            <td className="px-3 py-1.5 pl-8 text-slate-400">{src}</td>
+          </tr>
+        );
+      });
+    }
+    return out;
+  };
 
   return (
     <div className="fixed inset-y-0 right-0 z-20 flex w-full max-w-xl flex-col border-l border-ink-700 bg-ink-900 shadow-2xl">
@@ -108,6 +184,9 @@ export function SimulationBaselinePanel({
               </>
             )}
           </div>
+          {platform !== "windows" && (
+            <div className="mt-1 text-[11px] text-slate-500">Overlap detection is Windows-only for now.</div>
+          )}
         </div>
         <button onClick={onClose} className="rounded-md px-2 py-1 text-slate-400 hover:bg-ink-800 hover:text-slate-200">
           ✕
@@ -184,25 +263,7 @@ export function SimulationBaselinePanel({
             </tr>
           </thead>
           <tbody>
-            {rows.map((s, idx) => (
-              <tr
-                key={`${s.settingId}-${idx}`}
-                className={`border-t border-ink-800 ${
-                  s.rowKind === "conflict" ? "bg-amber-500/10" : s.rowKind === "overlap" ? "bg-sky-500/10" : ""
-                }`}
-              >
-                <td className="px-3 py-2 text-slate-400">{s.cspArea}</td>
-                <td className="px-3 py-2 text-slate-200">{s.displayName}</td>
-                <td className="max-w-[12rem] truncate px-3 py-2 text-slate-300" title={s.value}>
-                  {s.value}
-                </td>
-                <td className="px-3 py-2 text-slate-400">
-                  {s.sourcePolicyName}
-                  {s.rowKind === "conflict" && <span className="ml-1.5 text-amber-400">⚠</span>}
-                  {s.rowKind === "overlap" && <span className="ml-1.5 text-sky-400">⇄</span>}
-                </td>
-              </tr>
-            ))}
+            {rows.flatMap(renderRow)}
             {rows.length === 0 && (
               <tr>
                 <td colSpan={4} className="px-3 py-6 text-center text-slate-500">
