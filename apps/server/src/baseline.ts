@@ -248,7 +248,15 @@ export function computeSimulation(
   const appliedPolicyObjs = candidatePolicies.filter((p) => policies.some((sp) => sp.id === p.id));
   const { settings, conflicts, overlaps } = mergeSettings(appliedPolicyObjs);
 
-  return { groups, policies, excludedPolicies, settings, conflicts, overlaps };
+  // Overlap detection is only trustworthy on Windows today. Other platforms --
+  // e.g. macOS custom .mobileconfig profiles -- share identical metadata fields
+  // (deploymentChannel, payload file names, etc.) across every profile, which
+  // surface as false overlaps. Suppress overlaps off Windows until those types
+  // get proper per-platform handling. Conflicts (genuine value disagreements)
+  // are left intact.
+  const platformOverlaps = options.platform === "windows" ? overlaps : [];
+
+  return { groups, policies, excludedPolicies, settings, conflicts, overlaps: platformOverlaps };
 }
 
 export function simulationToCsv(simulation: SimulationResult): string {
