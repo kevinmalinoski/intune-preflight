@@ -49,8 +49,13 @@ Older template-based profiles serialize every property, including unset defaults
 ## Planned for v1
 
 - **Combined/nested dynamic-group rule evaluation** (see above) — the headline item.
-- **Delegated (user sign-in) auth** as an alternative to app-only, so an Intune
-  Administrator can run it without a Global Admin granting app-permission consent.
+- **Optional delegated (user sign-in) auth** — a device-code sign-in flow as an
+  *alternative* mode, mainly to remove the long-lived client secret. Note the
+  deliberate tradeoff: a delegated token is subject to the signed-in admin's RBAC
+  **scope tags / admin units**, so it would show only *that admin's slice* — which
+  defeats the tool's core "full, unfiltered preflight" value. App-only stays the
+  default and recommended mode; delegated auth is for least-privilege/scoped use
+  cases, not a replacement.
 - **Cross-platform overlap** accuracy (macOS/iOS/Android).
 - **Effective-value resolution** — show which value "wins" for a conflicted setting.
 - **Human-readable Settings Catalog** names/values via definition metadata.

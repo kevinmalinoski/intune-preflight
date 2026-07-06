@@ -6,6 +6,12 @@ Intune makes you click into every Configuration Profile, Compliance Policy, Sett
 
 It's a read-only, self-hosted tool meant for validating and understanding assignments in a sandbox or production tenant before you roll changes out to real devices.
 
+## Why preflight?
+
+The normal loop is deploy-and-pray: assign a policy, wait for devices to check in, watch for failures and conflicts, dig into which policy actually won, fix it, then wait a few more days for the next check-in to confirm. **Intune Preflight collapses that loop** — simulate the endpoint up front and see its full merged baseline, conflicts, overlaps, and exclusions *before* you deploy. Less risk, far less reporting latency, and the confidence to design and manage your policy sets for the long term.
+
+**This is an admin tool that deliberately sees everything.** It authenticates with tenant-wide, read-only *application* permissions, so it returns the **complete, unfiltered** picture of every policy and assignment in the tenant. Unlike the Intune console for a scoped admin, it is **not** filtered by RBAC scope tags or admin-unit boundaries — that's intentional. A meaningful preflight needs the whole tenant's configuration, not one admin's slice of it. Run it as the full-visibility "source of truth" alongside your scoped day-to-day roles.
+
 ## Features
 
 - 🛫 **Endpoint simulator** — pick an OS platform and the Entra security groups an endpoint belongs to, and see exactly which policies apply as a connected diagram: device → groups → policies.
@@ -133,6 +139,7 @@ Read this before you host it anywhere other than your own machine:
 - **The server listens on all interfaces** (`0.0.0.0`) so it can be reached from other devices. Combined with the point above, that means you should **run it on localhost or a trusted private network / VPN, and never expose the server or web port directly to the internet** without putting your own authentication in front of it (e.g. a reverse proxy with access control).
 - **Credentials stay server-side.** `TENANT_ID` / `CLIENT_ID` / `CLIENT_SECRET` live only in the server's `.env`, are never sent to the browser, and `.env` is gitignored — keep it out of source control.
 - **Read-only.** The Graph permissions are all `*.Read.All`; the tool never writes to your tenant.
+- **Full-tenant visibility by design.** Because it uses application (app-only) permissions, it sees the *entire* tenant's configuration — it is **not** filtered by RBAC scope tags or admin units. That's the intended behavior (a preflight needs the whole picture), but it means the `.env` app registration is effectively a tenant-wide read key: protect it accordingly, scope the app registration to only the permissions listed above, and rotate the client secret periodically.
 
 ## Troubleshooting
 
