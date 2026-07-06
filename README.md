@@ -51,8 +51,6 @@ Microsoft Graph  --->  apps/server (Fastify)  --->  apps/web (React + React Flow
 
 The server authenticates to Microsoft Graph using an Entra **app registration** (client-credentials flow — no per-user sign-in), pulls every policy along with its group assignments (both included and excluded), the assignment filters, the Autopilot deployment profiles, and the security groups (with their dynamic membership rules), then computes a merged baseline for whatever combination of groups / platform / filters you select. Results are cached in memory for `CACHE_TTL_SECONDS` (default 300s) — there is intentionally no database, to keep the app easy to run and reason about. The **Refresh from Intune** button (or `POST /api/refresh`) clears the cache on demand.
 
-<!-- Add a screenshot or short GIF of the simulator here before publishing. -->
-
 ## Who can install this — required Entra roles
 
 The app uses **application (app-only) permissions**, which require **admin consent**. Granting that consent is a privileged action:
