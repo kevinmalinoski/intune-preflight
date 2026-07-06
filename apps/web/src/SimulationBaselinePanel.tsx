@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { type MouseEvent as ReactMouseEvent, useEffect, useMemo, useState } from "react";
 import type { Platform, SimulationResult } from "@intune-preflight/shared";
 import { api } from "./api.ts";
 
@@ -82,6 +82,32 @@ export function SimulationBaselinePanel({
   const [view, setView] = useState<ViewFilter>("all");
   const [expandedOverlaps, setExpandedOverlaps] = useState<Set<string>>(new Set());
 
+  // Resizable panel width (docked to the right edge, so width = viewport - cursorX).
+  // Persisted so it stays where the user left it.
+  const [width, setWidth] = useState<number>(() => {
+    const saved = Number(localStorage.getItem("baselinePanelWidth"));
+    return saved >= 380 ? saved : 720;
+  });
+  useEffect(() => {
+    localStorage.setItem("baselinePanelWidth", String(Math.round(width)));
+  }, [width]);
+
+  const startResize = (e: ReactMouseEvent) => {
+    e.preventDefault();
+    const onMove = (ev: MouseEvent) => {
+      const next = Math.min(Math.max(window.innerWidth - ev.clientX, 380), window.innerWidth - 80);
+      setWidth(next);
+    };
+    const onUp = () => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      document.body.style.userSelect = "";
+    };
+    document.body.style.userSelect = "none";
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
+
   const toggleOverlap = (id: string) =>
     setExpandedOverlaps((prev) => {
       const next = new Set(prev);
@@ -161,7 +187,18 @@ export function SimulationBaselinePanel({
   };
 
   return (
-    <div className="fixed inset-y-0 right-0 z-20 flex w-full max-w-xl flex-col border-l border-ink-700 bg-ink-900 shadow-2xl">
+    <div
+      className="fixed inset-y-0 right-0 z-20 flex max-w-full flex-col border-l border-ink-700 bg-ink-900 shadow-2xl"
+      style={{ width }}
+    >
+      {/* Drag handle on the left edge to resize the panel */}
+      <div
+        onMouseDown={startResize}
+        title="Drag to resize"
+        className="group absolute inset-y-0 left-0 z-30 w-1.5 cursor-col-resize hover:bg-sky-500/40 active:bg-sky-500/60"
+      >
+        <div className="absolute inset-y-0 -left-1 w-3" />
+      </div>
       <div className="flex items-start justify-between border-b border-ink-700 p-4">
         <div>
           <div className="text-xs uppercase tracking-wide text-slate-400">Endpoint baseline</div>
