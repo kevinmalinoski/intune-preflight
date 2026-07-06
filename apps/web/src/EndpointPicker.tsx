@@ -22,6 +22,7 @@ export function EndpointPicker({
   onToggleAutopilotDevice,
   groupTag,
   onGroupTagChange,
+  loading = false,
 }: {
   groups: GroupSummary[];
   selectedGroupIds: string[];
@@ -35,6 +36,7 @@ export function EndpointPicker({
   onToggleAutopilotDevice: () => void;
   groupTag: string;
   onGroupTagChange: (value: string) => void;
+  loading?: boolean;
 }) {
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState(false);
@@ -255,7 +257,9 @@ export function EndpointPicker({
               );
             })}
             {filteredGroups.length === 0 && (
-              <div className="px-3 py-2 text-center text-xs text-slate-500">No groups found.</div>
+              <div className="px-3 py-2 text-center text-xs text-slate-500">
+                {loading ? "Loading groups from Intune…" : "No groups found."}
+              </div>
             )}
           </div>
           <div className="mt-0.5 text-[10px] text-slate-600">

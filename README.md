@@ -6,6 +6,14 @@ Intune makes you click into every Configuration Profile, Compliance Policy, Sett
 
 It's a read-only, self-hosted tool meant for validating and understanding assignments in a sandbox or production tenant before you roll changes out to real devices.
 
+![Intune Preflight — endpoint simulator](docs/simulator.png)
+
+_Pick an OS, the Entra groups an endpoint belongs to, its Autopilot Group Tag, and any Assignment Filters — and see exactly which policies apply as a connected diagram._
+
+![Merged baseline with conflicts and overlaps](docs/baseline.png)
+
+_Drill into the full merged CSP baseline — every setting from every applied policy, with real conflicts and policy overlaps surfaced._
+
 ## Why preflight?
 
 The normal loop is deploy-and-pray: assign a policy, wait for devices to check in, watch for failures and conflicts, dig into which policy actually won, fix it, then wait a few more days for the next check-in to confirm. **Intune Preflight collapses that loop** — simulate the endpoint up front and see its full merged baseline, conflicts, overlaps, and exclusions *before* you deploy. Less risk, far less reporting latency, and the confidence to design and manage your policy sets for the long term.

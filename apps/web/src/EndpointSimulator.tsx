@@ -17,6 +17,7 @@ export function EndpointSimulator() {
   const [simulation, setSimulation] = useState<SimulationResult | null>(null);
   const [showBaseline, setShowBaseline] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     Promise.all([api.groups(), api.filters()])
@@ -24,7 +25,8 @@ export function EndpointSimulator() {
         setGroups(allGroups.filter((g) => !g.id.startsWith("virtual-")));
         setFilters(allFilters);
       })
-      .catch((e) => setError(e.message));
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
   }, []);
 
   // Filters selected for one platform won't apply to another -- reset on switch.
@@ -137,6 +139,7 @@ export function EndpointSimulator() {
         onToggleAutopilotDevice={toggleAutopilotDevice}
         groupTag={groupTag}
         onGroupTagChange={setGroupTag}
+        loading={loading}
       />
 
       <div className="relative flex-1 bg-ink-950">
@@ -145,7 +148,16 @@ export function EndpointSimulator() {
             {error}
           </div>
         )}
-        {!error && simulation && (
+        {!error && loading && (
+          <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 text-center">
+            <span className="h-8 w-8 animate-spin rounded-full border-2 border-ink-700 border-t-sky-400" aria-hidden />
+            <div className="text-sm text-slate-300">Loading tenant data from Intune…</div>
+            <div className="max-w-xs text-xs text-slate-600">
+              The first load reads every policy and assignment in the tenant — this can take a little while.
+            </div>
+          </div>
+        )}
+        {!error && !loading && simulation && (
           <>
             <SimulationDiagram simulation={simulation} deviceFilterNames={deviceFilterNames} />
             <div className="absolute right-4 top-4 z-10 flex flex-col items-end gap-2">
