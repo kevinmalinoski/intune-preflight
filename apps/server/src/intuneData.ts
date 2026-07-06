@@ -94,9 +94,13 @@ function warnSkippedItem(kind: string, id: unknown, err: unknown): void {
 }
 
 async function fetchDeviceConfigurations(): Promise<IntunePolicy[]> {
-  const { items, useBeta } = await getCollectionWithBetaFallback<Record<string, unknown>>(
-    "/deviceManagement/deviceConfigurations"
-  );
+  // Read deviceConfigurations from BETA directly. Several newer types -- notably
+  // the Apple/Android Wi-Fi profiles (macOSWiFiConfiguration, iosWiFiConfiguration,
+  // aospDeviceOwnerWiFiConfiguration) plus a couple of Windows ones -- are only
+  // returned on the beta endpoint. v1.0 returns a PARTIAL 200, so the generic
+  // "fall back to beta on error" helper never triggers and those profiles would
+  // silently vanish from the baseline. Beta is a strict superset here.
+  const items = await graphGetCollection<Record<string, unknown>>("/deviceManagement/deviceConfigurations", true);
   const result: IntunePolicy[] = [];
   for (const item of items) {
     try {
@@ -104,7 +108,7 @@ async function fetchDeviceConfigurations(): Promise<IntunePolicy[]> {
       const displayName = (item.displayName as string) ?? "Untitled";
       const assignments = await graphGetCollection<RawAssignment>(
         `/deviceManagement/deviceConfigurations/${id}/assignments`,
-        useBeta
+        true
       );
       const { includedGroupIds, excludedGroupIds, assignmentFilters } = resolveAssignmentGroupIds(assignments);
       result.push({
@@ -126,9 +130,10 @@ async function fetchDeviceConfigurations(): Promise<IntunePolicy[]> {
 }
 
 async function fetchCompliancePolicies(): Promise<IntunePolicy[]> {
-  const { items, useBeta } = await getCollectionWithBetaFallback<Record<string, unknown>>(
-    "/deviceManagement/deviceCompliancePolicies"
-  );
+  // Read from BETA directly. On v1.0, compliance policies for newer types --
+  // e.g. aospDeviceOwnerCompliancePolicy -- come back with NO @odata.type, so
+  // they classify as "other" and disappear. Beta returns the proper type.
+  const items = await graphGetCollection<Record<string, unknown>>("/deviceManagement/deviceCompliancePolicies", true);
   const result: IntunePolicy[] = [];
   for (const item of items) {
     try {
@@ -136,7 +141,7 @@ async function fetchCompliancePolicies(): Promise<IntunePolicy[]> {
       const displayName = (item.displayName as string) ?? "Untitled";
       const assignments = await graphGetCollection<RawAssignment>(
         `/deviceManagement/deviceCompliancePolicies/${id}/assignments`,
-        useBeta
+        true
       );
       const { includedGroupIds, excludedGroupIds, assignmentFilters } = resolveAssignmentGroupIds(assignments);
       result.push({
@@ -399,6 +404,56 @@ async function fetchAssignmentFilters(): Promise<AssignmentFilter[]> {
   }));
 }
 
+/**
+ * Windows Update policies live under their own top-level endpoints (Feature,
+ * Quality and Driver update profiles) rather than deviceConfigurations, and
+ * they carry no @odata.type. Inject a synthetic one so flattenToCspSettings
+ * namespaces the settingId per update-profile kind (and derives a sensible CSP
+ * area), then treat them as Windows device configurations for the baseline.
+ * These are genuine baseline inputs -- e.g. which feature update version a
+ * device is targeted to -- and two profiles targeting different versions are a
+ * real conflict.
+ */
+async function fetchWindowsUpdateProfiles(): Promise<IntunePolicy[]> {
+  const sources = [
+    { path: "windowsFeatureUpdateProfiles", type: "windowsFeatureUpdateProfile" },
+    { path: "windowsQualityUpdateProfiles", type: "windowsQualityUpdateProfile" },
+    { path: "windowsDriverUpdateProfiles", type: "windowsDriverUpdateProfile" },
+  ];
+  const result: IntunePolicy[] = [];
+  for (const source of sources) {
+    let items: Record<string, unknown>[];
+    try {
+      items = await graphGetCollection<Record<string, unknown>>(`/deviceManagement/${source.path}`, true);
+    } catch (err) {
+      console.warn(`Skipping ${source.path}: ${skipReason(err as Error, "If this is a 403, grant DeviceManagementConfiguration.Read.All.")}`);
+      continue;
+    }
+    for (const item of items) {
+      try {
+        const id = item.id as string;
+        const displayName = (item.displayName as string) ?? "Untitled";
+        const assignments = await graphGetCollection<RawAssignment>(`/deviceManagement/${source.path}/${id}/assignments`, true);
+        const { includedGroupIds, excludedGroupIds, assignmentFilters } = resolveAssignmentGroupIds(assignments);
+        result.push({
+          id,
+          kind: "deviceConfiguration",
+          displayName,
+          description: item.description as string | undefined,
+          platform: "windows",
+          settings: flattenToCspSettings({ ...item, "@odata.type": `#microsoft.graph.${source.type}` }),
+          assignedGroupIds: includedGroupIds,
+          excludedGroupIds,
+          assignmentFilters,
+        });
+      } catch (err) {
+        warnSkippedItem("Windows update profile", item.id, err);
+      }
+    }
+  }
+  return result;
+}
+
 export interface TenantData {
   policies: IntunePolicy[];
   groups: IntuneGroup[];
@@ -424,18 +479,19 @@ async function safeFetch<T>(label: string, fn: () => Promise<T[]>): Promise<T[]>
 
 export async function loadTenantData(): Promise<TenantData> {
   return cache.getOrFetch("tenant-data", async () => {
-    const [deviceConfigs, compliance, settingsCatalog, adminTemplates, platformScripts, autopilotProfiles, assignmentFilters] =
+    const [deviceConfigs, compliance, settingsCatalog, adminTemplates, platformScripts, updateProfiles, autopilotProfiles, assignmentFilters] =
       await Promise.all([
         safeFetch("device configurations", fetchDeviceConfigurations),
         safeFetch("compliance policies", fetchCompliancePolicies),
         safeFetch("Settings Catalog policies", fetchSettingsCatalogPolicies),
         safeFetch("administrative templates", fetchAdminTemplates),
         safeFetch("platform scripts", fetchPlatformScripts),
+        safeFetch("Windows update profiles", fetchWindowsUpdateProfiles),
         safeFetch("Autopilot profiles", fetchAutopilotProfiles),
         safeFetch("assignment filters", fetchAssignmentFilters),
       ]);
 
-    const policies = [...deviceConfigs, ...compliance, ...settingsCatalog, ...adminTemplates, ...platformScripts];
+    const policies = [...deviceConfigs, ...compliance, ...settingsCatalog, ...adminTemplates, ...platformScripts, ...updateProfiles];
 
     const groupIds = new Set<string>();
     for (const p of policies) {

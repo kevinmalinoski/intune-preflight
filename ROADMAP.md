@@ -49,6 +49,15 @@ Older template-based profiles serialize every property, including unset defaults
 ## Planned for v1
 
 - **Combined/nested dynamic-group rule evaluation** (see above) — the headline item.
+- **Security Baselines & legacy Endpoint Security (`deviceManagement/intents`)** —
+  the biggest coverage gap. Security Baselines (Windows, Defender for Endpoint,
+  Edge, …) and older-format endpoint security policies are stored as `intents`,
+  not `configurationPolicies`, and use a different settings shape
+  (`deviceManagementSettingInstance` + `valueJson`) plus a `templateId`→platform
+  mapping. They carry many settings and routinely conflict with device
+  configuration profiles, so they belong in the merged baseline. Not included in
+  0.5. (New endpoint security policies that have migrated to Settings Catalog are
+  already covered.)
 - **Optional delegated (user sign-in) auth** — a device-code sign-in flow as an
   *alternative* mode, mainly to remove the long-lived client secret. Note the
   deliberate tradeoff: a delegated token is subject to the signed-in admin's RBAC

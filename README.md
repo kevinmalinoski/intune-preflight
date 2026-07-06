@@ -33,7 +33,13 @@ The normal loop is deploy-and-pray: assign a policy, wait for devices to check i
 - 🔄 **Refresh from Intune** — an in-memory cache keeps things fast; one click clears it and re-reads the tenant after you make changes in the admin center.
 - 🪶 **Lightweight** — no database, runs as one small API process + one static web app (or two containers via Docker).
 
-Policy types read today: **Device Configuration profiles, Settings Catalog, Compliance policies, Administrative Templates, and Platform Scripts** (Windows PowerShell + macOS shell). Proactive Remediations and enrollment-time policies (Device Preparation / ESP) are intentionally excluded.
+### What's included in the baseline
+
+**Covered:** Device Configuration profiles (all platforms, incl. Apple/Android Wi-Fi, VPN, certs, custom) · Settings Catalog (including migrated Endpoint Security policies like Antivirus, Disk Encryption) · Compliance policies · Administrative Templates (ADMX) · Platform Scripts (Windows PowerShell + macOS shell) · Windows Feature / Quality / Driver Update profiles.
+
+**Not yet covered (planned for v1):** **Security Baselines and legacy Endpoint Security policies** stored as `deviceManagement/intents` — these can carry hundreds of settings and *can conflict with your config profiles*, so if you rely on baselines, treat the merged view as incomplete until v1. See [ROADMAP.md](ROADMAP.md).
+
+**Intentionally excluded:** Proactive Remediations, enrollment-time policies (Device Preparation / ESP / enrollment restrictions), and app-level MAM / app configuration.
 
 ## How it works
 

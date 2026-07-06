@@ -364,39 +364,41 @@ export function parseAssignmentTarget(assignment: {
 }
 
 /**
- * Derives the target OS platform from a Graph resource's @odata.type, which
- * for deviceConfigurations and deviceCompliancePolicies always encodes the
- * platform (e.g. #microsoft.graph.windows10CompliancePolicy,
- * #microsoft.graph.iosCompliancePolicy, #microsoft.graph.macOSGeneralDeviceConfiguration).
- * "ios" types cover both iOS and iPadOS in Graph's model.
+ * Classifies an OS platform from any Graph string that encodes one -- a
+ * resource @odata.type, a Settings Catalog `platforms` field, or an assignment
+ * filter platform enum.
+ *
+ * Order and keywords matter:
+ * - `aosp` counts as Android: AOSP / corporate-owned device types are named
+ *   `aospDeviceOwner...` and do NOT contain the string "android", so they'd
+ *   otherwise fall through to "other" (and nothing would show for Android).
+ * - `windows` is checked BEFORE `ios` because "k[ios]k" -- e.g.
+ *   windowsKioskConfiguration -- contains the substring "ios" and would
+ *   otherwise be misclassified as iOS.
+ * ("ios" covers both iOS and iPadOS in Graph's model.)
  */
+function classifyPlatform(raw: string | undefined): Platform {
+  const value = (raw ?? "").toLowerCase();
+  if (value.includes("android") || value.includes("aosp")) return "android";
+  if (value.includes("macos")) return "macos";
+  if (value.includes("windows")) return "windows";
+  if (value.includes("ios")) return "ios";
+  return "other";
+}
+
+/** Platform from a deviceConfiguration / deviceCompliancePolicy @odata.type. */
 export function platformFromOdataType(odataType: string | undefined): Platform {
-  const type = (odataType ?? "").toLowerCase();
-  if (type.includes("macos")) return "macos";
-  if (type.includes("ios")) return "ios";
-  if (type.includes("android")) return "android";
-  if (type.includes("windows")) return "windows";
-  return "other";
+  return classifyPlatform(odataType);
 }
 
-/** Settings Catalog (configurationPolicies) resources expose platform directly via the `platforms` field. */
+/** Platform from a Settings Catalog (configurationPolicies) `platforms` field. */
 export function platformFromSettingsCatalog(platforms: string | undefined): Platform {
-  const value = (platforms ?? "").toLowerCase();
-  if (value.includes("macos")) return "macos";
-  if (value.includes("ios")) return "ios";
-  if (value.includes("android")) return "android";
-  if (value.includes("windows")) return "windows";
-  return "other";
+  return classifyPlatform(platforms);
 }
 
-/** Assignment Filters expose platform via a Graph enum like "windows10AndLater", "iOSMobileApplicationManagement". */
+/** Platform from an Assignment Filter's platform enum (e.g. "windows10AndLater", "androidAOSP"). */
 export function platformFromAssignmentFilter(platform: string | undefined): Platform {
-  const value = (platform ?? "").toLowerCase();
-  if (value.includes("macos")) return "macos";
-  if (value.includes("ios")) return "ios";
-  if (value.includes("android")) return "android";
-  if (value.includes("windows")) return "windows";
-  return "other";
+  return classifyPlatform(platform);
 }
 
 interface RuleClause {
