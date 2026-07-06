@@ -94,9 +94,13 @@ function warnSkippedItem(kind: string, id: unknown, err: unknown): void {
 }
 
 async function fetchDeviceConfigurations(): Promise<IntunePolicy[]> {
-  const { items, useBeta } = await getCollectionWithBetaFallback<Record<string, unknown>>(
-    "/deviceManagement/deviceConfigurations"
-  );
+  // Read deviceConfigurations from BETA directly. Several newer types -- notably
+  // the Apple/Android Wi-Fi profiles (macOSWiFiConfiguration, iosWiFiConfiguration,
+  // aospDeviceOwnerWiFiConfiguration) plus a couple of Windows ones -- are only
+  // returned on the beta endpoint. v1.0 returns a PARTIAL 200, so the generic
+  // "fall back to beta on error" helper never triggers and those profiles would
+  // silently vanish from the baseline. Beta is a strict superset here.
+  const items = await graphGetCollection<Record<string, unknown>>("/deviceManagement/deviceConfigurations", true);
   const result: IntunePolicy[] = [];
   for (const item of items) {
     try {
@@ -104,7 +108,7 @@ async function fetchDeviceConfigurations(): Promise<IntunePolicy[]> {
       const displayName = (item.displayName as string) ?? "Untitled";
       const assignments = await graphGetCollection<RawAssignment>(
         `/deviceManagement/deviceConfigurations/${id}/assignments`,
-        useBeta
+        true
       );
       const { includedGroupIds, excludedGroupIds, assignmentFilters } = resolveAssignmentGroupIds(assignments);
       result.push({
