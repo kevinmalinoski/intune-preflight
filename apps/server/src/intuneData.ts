@@ -130,9 +130,10 @@ async function fetchDeviceConfigurations(): Promise<IntunePolicy[]> {
 }
 
 async function fetchCompliancePolicies(): Promise<IntunePolicy[]> {
-  const { items, useBeta } = await getCollectionWithBetaFallback<Record<string, unknown>>(
-    "/deviceManagement/deviceCompliancePolicies"
-  );
+  // Read from BETA directly. On v1.0, compliance policies for newer types --
+  // e.g. aospDeviceOwnerCompliancePolicy -- come back with NO @odata.type, so
+  // they classify as "other" and disappear. Beta returns the proper type.
+  const items = await graphGetCollection<Record<string, unknown>>("/deviceManagement/deviceCompliancePolicies", true);
   const result: IntunePolicy[] = [];
   for (const item of items) {
     try {
@@ -140,7 +141,7 @@ async function fetchCompliancePolicies(): Promise<IntunePolicy[]> {
       const displayName = (item.displayName as string) ?? "Untitled";
       const assignments = await graphGetCollection<RawAssignment>(
         `/deviceManagement/deviceCompliancePolicies/${id}/assignments`,
-        useBeta
+        true
       );
       const { includedGroupIds, excludedGroupIds, assignmentFilters } = resolveAssignmentGroupIds(assignments);
       result.push({
