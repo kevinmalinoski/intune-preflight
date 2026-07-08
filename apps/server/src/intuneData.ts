@@ -1,4 +1,4 @@
-import type { AssignmentFilter, AssignmentFilterRef, AutopilotProfile, IntuneGroup, IntunePolicy } from "@intune-preflight/shared";
+import type { AssignmentFilter, AssignmentFilterRef, AutopilotProfile, IntuneGroup, IntunePolicy, SettingCatalogDefinition } from "@intune-preflight/shared";
 import { graphGetCollection } from "./graphClient.js";
 import {
   flattenScriptToCspSettings,
@@ -212,6 +212,49 @@ async function fetchSettingsCatalogPolicies(): Promise<IntunePolicy[]> {
     }
   }
   return result;
+}
+
+export async function fetchSettingsCatalogDefinitions(): Promise<SettingCatalogDefinition[]> {
+  return cache.getOrFetch<SettingCatalogDefinition[]>("settings-catalog-definitions", async () => {
+    try {
+      const { items } = await getCollectionWithBetaFallback<Record<string, unknown>>("/deviceManagement/configurationSettings");
+      const defs: SettingCatalogDefinition[] = items.map((item) => {
+        const optionsRaw = (item.options as Record<string, unknown>[] | undefined) ?? [];
+        const options = optionsRaw.map((o) => ({
+          itemId: (o.itemId as string) ?? (o.id as string) ?? (o.name as string) ?? "",
+          displayName: (o.displayName as string) ?? (o.name as string) ?? "",
+          name: o.name as string | undefined,
+          description: o.description as string | undefined,
+          helpText: o.helpText as string | undefined,
+        }));
+
+        return {
+          id: item.id as string,
+          settingDefinitionId: (item.settingDefinitionId as string) ?? (item.name as string) ?? (item.id as string),
+          displayName: (item.displayName as string) ?? (item.name as string) ?? (item.settingDefinitionId as string) ?? (item.id as string),
+          name: item.name as string | undefined,
+          description: item.description as string | undefined,
+          helpText: item.helpText as string | undefined,
+          version: item.version as string | undefined,
+          categoryId: item.categoryId as string | undefined,
+          uxBehavior: item.uxBehavior as string | undefined,
+          visibility: item.visibility as string | undefined,
+          riskLevel: item.riskLevel as string | undefined,
+          options: options.length ? options : undefined,
+          defaultOptionId: item.defaultOptionId as string | undefined,
+          baseUri: item.baseUri as string | undefined,
+          offsetUri: item.offsetUri as string | undefined,
+          rootDefinitionId: item.rootDefinitionId as string | undefined,
+        };
+      });
+      return defs;
+    } catch (err) {
+      console.warn(
+        `Skipping Settings Catalog definitions: ${skipReason(err as Error, "If this is a 403, grant DeviceManagementConfiguration.Read.All to enable definitions.")}`
+      );
+      return [];
+    }
+  });
 }
 
 async function fetchAdminTemplates(): Promise<IntunePolicy[]> {
