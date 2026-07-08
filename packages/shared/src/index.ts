@@ -64,8 +64,6 @@ export interface SettingCatalogDefinition {
   baseUri?: string;
   offsetUri?: string;
   rootDefinitionId?: string | null;
-  // Allow extension for additional fields returned by Graph
-  [key: string]: any;
 }
 
 /** An Intune Assignment Filter, used to scope an assignment to devices matching a rule (e.g. "Kiosk Devices"). */

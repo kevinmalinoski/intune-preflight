@@ -276,9 +276,12 @@ export function flattenSettingsCatalogEntries(
       const value = extractCatalogValue(instance, definitionId, optionLabels);
       if (value !== undefined && !bySettingId.has(definitionId)) {
         const parsed = parseCatalogDefinitionId(definitionId);
+        // categoryId from Graph is an opaque GUID -- not suitable for display.
+        // Fall back to the heuristic area derived from the definition ID itself,
+        // which extracts the CSP area segment (e.g. "Update", "Defender", "Wifi").
         bySettingId.set(definitionId, {
           settingId: definitionId,
-          cspArea: definition?.categoryId ? friendlyLabel(definition.categoryId) : parsed.area,
+          cspArea: parsed.area,
           displayName: definition?.displayName ?? parsed.name,
           value,
         });
