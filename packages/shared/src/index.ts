@@ -31,6 +31,41 @@ export interface CspSetting {
   value: string;
 }
 
+export interface OptionDefinition {
+  /** The stable item id for the option (matches choice value seen in policies) */
+  itemId: string;
+  /** Human-readable label for the option shown in UI */
+  displayName: string;
+  /** Optional programmatic name */
+  name?: string;
+  /** Optional description/help text for the option */
+  description?: string;
+  helpText?: string;
+}
+
+export interface SettingCatalogDefinition {
+  /** Graph resource id */
+  id: string;
+  /** The concatenated settingDefinitionId used in policies (stable key) */
+  settingDefinitionId: string;
+  /** Human-readable setting name */
+  displayName: string;
+  name?: string;
+  description?: string;
+  helpText?: string;
+  version?: string;
+  categoryId?: string;
+  uxBehavior?: string;
+  visibility?: string;
+  riskLevel?: string;
+  /** Choice options for choice-type settings */
+  options?: OptionDefinition[];
+  defaultOptionId?: string;
+  baseUri?: string;
+  offsetUri?: string;
+  rootDefinitionId?: string | null;
+}
+
 /** An Intune Assignment Filter, used to scope an assignment to devices matching a rule (e.g. "Kiosk Devices"). */
 export interface AssignmentFilter {
   id: string;

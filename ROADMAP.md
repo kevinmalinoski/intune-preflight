@@ -38,8 +38,7 @@ accurate.
 ### Settings-catalog names & choice values are raw
 Settings Catalog setting names and choice option ids come from the
 `settingDefinitionId` (lowercase-concatenated). Accurate and unique, but not fully
-human-labeled. **v1 plan:** resolve names/labels from the settings-catalog
-definition metadata.
+human-labeled. **✅ Fixed in v0.6** — see changelog.
 
 ### Legacy device-config default noise
 Older template-based profiles serialize every property, including unset defaults.
@@ -66,5 +65,5 @@ Older template-based profiles serialize every property, including unset defaults
   cases, not a replacement.
 - **Cross-platform overlap** accuracy (macOS/iOS/Android).
 - **Effective-value resolution** — show which value "wins" for a conflicted setting.
-- **Human-readable Settings Catalog** names/values via definition metadata.
+- **Human-readable Settings Catalog** names/values via definition metadata. ✅ **Done in v0.6** — setting names and choice values now come from Graph definition metadata (`/beta/deviceManagement/configurationSettings`). Heuristic parsing remains as fallback if definitions are unavailable.
 - **Demo mode / sample data** so the tool can be evaluated without a tenant.

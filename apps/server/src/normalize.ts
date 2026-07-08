@@ -1,4 +1,4 @@
-import type { CspSetting, Platform } from "@intune-preflight/shared";
+import type { CspSetting, Platform, SettingCatalogDefinition } from "@intune-preflight/shared";
 
 // Metadata fields present on most Graph device-management resources that aren't
 // actual configuration settings -- excluded when flattening a policy into CSP settings.
@@ -195,6 +195,16 @@ function cleanChoiceOptionId(optionId: string, definitionId: string): string {
   return parts[parts.length - 1] || optionId;
 }
 
+function catalogOptionLabelMap(definition: SettingCatalogDefinition | undefined): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const option of definition?.options ?? []) {
+    if (option.itemId && option.displayName) {
+      map.set(option.itemId, option.displayName);
+    }
+  }
+  return map;
+}
+
 /**
  * Extracts a human-readable value from a Settings Catalog settingInstance,
  * which comes in several shapes. Choice settings carry an option-id string
@@ -202,14 +212,22 @@ function cleanChoiceOptionId(optionId: string, definitionId: string): string {
  * list. Without this, choice settings leak the raw CSP option id while simple
  * settings show a normal value -- the inconsistency this fixes.
  */
-function extractCatalogValue(instance: Record<string, unknown>, definitionId: string): string | undefined {
+function extractCatalogValue(
+  instance: Record<string, unknown>,
+  definitionId: string,
+  optionLabels: Map<string, string>
+): string | undefined {
   const choice = instance["choiceSettingValue"] as { value?: unknown } | undefined;
-  if (choice && typeof choice.value === "string") return cleanChoiceOptionId(choice.value, definitionId);
+  if (choice && typeof choice.value === "string") {
+    return optionLabels.get(choice.value) ?? cleanChoiceOptionId(choice.value, definitionId);
+  }
 
   const choiceCollection = instance["choiceSettingCollectionValue"] as Array<{ value?: unknown }> | undefined;
   if (Array.isArray(choiceCollection)) {
     const values = choiceCollection
-      .map((c) => (typeof c.value === "string" ? cleanChoiceOptionId(c.value, definitionId) : undefined))
+      .map((c) =>
+        typeof c.value === "string" ? optionLabels.get(c.value) ?? cleanChoiceOptionId(c.value, definitionId) : undefined
+      )
       .filter((v): v is string => v !== undefined);
     return values.length ? values.join(", ") : undefined;
   }
@@ -238,18 +256,35 @@ function extractCatalogValue(instance: Record<string, unknown>, definitionId: st
  * or overlap -- and also yields the CSP area and setting name for display.
  */
 export function flattenSettingsCatalogEntries(
-  entries: Array<{ settingInstance?: Record<string, unknown> }>
+  entries: Array<{ settingInstance?: Record<string, unknown> }>,
+  definitions: SettingCatalogDefinition[] = []
 ): CspSetting[] {
   const bySettingId = new Map<string, CspSetting>();
+  const definitionById = new Map<string, SettingCatalogDefinition>();
+  const definitionBySettingId = new Map<string, SettingCatalogDefinition>();
+  for (const definition of definitions) {
+    if (definition.id) definitionById.set(definition.id, definition);
+    if (definition.settingDefinitionId) definitionBySettingId.set(definition.settingDefinitionId, definition);
+  }
 
   const visit = (instance: Record<string, unknown> | undefined): void => {
     if (!instance) return;
     const definitionId = instance["settingDefinitionId"] as string | undefined;
     if (definitionId) {
-      const value = extractCatalogValue(instance, definitionId);
+      const definition = definitionBySettingId.get(definitionId) ?? definitionById.get(definitionId);
+      const optionLabels = catalogOptionLabelMap(definition);
+      const value = extractCatalogValue(instance, definitionId, optionLabels);
       if (value !== undefined && !bySettingId.has(definitionId)) {
-        const { area, name } = parseCatalogDefinitionId(definitionId);
-        bySettingId.set(definitionId, { settingId: definitionId, cspArea: area, displayName: name, value });
+        const parsed = parseCatalogDefinitionId(definitionId);
+        // categoryId from Graph is an opaque GUID -- not suitable for display.
+        // Fall back to the heuristic area derived from the definition ID itself,
+        // which extracts the CSP area segment (e.g. "Update", "Defender", "Wifi").
+        bySettingId.set(definitionId, {
+          settingId: definitionId,
+          cspArea: parsed.area,
+          displayName: definition?.displayName ?? parsed.name,
+          value,
+        });
       }
     }
     // Settings Catalog settings are hierarchical -- a choice or group can carry
