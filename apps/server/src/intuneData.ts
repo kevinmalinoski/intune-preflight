@@ -178,7 +178,7 @@ function isEnrollmentTimePolicy(item: Record<string, unknown>): boolean {
   return technologies.includes("enrollment") || templateFamily === "enrollmentconfiguration";
 }
 
-async function fetchSettingsCatalogPolicies(): Promise<IntunePolicy[]> {
+async function fetchSettingsCatalogPolicies(definitions: SettingCatalogDefinition[] = []): Promise<IntunePolicy[]> {
   const { items, useBeta } = await getCollectionWithBetaFallback<Record<string, unknown>>(
     "/deviceManagement/configurationPolicies"
   );
@@ -202,7 +202,7 @@ async function fetchSettingsCatalogPolicies(): Promise<IntunePolicy[]> {
         displayName,
         description: item.description as string | undefined,
         platform: platformFromSettingsCatalog(item.platforms as string | undefined),
-        settings: flattenSettingsCatalogEntries(settingEntries),
+        settings: flattenSettingsCatalogEntries(settingEntries, definitions),
         assignedGroupIds: includedGroupIds,
         excludedGroupIds,
         assignmentFilters,
@@ -502,6 +502,7 @@ export interface TenantData {
   groups: IntuneGroup[];
   autopilotProfiles: AutopilotProfile[];
   assignmentFilters: AssignmentFilter[];
+  settingsCatalogDefinitions: SettingCatalogDefinition[];
 }
 
 /**
@@ -522,17 +523,30 @@ async function safeFetch<T>(label: string, fn: () => Promise<T[]>): Promise<T[]>
 
 export async function loadTenantData(): Promise<TenantData> {
   return cache.getOrFetch("tenant-data", async () => {
-    const [deviceConfigs, compliance, settingsCatalog, adminTemplates, platformScripts, updateProfiles, autopilotProfiles, assignmentFilters] =
+    const [
+      deviceConfigs,
+      compliance,
+      settingsCatalogDefinitions,
+      adminTemplates,
+      platformScripts,
+      updateProfiles,
+      autopilotProfiles,
+      assignmentFilters,
+    ] =
       await Promise.all([
         safeFetch("device configurations", fetchDeviceConfigurations),
         safeFetch("compliance policies", fetchCompliancePolicies),
-        safeFetch("Settings Catalog policies", fetchSettingsCatalogPolicies),
+        safeFetch("Settings Catalog definitions", fetchSettingsCatalogDefinitions),
         safeFetch("administrative templates", fetchAdminTemplates),
         safeFetch("platform scripts", fetchPlatformScripts),
         safeFetch("Windows update profiles", fetchWindowsUpdateProfiles),
         safeFetch("Autopilot profiles", fetchAutopilotProfiles),
         safeFetch("assignment filters", fetchAssignmentFilters),
       ]);
+
+    const settingsCatalog = await safeFetch("Settings Catalog policies", () =>
+      fetchSettingsCatalogPolicies(settingsCatalogDefinitions)
+    );
 
     const policies = [...deviceConfigs, ...compliance, ...settingsCatalog, ...adminTemplates, ...platformScripts, ...updateProfiles];
 
@@ -573,7 +587,7 @@ export async function loadTenantData(): Promise<TenantData> {
       }
     }
 
-    return { policies, groups, autopilotProfiles, assignmentFilters };
+    return { policies, groups, autopilotProfiles, assignmentFilters, settingsCatalogDefinitions };
   });
 }
 
