@@ -225,13 +225,13 @@ function buildGraph(
   }
   const policySpan = Math.max(policyY - ROW_GAP, 0);
 
-  // Vertically center the shorter column against the taller one so the diagram
-  // stays balanced as policies collapse away.
-  const offset = (span: number) => Math.max(0, (Math.max(groupSpan, policySpan) - span) / 2);
-  const groupOffset = offset(groupSpan);
-  const policyOffset = offset(policySpan);
+  // The device node and group column are FROZEN in place: their positions come
+  // only from the (fixed) group column, never from the policy column. The policy
+  // column expands/contracts around the same fixed centerline, so hiding a group
+  // moves only the policies -- the primary columns don't drift.
+  const centerline = groupSpan / 2;
+  const policyOffset = centerline - policySpan / 2;
   for (const n of nodes) {
-    if (n.type === "entraGroup") n.position = { ...n.position, y: n.position.y + groupOffset };
     if (n.type === "policy") n.position = { ...n.position, y: n.position.y + policyOffset };
   }
 
@@ -239,7 +239,7 @@ function buildGraph(
   nodes.unshift({
     id: "device",
     type: "device",
-    position: { x: 0, y: groupSpan >= policySpan ? groupOffset + groupSpan / 2 - 40 : policyOffset + policySpan / 2 - 40 },
+    position: { x: 0, y: centerline - 40 },
     data: { groupNames, filterNames: deviceFilterNames },
   });
   for (const g of simulation.groups) {
