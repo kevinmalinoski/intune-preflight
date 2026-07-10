@@ -168,72 +168,100 @@ const nodeTypes = { device: DeviceNode, entraGroup: GroupNode, policy: PolicyNod
 
 const COLUMN_GAP = 140;
 
-function layout(simulation: SimulationResult, deviceFilterNames: string[]) {
+// Build the graph for the current visibility state. Hidden groups stay in the
+// group column as dimmed toggles (so they can be clicked back on), but the
+// policy column is laid out from ONLY the visible policies -- so hiding a group
+// collapses the gaps its policies leave behind instead of punching holes.
+function buildGraph(
+  simulation: SimulationResult,
+  deviceFilterNames: string[],
+  hiddenGroupIds: Set<string>,
+  settingsCount: Record<string, number>
+) {
   const groupNames = simulation.groups.filter((g) => g.source === "selected").map((g) => g.displayName);
-  const nodes: Node[] = [
-    { id: "device", type: "device", position: { x: 0, y: 0 }, data: { groupNames, filterNames: deviceFilterNames } },
-  ];
+  const nodes: Node[] = [];
+  const edges: Edge[] = [];
 
-  const groupX = GROUP_NODE_WIDTH * 0 + 220 + COLUMN_GAP / 2;
+  // --- Group column (all groups; hidden ones dimmed) ---
+  const groupX = 220 + COLUMN_GAP / 2;
   let groupY = 0;
   for (const g of simulation.groups) {
+    const off = hiddenGroupIds.has(g.id);
+    const h = estimateRowHeight(g.displayName) + (g.impliedByGroupNames?.length ? LINE_HEIGHT : 0);
     nodes.push({
       id: `group:${g.id}`,
       type: "entraGroup",
       position: { x: groupX, y: groupY },
-      data: { label: g.displayName, source: g.source, isDynamic: g.isDynamic, impliedByGroupNames: g.impliedByGroupNames },
+      style: { opacity: off ? 0.4 : 1 },
+      data: { label: g.displayName, source: g.source, isDynamic: g.isDynamic, impliedByGroupNames: g.impliedByGroupNames, off },
     });
-    groupY += estimateRowHeight(g.displayName) + (g.impliedByGroupNames?.length ? LINE_HEIGHT : 0);
+    groupY += h;
   }
+  // estimateRowHeight already includes a trailing ROW_GAP; drop the last one.
+  const groupSpan = Math.max(groupY - ROW_GAP, 0);
 
+  // --- Policy column (only visible policies, laid out contiguously) ---
   const policyX = groupX + GROUP_NODE_WIDTH + COLUMN_GAP;
+  const visiblePolicies: { id: string; y: number; h: number; sources: string[]; excluded: boolean }[] = [];
   let policyY = 0;
   for (const p of [...simulation.policies, ...simulation.excludedPolicies]) {
     const excluded = simulation.excludedPolicies.includes(p);
-    const excludedReason = p.excludedByFilter
-      ? `Excluded — device filter "${p.excludedByFilter.filterName}"`
-      : undefined;
+    // Group-exclude and filter-exclude are mutually exclusive per policy (see computeSimulation).
+    const sourceGroupIds = excluded && p.excludedViaGroupIds.length > 0 ? p.excludedViaGroupIds : p.viaGroupIds;
+    const visibleSources = sourceGroupIds.filter((id) => !hiddenGroupIds.has(id));
+    // A policy survives only while at least one group bringing it in is still visible.
+    if (sourceGroupIds.length > 0 && visibleSources.length === 0) continue;
+
+    const h = estimateRowHeight(p.displayName);
+    const excludedReason = p.excludedByFilter ? `Excluded — device filter "${p.excludedByFilter.filterName}"` : undefined;
     nodes.push({
       id: `policy:${p.id}`,
       type: "policy",
       position: { x: policyX, y: policyY },
-      data: { label: p.displayName, kind: p.kind, settingsCount: undefined, excluded, excludedReason },
+      data: { label: p.displayName, kind: p.kind, settingsCount: settingsCount[p.id] ?? 0, excluded, excludedReason },
     });
-    policyY += estimateRowHeight(p.displayName);
+    visiblePolicies.push({ id: p.id, y: policyY, h, sources: visibleSources, excluded });
+    policyY += h;
+  }
+  const policySpan = Math.max(policyY - ROW_GAP, 0);
+
+  // Vertically center the shorter column against the taller one so the diagram
+  // stays balanced as policies collapse away.
+  const offset = (span: number) => Math.max(0, (Math.max(groupSpan, policySpan) - span) / 2);
+  const groupOffset = offset(groupSpan);
+  const policyOffset = offset(policySpan);
+  for (const n of nodes) {
+    if (n.type === "entraGroup") n.position = { ...n.position, y: n.position.y + groupOffset };
+    if (n.type === "policy") n.position = { ...n.position, y: n.position.y + policyOffset };
   }
 
-  const edges: Edge[] = [];
+  // --- Edges ---
+  nodes.unshift({
+    id: "device",
+    type: "device",
+    position: { x: 0, y: groupSpan >= policySpan ? groupOffset + groupSpan / 2 - 40 : policyOffset + policySpan / 2 - 40 },
+    data: { groupNames, filterNames: deviceFilterNames },
+  });
   for (const g of simulation.groups) {
+    const off = hiddenGroupIds.has(g.id);
     edges.push({
       id: `device->${g.id}`,
       source: "device",
       target: `group:${g.id}`,
       type: "default",
-      style: { stroke: SOURCE_STYLE[g.source].border, opacity: 0.5, strokeWidth: 2 },
+      style: { stroke: SOURCE_STYLE[g.source].border, opacity: off ? 0.1 : 0.5, strokeWidth: 2 },
     });
   }
-  for (const p of simulation.policies) {
-    for (const groupId of p.viaGroupIds) {
+  for (const p of visiblePolicies) {
+    for (const groupId of p.sources) {
       edges.push({
-        id: `${groupId}->${p.id}`,
+        id: `${p.excluded ? "exclude-" : ""}${groupId}->${p.id}`,
         source: `group:${groupId}`,
         target: `policy:${p.id}`,
         type: "default",
-        style: { stroke: "#64748b", opacity: 0.4, strokeWidth: 1.5 },
-      });
-    }
-  }
-  for (const p of simulation.excludedPolicies) {
-    // Group-exclude and filter-exclude are mutually exclusive per policy (see computeSimulation):
-    // group-excluded policies carry excludedViaGroupIds, filter-excluded ones carry viaGroupIds instead.
-    const sourceGroupIds = p.excludedViaGroupIds.length > 0 ? p.excludedViaGroupIds : p.viaGroupIds;
-    for (const groupId of sourceGroupIds) {
-      edges.push({
-        id: `exclude-${groupId}->${p.id}`,
-        source: `group:${groupId}`,
-        target: `policy:${p.id}`,
-        type: "default",
-        style: { stroke: "#fb7185", strokeDasharray: "5 5", opacity: 0.55, strokeWidth: 1.5 },
+        style: p.excluded
+          ? { stroke: "#fb7185", strokeDasharray: "5 5", opacity: 0.55, strokeWidth: 1.5 }
+          : { stroke: "#64748b", opacity: 0.4, strokeWidth: 1.5 },
       });
     }
   }
@@ -277,21 +305,16 @@ export function SimulationDiagram({
   // group stay). Works on the All Devices / All Users buckets too.
   const [hiddenGroupIds, setHiddenGroupIds] = useState<Set<string>>(new Set());
 
-  const { nodes, edges } = useMemo(() => layout(simulation, deviceFilterNames), [simulation, deviceFilterNames]);
-
-  const policySettingsCount = useMemo(() => {
+  const settingsCount = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const s of simulation.settings) counts[s.sourcePolicyId] = (counts[s.sourcePolicyId] ?? 0) + 1;
     return counts;
   }, [simulation.settings]);
 
-  // Which groups bring in each policy (for excluded policies, the group(s) that exclude it).
-  const policySourceGroups = useMemo(() => {
-    const m = new Map<string, string[]>();
-    for (const p of simulation.policies) m.set(p.id, p.viaGroupIds);
-    for (const p of simulation.excludedPolicies) m.set(p.id, p.excludedViaGroupIds.length ? p.excludedViaGroupIds : p.viaGroupIds);
-    return m;
-  }, [simulation]);
+  const { nodes, edges } = useMemo(
+    () => buildGraph(simulation, deviceFilterNames, hiddenGroupIds, settingsCount),
+    [simulation, deviceFilterNames, hiddenGroupIds, settingsCount]
+  );
 
   const onNodeClick: NodeMouseHandler = useCallback((_evt, node) => {
     if (node.type !== "entraGroup") return;
@@ -303,49 +326,11 @@ export function SimulationDiagram({
     });
   }, []);
 
-  // A policy disappears only when every group that brings it in is hidden.
-  const policyHidden = (policyId: string) => {
-    const groups = policySourceGroups.get(policyId) ?? [];
-    return groups.length > 0 && groups.every((g) => hiddenGroupIds.has(g));
-  };
-
-  const displayNodes = useMemo(
-    () =>
-      nodes.map((n) => {
-        if (n.type === "entraGroup") {
-          const off = hiddenGroupIds.has(n.id.replace("group:", ""));
-          return { ...n, data: { ...n.data, off }, style: { opacity: off ? 0.45 : 1 } };
-        }
-        if (n.type === "policy") {
-          const pid = n.id.replace("policy:", "");
-          return { ...n, hidden: policyHidden(pid), data: { ...n.data, settingsCount: policySettingsCount[pid] ?? 0 } };
-        }
-        return n;
-      }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [nodes, hiddenGroupIds, policySettingsCount, policySourceGroups]
-  );
-
-  const displayEdges = useMemo(
-    () =>
-      edges.map((e) => {
-        if (e.source === "device") {
-          const off = hiddenGroupIds.has(e.target.replace("group:", ""));
-          return { ...e, style: { ...e.style, opacity: off ? 0.1 : (e.style?.opacity ?? 0.5) } };
-        }
-        const gid = e.source.replace("group:", "");
-        const pid = e.target.replace("policy:", "");
-        return { ...e, hidden: hiddenGroupIds.has(gid) || policyHidden(pid) };
-      }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [edges, hiddenGroupIds, policySourceGroups]
-  );
-
   return (
     <div className="relative h-full w-full">
       <ReactFlow
-        nodes={displayNodes}
-        edges={displayEdges}
+        nodes={nodes}
+        edges={edges}
         nodeTypes={nodeTypes}
         onNodeClick={onNodeClick}
         fitView
