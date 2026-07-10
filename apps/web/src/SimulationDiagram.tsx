@@ -1,5 +1,14 @@
-import { useMemo } from "react";
-import { ReactFlow, Background, Controls, type Node, type Edge, Handle, Position } from "@xyflow/react";
+import { useCallback, useMemo, useState } from "react";
+import {
+  ReactFlow,
+  Background,
+  Controls,
+  type Node,
+  type Edge,
+  type NodeMouseHandler,
+  Handle,
+  Position,
+} from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import type { SimulationGroup, SimulationResult } from "@intune-preflight/shared";
 
@@ -72,22 +81,31 @@ function DeviceNode({ data }: { data: { groupNames: string[]; filterNames: strin
 function GroupNode({
   data,
 }: {
-  data: { label: string; source: SimulationGroup["source"]; isDynamic?: boolean; impliedByGroupNames?: string[] };
+  data: {
+    label: string;
+    source: SimulationGroup["source"];
+    isDynamic?: boolean;
+    impliedByGroupNames?: string[];
+    off?: boolean;
+  };
 }) {
   const style = SOURCE_STYLE[data.source];
-  const tooltip =
+  const base =
     data.source === "implied" && data.impliedByGroupNames?.length
       ? `${data.label}\n\nImplied by the dynamic membership rule of: ${data.impliedByGroupNames.join(", ")}.\nBest-effort -- verify against the actual rules in Entra.`
       : data.label;
+  const tooltip = `${base}\n\nClick to ${data.off ? "show" : "hide"} this group and the policies it brings in.`;
   return (
     <div
-      className="rounded-xl border bg-ink-900 px-4 py-3 text-xs shadow-[0_4px_16px_rgba(0,0,0,0.35)]"
+      className="cursor-pointer rounded-xl border bg-ink-900 px-4 py-3 text-xs shadow-[0_4px_16px_rgba(0,0,0,0.35)] transition-opacity"
       style={{ borderColor: style.border, width: GROUP_NODE_WIDTH }}
       title={tooltip}
     >
       <Handle type="target" position={Position.Left} className="opacity-0" />
       <Handle type="source" position={Position.Right} className="opacity-0" />
-      <div className="break-words font-semibold leading-snug text-slate-100">{data.label}</div>
+      <div className={`break-words font-semibold leading-snug text-slate-100 ${data.off ? "line-through" : ""}`}>
+        {data.label}
+      </div>
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
         <span
           className="rounded px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide"
@@ -98,6 +116,11 @@ function GroupNode({
         {data.isDynamic && (
           <span className="rounded bg-violet-500/15 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-violet-300">
             Dynamic
+          </span>
+        )}
+        {data.off && (
+          <span className="rounded bg-slate-500/20 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-slate-300">
+            Hidden
           </span>
         )}
       </div>
@@ -249,25 +272,82 @@ export function SimulationDiagram({
   simulation: SimulationResult;
   deviceFilterNames?: string[];
 }) {
+  // Groups the user has toggled off on the diagram. Hiding a group hides the
+  // policies that come ONLY through it (policies shared with a still-visible
+  // group stay). Works on the All Devices / All Users buckets too.
+  const [hiddenGroupIds, setHiddenGroupIds] = useState<Set<string>>(new Set());
+
   const { nodes, edges } = useMemo(() => layout(simulation, deviceFilterNames), [simulation, deviceFilterNames]);
+
   const policySettingsCount = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const s of simulation.settings) counts[s.sourcePolicyId] = (counts[s.sourcePolicyId] ?? 0) + 1;
     return counts;
   }, [simulation.settings]);
 
-  const enrichedNodes = nodes.map((n) =>
-    n.type === "policy"
-      ? { ...n, data: { ...n.data, settingsCount: policySettingsCount[n.id.replace("policy:", "")] ?? 0 } }
-      : n
+  // Which groups bring in each policy (for excluded policies, the group(s) that exclude it).
+  const policySourceGroups = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const p of simulation.policies) m.set(p.id, p.viaGroupIds);
+    for (const p of simulation.excludedPolicies) m.set(p.id, p.excludedViaGroupIds.length ? p.excludedViaGroupIds : p.viaGroupIds);
+    return m;
+  }, [simulation]);
+
+  const onNodeClick: NodeMouseHandler = useCallback((_evt, node) => {
+    if (node.type !== "entraGroup") return;
+    const gid = node.id.replace("group:", "");
+    setHiddenGroupIds((prev) => {
+      const next = new Set(prev);
+      next.has(gid) ? next.delete(gid) : next.add(gid);
+      return next;
+    });
+  }, []);
+
+  // A policy disappears only when every group that brings it in is hidden.
+  const policyHidden = (policyId: string) => {
+    const groups = policySourceGroups.get(policyId) ?? [];
+    return groups.length > 0 && groups.every((g) => hiddenGroupIds.has(g));
+  };
+
+  const displayNodes = useMemo(
+    () =>
+      nodes.map((n) => {
+        if (n.type === "entraGroup") {
+          const off = hiddenGroupIds.has(n.id.replace("group:", ""));
+          return { ...n, data: { ...n.data, off }, style: { opacity: off ? 0.45 : 1 } };
+        }
+        if (n.type === "policy") {
+          const pid = n.id.replace("policy:", "");
+          return { ...n, hidden: policyHidden(pid), data: { ...n.data, settingsCount: policySettingsCount[pid] ?? 0 } };
+        }
+        return n;
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [nodes, hiddenGroupIds, policySettingsCount, policySourceGroups]
+  );
+
+  const displayEdges = useMemo(
+    () =>
+      edges.map((e) => {
+        if (e.source === "device") {
+          const off = hiddenGroupIds.has(e.target.replace("group:", ""));
+          return { ...e, style: { ...e.style, opacity: off ? 0.1 : (e.style?.opacity ?? 0.5) } };
+        }
+        const gid = e.source.replace("group:", "");
+        const pid = e.target.replace("policy:", "");
+        return { ...e, hidden: hiddenGroupIds.has(gid) || policyHidden(pid) };
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [edges, hiddenGroupIds, policySourceGroups]
   );
 
   return (
     <div className="relative h-full w-full">
       <ReactFlow
-        nodes={enrichedNodes}
-        edges={edges}
+        nodes={displayNodes}
+        edges={displayEdges}
         nodeTypes={nodeTypes}
+        onNodeClick={onNodeClick}
         fitView
         fitViewOptions={{ padding: 0.15 }}
         proOptions={{ hideAttribution: true }}
@@ -279,6 +359,20 @@ export function SimulationDiagram({
         <Controls showInteractive={false} position="bottom-right" />
       </ReactFlow>
       <Legend />
+      <div className="absolute left-3 top-3 z-10">
+        {hiddenGroupIds.size > 0 ? (
+          <button
+            onClick={() => setHiddenGroupIds(new Set())}
+            className="rounded-md border border-ink-700 bg-ink-900/90 px-2.5 py-1 text-[11px] text-slate-300 backdrop-blur hover:bg-ink-800"
+          >
+            Show all groups ({hiddenGroupIds.size} hidden)
+          </button>
+        ) : (
+          <div className="pointer-events-none rounded-md border border-ink-700/60 bg-ink-900/70 px-2.5 py-1 text-[10px] text-slate-500 backdrop-blur">
+            Tip: click a group to hide its policies
+          </div>
+        )}
+      </div>
     </div>
   );
 }
