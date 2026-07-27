@@ -1,0 +1,19 @@
+Intune Preflight
+Copyright (c) 2026 Kevin Malinoski and contributors
+
+This product is licensed under the MIT License (see LICENSE).
+
+DEVELOPMENT
+-----------
+Intune Preflight was designed and built by Kevin Malinoski, pair-programmed
+with Claude Code (Anthropic). AI-assisted commits carry a Co-Authored-By
+trailer in the Git history.
+
+TRADEMARKS
+----------
+Intune Preflight is an independent, community-built tool. It is not
+affiliated with, endorsed by, or sponsored by Microsoft.
+
+Microsoft, Intune, Entra, and Microsoft Graph are trademarks of the
+Microsoft group of companies. These names are used only nominatively, to
+describe the Microsoft services this tool interoperates with.

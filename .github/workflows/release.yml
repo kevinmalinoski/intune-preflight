@@ -1,0 +1,59 @@
+name: Release
+
+# Tagging a version (e.g. `git tag v1.0.0 && git push origin v1.0.0`) packages the
+# source and publishes a GitHub Release with a versioned .zip asset. GitHub tracks
+# that asset's download_count persistently -- read it any time with:
+#   gh api repos/${{ github.repository }}/releases --jq \
+#     '.[] | {tag: .tag_name, assets: [.assets[] | {name, download_count}]}'
+# (git clones and the auto-generated "Source code" zip are NOT counted by GitHub;
+#  see Insights -> Traffic for clone/visitor trends.)
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write # create the release and upload the asset
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package tracked source into a versioned zip
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          # git archive only includes committed files -> no .env, node_modules, or
+          # scratchpad ever end up in the asset.
+          git archive --format=zip --prefix="intune-preflight-${TAG}/" \
+            -o "intune-preflight-${TAG}.zip" HEAD
+          ls -lh "intune-preflight-${TAG}.zip"
+
+      - name: Extract this version's notes from CHANGELOG
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk -v v="$VERSION" '
+            $0 ~ "^## \\[" v "\\]" { f=1; next }
+            f && /^## \[/ { exit }
+            f { print }
+          ' CHANGELOG.md > RELEASE_NOTES.md
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "See [CHANGELOG.md](CHANGELOG.md) for the full changelog." > RELEASE_NOTES.md
+          fi
+
+      - name: Publish the GitHub Release with the asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          ASSET="intune-preflight-${TAG}.zip"
+          # Idempotent: create the release, or (if it already exists) attach/replace the asset.
+          gh release create "$TAG" "$ASSET" \
+            --title "$TAG" \
+            --notes-file RELEASE_NOTES.md \
+            || gh release upload "$TAG" "$ASSET" --clobber

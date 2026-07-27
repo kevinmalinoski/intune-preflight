@@ -1,0 +1,12 @@
+node_modules/
+dist/
+build/
+# Ignore every .env variant (incl. backups like .envmalosandboxbackup); keep the example.
+.env*
+!.env.example
+*.log
+*.tsbuildinfo
+.DS_Store
+
+# Local Claude Code tooling (preview config, permission allowlist, etc.)
+.claude/
