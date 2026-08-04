@@ -1,16 +1,18 @@
 # Roadmap
 
-Intune Preflight is at **v1.0**. The core is complete: endpoint simulation,
+Intune Preflight is at **v1.2**. The core is complete: endpoint simulation,
 assignment resolution (include/exclude, filters, inherited All Devices / All
-Users), the Autopilot V1/V2 enrollment layer, and the Windows merged CSP baseline
-with human-readable Settings Catalog names and values.
+Users), the Autopilot V1/V2 enrollment layer, the Windows merged CSP baseline
+with human-readable Settings Catalog names and values, legacy Endpoint Security
+intents, and a tightly integrated Assignment Manifest (send groups to the
+simulator, per-group policy "seating charts").
 
-This page tracks the **honest edges that remain** in v1.0 and the **v2** work
-planned to close them (targeted ~Q4 2026). None of the known limitations block
-v1.0's core use — they're documented so you know exactly where to double-check
-against Entra and the Intune admin center.
+This page tracks the **honest edges that remain** and the **v2** work planned to
+close them (targeted ~Q4 2026). None of the known limitations block the core use
+— they're documented so you know exactly where to double-check against Entra and
+the Intune admin center. See [CHANGELOG.md](CHANGELOG.md) for what shipped when.
 
-## Known limitations (v1.0)
+## Known limitations
 
 ### Dynamic-group rule evaluation is flat / best-effort
 The **Autopilot** and **Group Tag** auto-selection (and the "implied group"
@@ -94,6 +96,37 @@ group rather than its user assignment.
   token is scoped to the signed-in admin's RBAC (scope tags / admin units), so it
   shows only *that admin's slice* — which narrows the tool's "full, unfiltered
   preflight" value. App-only stays the default and recommended mode.
+
+### Under consideration
+
+- **Tenant-wide policy ↔ group map** — a connective "nebula" of which policies
+  bridge which groups across the whole tenant. The per-group seating chart (v1.2)
+  is its single-group view; this is the zoomed-out whole-tenant version.
+- **Group-collision analysis** — surfacing the group *pairs* whose union produces
+  conflicting settings (a device in both A and B). Parked deliberately: it leans on
+  co-membership reasoning the tool avoids, and Intune already flags device-level
+  conflicts — revisit only if the descriptive views prove it's wanted.
+
+## Shipped since v1.0
+
+**v1.2**
+- **Manifest → Simulator bridge** — check groups in the Assignment Manifest and
+  simulate a device in exactly those groups, carrying any device filters you were
+  simulating; the two views now compose instead of standing apart.
+- **Per-group policy "seating charts"** — each checked group's policies as a heat
+  cluster (unique to the group vs shared vs bleed), with a named chip-list
+  drill-down, click-a-policy-to-see-its-groups, and a dual-assignment
+  (All Devices/Users *and* a direct group) anomaly flag.
+- **"Legacy policies" merged-baseline filter**, and a baseline fix dropping the
+  `Assignments@odata.context` OData annotation that leaked in as a setting.
+
+**v1.1**
+- **Legacy Endpoint Security & Security Baselines** (`deviceManagement/intents`)
+  are read and merged — BitLocker / Disk Encryption, Defender Antivirus, Firewall,
+  ASR — and, being Windows, compared for conflicts/overlaps (see the two remaining
+  edges under Known limitations, and the CSP-mapping item in v2).
+- **Docker runtime fix** — the slim server image resolved the shared package from
+  its TypeScript source and 502'd on boot; it now resolves the built output.
 
 ## Shipped in v1.0
 

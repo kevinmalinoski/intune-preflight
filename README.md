@@ -37,7 +37,9 @@ The normal loop is deploy-and-pray: assign a policy, wait for devices to check i
 - 🎫 **Policy Waitlist** — pull an *unassigned* policy into the simulation to preview "what if I assigned this?"
 - 🔍 **Merged baseline drill-down** — every setting from every applied policy in one filterable grid, with the real **CSP path** and a **Microsoft Learn** link per setting.
 - ⚔️ **Conflicts & overlaps** — genuine value disagreements vs redundant duplicate configuration, surfaced separately (Windows).
-- 📋 **Assignment Manifest** — a tenant-wide map of which groups carry which policies, with filter simulation and CSV export. **New in v1.**
+- 🛡️ **Legacy Endpoint Security** — intents-based BitLocker, Defender Antivirus, Firewall and ASR policies read and merged alongside modern Settings Catalog ones.
+- 📋 **Assignment Manifest** — a tenant-wide map of which groups carry which policies, with filter simulation and CSV export.
+- 🔗 **Manifest ↔ Simulator** — check groups in the Manifest and *simulate a device in exactly those groups*; per-group **"seating charts"** reveal at a glance whether a group's policies are its own or shared across the tenant.
 - 🌐 **Four platforms** — Windows, macOS, iOS/iPadOS, and Android, scoped separately.
 - 📤 **Export** — JSON or CSV from both the simulator and the Manifest.
 

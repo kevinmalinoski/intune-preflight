@@ -1,6 +1,8 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import type { AssignmentReport as Report, AssignmentReportRow, Platform, PolicyKind } from "@intune-preflight/shared";
 import { api } from "./api.ts";
+import { GroupHeatCluster, type ClusterPolicy } from "./GroupHeatCluster.tsx";
+import { GroupPolicyList } from "./GroupPolicyList.tsx";
 
 // An endpoint is defined by its OS, so the manifest is always scoped to one --
 // a mixed-OS view mixes assignments no single device would ever see.
@@ -62,11 +64,26 @@ function SortTh({
   );
 }
 
-export function AssignmentReport() {
+export function AssignmentReport({
+  onSimulateGroups,
+}: {
+  /** Send the checked groups (and any simulated device filters) to the Simulator
+   *  as a fresh device. When omitted, the checkbox column and selection bar are
+   *  hidden (the Manifest is read-only). */
+  onSimulateGroups?: (groupIds: string[], platform: Platform, filterIds: string[]) => void;
+} = {}) {
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [os, setOs] = useState<Platform>("windows");
+  // Real Entra groups checked to send to the Simulator (never the virtual
+  // All Devices / All Users — those always apply). Cleared when the OS changes,
+  // since each OS tab shows a different set of groups.
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  // The group whose seating chart is expanded into the full chip list, if any.
+  const [openCluster, setOpenCluster] = useState<{ id: string; name: string } | null>(null);
+  const canSimulate = !!onSimulateGroups;
+  const colCount = canSimulate ? 7 : 6;
   const [showInherited, setShowInherited] = useState(true);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   // Default to Direct, descending: the most directly-assigned groups (the real
@@ -81,6 +98,7 @@ export function AssignmentReport() {
   // derived client-side since unassigned policies produce no assignment rows).
   useEffect(() => {
     let live = true;
+    setChecked(new Set()); // the group set differs per OS; don't carry a stale selection across tabs
     api
       .assignmentReport(os)
       .then((r) => live && setReport(r))
@@ -89,6 +107,13 @@ export function AssignmentReport() {
       live = false;
     };
   }, [os]);
+
+  const toggleChecked = (id: string) =>
+    setChecked((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
 
   // Policies targeting each group, for the expandable detail rows.
   const rowsByGroup = useMemo(() => {
@@ -305,6 +330,53 @@ export function AssignmentReport() {
       return next;
     });
 
+  // "Which groups carry each policy" -- powers the per-group seating charts.
+  // Real (non-virtual) Include edges only: the All Devices / All Users baseline
+  // is shared by everyone by definition, so counting it would wash every group
+  // hot and hide the real containment-vs-bleed signal.
+  const sharedWithByPolicy = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    for (const r of report?.rows ?? []) {
+      if (r.assignment !== "Include" || r.groupKind === "virtual") continue;
+      const s = m.get(r.policyId) ?? new Set<string>();
+      s.add(r.groupName);
+      m.set(r.policyId, s);
+    }
+    return m;
+  }, [report]);
+
+  // Policies scoped to the virtual All Devices / All Users targets. Intune's UI
+  // disables adding groups once you pick All Devices/Users (it's either/or), so a
+  // policy that is on one of these AND also directly on a group is an ANOMALY --
+  // it can only be created outside the portal. Flag it where it appears in a
+  // group's own list rather than mistaking it for the group's own policy.
+  const universalByPolicy = useMemo(() => {
+    const m = new Map<string, Set<string>>();
+    for (const r of report?.rows ?? []) {
+      if (r.assignment !== "Include" || r.groupKind !== "virtual") continue;
+      (m.get(r.policyId) ?? m.set(r.policyId, new Set<string>()).get(r.policyId)!).add(r.groupName);
+    }
+    return m;
+  }, [report]);
+
+  const clusterFor = (groupId: string, groupName: string): ClusterPolicy[] => {
+    const seen = new Set<string>();
+    const out: ClusterPolicy[] = [];
+    for (const r of report?.rows ?? []) {
+      if (r.groupId !== groupId || r.assignment !== "Include" || seen.has(r.policyId)) continue;
+      seen.add(r.policyId);
+      const names = [...(sharedWithByPolicy.get(r.policyId) ?? new Set<string>())];
+      out.push({
+        id: r.policyId,
+        name: r.policyName,
+        shared: names.length || 1,
+        sharedWith: names.filter((n) => n !== groupName),
+        universal: [...(universalByPolicy.get(r.policyId) ?? new Set<string>())],
+      });
+    }
+    return out;
+  };
+
   if (error) {
     return <div className="flex h-full items-center justify-center p-8 text-center text-sm text-red-400">{error}</div>;
   }
@@ -321,7 +393,7 @@ export function AssignmentReport() {
   const osLabel = OS_FILTERS.find((f) => f.value === os)?.label ?? os;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="relative flex h-full flex-col">
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-3 border-b border-ink-700 bg-ink-900 px-4 py-3">
         <div className="mr-auto flex max-w-xl items-start gap-2">
@@ -379,7 +451,7 @@ export function AssignmentReport() {
       </div>
 
       {/* Body */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+      <div className={`min-h-0 flex-1 overflow-y-auto px-4 py-3 ${canSimulate && checked.size > 0 ? "pb-56" : ""}`}>
         <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1">
           <input
             value={search}
@@ -422,6 +494,7 @@ export function AssignmentReport() {
           <table className="w-full text-left text-xs">
             <thead className="bg-ink-900 text-[10px] uppercase tracking-wide text-slate-500">
               <tr>
+                {canSimulate && <th className="w-9 px-2 py-2" title="Select groups to send to the Simulator" />}
                 <SortTh label="Group" col="group" sort={sort} onSort={sortBy} />
                 <th className="px-3 py-2 font-medium">Type</th>
                 <SortTh
@@ -462,6 +535,27 @@ export function AssignmentReport() {
                       onClick={() => toggle(o.groupId)}
                       className="cursor-pointer border-t border-ink-800 hover:bg-ink-800/60"
                     >
+                      {canSimulate && (
+                        <td className="px-2 py-2" onClick={(e) => e.stopPropagation()}>
+                          {o.groupKind === "virtual" ? (
+                            <input
+                              type="checkbox"
+                              checked
+                              disabled
+                              title="Always applies — every device inherits All Devices / All Users, so there's nothing to select"
+                              className="cursor-not-allowed opacity-40 accent-sky-400"
+                            />
+                          ) : (
+                            <input
+                              type="checkbox"
+                              checked={checked.has(o.groupId)}
+                              onChange={() => toggleChecked(o.groupId)}
+                              title={`Add “${o.groupName}” to the device to simulate`}
+                              className="cursor-pointer accent-sky-400"
+                            />
+                          )}
+                        </td>
+                      )}
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-1.5">
                           <span className="text-slate-500">{open ? "▾" : "▸"}</span>
@@ -490,7 +584,7 @@ export function AssignmentReport() {
                     </tr>
                     {open && (
                       <tr className="border-t border-ink-800 bg-ink-950/40">
-                        <td colSpan={6} className="px-3 py-2">
+                        <td colSpan={colCount} className="px-3 py-2">
                           <div className="flex flex-col gap-1">
                             {detail.map(({ row: r, inheritedFrom, implied, filteredOut }, i) => {
                               const kind = KIND_STYLE[r.kind] ?? { label: r.kind, cls: "bg-slate-500/15 text-slate-400" };
@@ -575,7 +669,7 @@ export function AssignmentReport() {
               })}
               {overlaps.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-3 py-6 text-center text-slate-500">
+                  <td colSpan={colCount} className="px-3 py-6 text-center text-slate-500">
                     {search ? `No groups match “${search}”.` : "No policy assignments for this platform."}
                   </td>
                 </tr>
@@ -620,6 +714,69 @@ export function AssignmentReport() {
           <p className="text-slate-600">Export the CSV for the raw per-assignment detail — pivot by Group or Policy in Excel.</p>
         </div>
       </div>
+
+      {/* Selection bar — rises from the bottom when ≥1 group is checked, and sends
+          the checked groups to the Simulator as a fresh, ground-up device. */}
+      {canSimulate && (
+        <div
+          className={`absolute inset-x-0 bottom-0 z-20 border-t border-ink-700 bg-ink-900/95 px-4 py-3 shadow-[0_-8px_24px_rgba(0,0,0,0.35)] backdrop-blur transition-transform duration-200 ${
+            checked.size > 0 ? "translate-y-0" : "pointer-events-none translate-y-full"
+          }`}
+        >
+          {/* Seating charts — one per checked group: policies as bubbles, cool =
+              this group's own, hot = shared. A preflight check for overcrowding. */}
+          {checked.size > 0 && (
+            <div className="mx-auto mb-2 flex max-w-6xl gap-2 overflow-x-auto pb-1">
+              {[...checked].map((gid) => {
+                const gname = overlaps.find((o) => o.groupId === gid)?.groupName ?? gid;
+                return (
+                  <GroupHeatCluster
+                    key={gid}
+                    name={gname}
+                    policies={clusterFor(gid, gname)}
+                    onOpen={() => setOpenCluster({ id: gid, name: gname })}
+                  />
+                );
+              })}
+            </div>
+          )}
+          <div className="mx-auto flex max-w-5xl items-center gap-3">
+            <span className="text-xs text-slate-300">
+              <span className="font-semibold text-slate-100">{checked.size}</span> group{checked.size === 1 ? "" : "s"} selected
+            </span>
+            <span className="hidden text-[11px] text-slate-500 sm:inline">
+              All Devices / All Users always apply and are included automatically.
+            </span>
+            {matched.size > 0 && (
+              <span className="text-[11px] text-violet-300" title="The device filters you're simulating here carry over to the Simulator">
+                ⛃ carrying {matched.size} device filter{matched.size === 1 ? "" : "s"}
+              </span>
+            )}
+            <div className="ml-auto flex items-center gap-2">
+              <button
+                onClick={() => setChecked(new Set())}
+                className="rounded-md px-2.5 py-1.5 text-xs text-slate-400 hover:text-slate-200"
+              >
+                Clear
+              </button>
+              <button
+                onClick={() => onSimulateGroups?.([...checked], os, [...matched])}
+                className="rounded-md border border-emerald-400/50 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20"
+              >
+                Simulate a device in these {checked.size} group{checked.size === 1 ? "" : "s"} →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {openCluster && (
+        <GroupPolicyList
+          name={openCluster.name}
+          policies={clusterFor(openCluster.id, openCluster.name)}
+          onClose={() => setOpenCluster(null)}
+        />
+      )}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { groupTagMatchesRule, isGroupTagRule, isAutopilotJoinedRule } from "@intune-preflight/shared";
 import type {
   AssignmentFilter,
@@ -13,12 +13,23 @@ import { PolicyPreflight } from "./PolicyPreflight.tsx";
 import { SimulationDiagram } from "./SimulationDiagram.tsx";
 import { SimulationBaselinePanel, type BaselineScope } from "./SimulationBaselinePanel.tsx";
 
-export function EndpointSimulator() {
+export function EndpointSimulator({
+  handoff,
+  onHandoffConsumed,
+}: {
+  /** One-shot "simulate a device in these groups" payload from the Manifest. */
+  handoff?: { groupIds: string[]; platform: Platform; filterIds: string[] } | null;
+  onHandoffConsumed?: () => void;
+} = {}) {
   const [groups, setGroups] = useState<GroupSummary[]>([]);
   const [filters, setFilters] = useState<AssignmentFilter[]>([]);
-  const [platform, setPlatform] = useState<Platform>("windows");
-  const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
-  const [deviceFilterIds, setDeviceFilterIds] = useState<string[]>([]);
+  // Seed the OS, group selection, and matched device filters from a Manifest
+  // handoff on this fresh mount; everything else (Autopilot, waitlist) starts
+  // clean, so it's a faithful continuation of what you were exploring in the
+  // Manifest. The seeded state drives the simulate effect below like a manual one.
+  const [platform, setPlatform] = useState<Platform>(handoff?.platform ?? "windows");
+  const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>(handoff?.groupIds ?? []);
+  const [deviceFilterIds, setDeviceFilterIds] = useState<string[]>(handoff?.filterIds ?? []);
   const [unassignedPolicies, setUnassignedPolicies] = useState<UnassignedPolicy[]>([]);
   const [unassignedPolicyIds, setUnassignedPolicyIds] = useState<string[]>([]);
   const [isAutopilotDevice, setIsAutopilotDevice] = useState(false);
@@ -28,6 +39,13 @@ export function EndpointSimulator() {
   const [baselineScope, setBaselineScope] = useState<BaselineScope | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // The handoff is consumed by the useState initializers above; clear it once so
+  // that returning to this tab later (without re-copying) starts a blank device.
+  useEffect(() => {
+    if (handoff) onHandoffConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     Promise.all([api.groups(), api.filters(), api.unassignedPolicies()])
@@ -40,9 +58,17 @@ export function EndpointSimulator() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Filters selected for one platform won't apply to another -- reset on switch.
+  // Filters selected for one platform won't apply to another -- reset when the
+  // user actually switches OS. Compare against the PREVIOUS platform via a ref
+  // rather than a "skip first mount" flag: React StrictMode double-invokes mount
+  // effects in dev, and the flag approach would let the second invoke wipe the
+  // filters seeded from a Manifest handoff. A real OS switch still clears them.
+  const lastPlatform = useRef(platform);
   useEffect(() => {
-    setDeviceFilterIds([]);
+    if (lastPlatform.current !== platform) {
+      lastPlatform.current = platform;
+      setDeviceFilterIds([]);
+    }
   }, [platform]);
 
   // Autopilot is Windows-only -- turn it (and any Group Tag) off when the

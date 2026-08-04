@@ -19,6 +19,18 @@ const METADATA_KEYS = new Set([
   "assignments",
 ]);
 
+/**
+ * Whether a Graph property is metadata rather than a configuration setting.
+ * Beyond the fixed fields above, this drops any OData annotation -- keys like
+ * `assignments@odata.context`, `@odata.count`, `<nav>@odata.navigationLink` --
+ * which ride along on `$expand`ed objects and would otherwise leak into the
+ * baseline as a bogus setting (e.g. "Assignments@odata.context" in a compliance
+ * policy). Real Graph setting names are plain camelCase identifiers with no `@`.
+ */
+function isNonSettingKey(key: string): boolean {
+  return METADATA_KEYS.has(key) || key.includes("@");
+}
+
 function friendlyLabel(key: string): string {
   // camelCase -> "Camel Case"
   const spaced = key.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
@@ -167,7 +179,7 @@ export function flattenToCspSettings(raw: Record<string, unknown>): CspSetting[]
   const policyId = (raw["id"] as string) ?? "";
   const settings: CspSetting[] = [];
   for (const [key, value] of Object.entries(raw)) {
-    if (METADATA_KEYS.has(key)) continue;
+    if (isNonSettingKey(key)) continue;
     // A compliance policy's schema defaults mean "not enforced", not "configured
     // to this value" -- drop them so the policy only contributes real rules (see
     // isUnenforcedComplianceDefault). Applied before stringify so `false` booleans
@@ -346,7 +358,7 @@ export function flattenSettingsCatalogEntries(
 export function flattenScriptToCspSettings(raw: Record<string, unknown>, policyId: string): CspSetting[] {
   const settings: CspSetting[] = [];
   for (const [key, value] of Object.entries(raw)) {
-    if (METADATA_KEYS.has(key)) continue;
+    if (isNonSettingKey(key)) continue;
     let stringValue: string | undefined;
     if (key === "scriptContent" && typeof value === "string") {
       try {

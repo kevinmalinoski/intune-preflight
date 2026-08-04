@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { Platform } from "@intune-preflight/shared";
 import { api } from "./api.ts";
 import { EndpointSimulator } from "./EndpointSimulator.tsx";
 import { AssignmentReport } from "./AssignmentReport.tsx";
@@ -15,6 +16,11 @@ export default function App() {
   const [refreshed, setRefreshed] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [tab, setTab] = useState<Tab>("simulate");
+  // One-shot handoff from the Assignment Manifest: "simulate a device in these
+  // groups". Set it and switch to the simulator; the simulator seeds from it on
+  // its fresh mount (the tabs unmount, so this is a true ground-up recompute)
+  // and clears it so a later manual tab switch doesn't re-apply a stale device.
+  const [handoff, setHandoff] = useState<{ groupIds: string[]; platform: Platform; filterIds: string[] } | null>(null);
 
   // Data-source mode. `demo === null` until the server status loads.
   const [demo, setDemo] = useState<boolean | null>(null);
@@ -198,7 +204,17 @@ export default function App() {
       )}
 
       <div className="min-h-0 flex-1">
-        {tab === "simulate" ? <EndpointSimulator key={refreshKey} /> : <AssignmentReport key={refreshKey} />}
+        {tab === "simulate" ? (
+          <EndpointSimulator key={refreshKey} handoff={handoff} onHandoffConsumed={() => setHandoff(null)} />
+        ) : (
+          <AssignmentReport
+            key={refreshKey}
+            onSimulateGroups={(groupIds, platform, filterIds) => {
+              setHandoff({ groupIds, platform, filterIds });
+              setTab("simulate");
+            }}
+          />
+        )}
       </div>
     </div>
   );

@@ -192,6 +192,21 @@ describe("flattenToCspSettings (compliance default suppression)", () => {
     expect(byId).toEqual({ passwordRequired: "true", passwordMinimumLength: "8" });
   });
 
+  it("drops OData annotations that ride along on $expand=assignments", () => {
+    // Graph returns `assignments@odata.context` (and friends) alongside the
+    // expanded assignments array -- they must not leak in as settings.
+    const policy = {
+      id: "c2",
+      "@odata.type": "#microsoft.graph.windows10CompliancePolicy",
+      passwordRequired: true,
+      assignments: [{ target: {} }],
+      "assignments@odata.context": "https://graph.microsoft.com/beta/$metadata#...",
+    };
+    const settings = flattenToCspSettings(policy);
+    expect(settings.some((s) => s.displayName.toLowerCase().includes("odata"))).toBe(false);
+    expect(settings.map((s) => s.settingId.split(":").pop())).toEqual(["passwordRequired"]);
+  });
+
   it("does NOT suppress `false` on a non-compliance config profile", () => {
     // A device-restriction profile can legitimately enforce a `false` (e.g.
     // "camera blocked = false"), so the compliance-only suppression must not

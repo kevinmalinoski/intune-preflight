@@ -6,6 +6,38 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-08-04
+
+### Added
+- **Per-group "seating charts."** As you check groups in the Assignment Manifest,
+  a strip above the selection bar shows each group's policies as a bubble cluster
+  — cool = a policy unique to this group, hot = one shared across many groups —
+  with a containment bar ("68% its own"). Click a chart to open the full named
+  policy list — heat-colored chips, unique policies first, each naming the other
+  groups that carry it. A preflight read on whether a group is siloed or
+  overcrowded with borrowed policies, computed entirely from the data already loaded.
+  A policy that is on **both All Devices/Users *and* a direct group** — an
+  assignment Intune's portal disallows (it's either/or), so an anomaly that can
+  only come from Graph/PowerShell — is flagged distinctly (indigo ⚠) instead of
+  being counted as the group's own. Pairs with the bridge: eyeball the groups,
+  then simulate them.
+- **Manifest → Simulator bridge.** Check real Entra groups in the Assignment
+  Manifest and hit **"Simulate a device in these groups"** to jump straight into
+  the Endpoint Preflight simulator, seeded with exactly those groups — plus any
+  device filters you were simulating in the Manifest — on the Manifest's current
+  OS, as a fresh, ground-up merged baseline. A selection bar
+  rises from the bottom when groups are checked; All Devices / All Users are
+  shown as always-applies and included automatically rather than selected. Ties
+  the tenant-wide "who carries what" view to the per-device "what does it get"
+  view without merging the two screens.
+
+### Fixed
+- **`Assignments@odata.context` no longer appears as a setting.** Fetching
+  policies with `$expand=assignments` makes Graph attach an OData annotation
+  (`assignments@odata.context`, a URL) that the schema-agnostic flattener emitted
+  as a bogus setting — most visible on compliance policies, which have few real
+  settings. Any `@odata` annotation key is now skipped.
+
 ## [1.1.0] — 2026-08-03
 
 ### Added
@@ -181,7 +213,8 @@ Initial public beta.
   platform scripts, Windows update profiles, Autopilot profiles, and Assignment Filters.
 - Docker Compose and `npm run dev` setup; MIT licensed.
 
-[Unreleased]: https://github.com/kevinmalinoski/intune-preflight/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/kevinmalinoski/intune-preflight/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/kevinmalinoski/intune-preflight/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/kevinmalinoski/intune-preflight/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/kevinmalinoski/intune-preflight/compare/v0.5.0-beta...v1.0.0
 [0.5.0-beta]: https://github.com/kevinmalinoski/intune-preflight/releases/tag/v0.5.0-beta

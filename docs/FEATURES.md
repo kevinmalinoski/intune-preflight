@@ -176,7 +176,7 @@ _Switch platform to scope the whole simulation — policies, filters, and the wa
 
 ---
 
-# Assignment Manifest — new in v1
+# Assignment Manifest
 
 The simulator answers *"what would this one device get?"* The Manifest answers the tenant-wide question: **which groups carry which policies, and what does a member of each group actually receive?**
 
@@ -223,6 +223,24 @@ _Toggle a filter and watch the whole tenant re-resolve. Policies the filter drop
 
 This is the fastest way to answer *"what does my Kiosk filter actually do to my policy set?"* — a question that's genuinely painful to work out in the Intune console.
 
+## Send groups to the simulator
+
+The Manifest and the simulator are two lenses on the same data, so they connect. Tick the checkbox on one or more groups and a bar rises from the bottom: **"Simulate a device in these groups →"**. It drops you into Endpoint Preflight seeded with exactly those groups — plus any device filters you were simulating here — on the Manifest's current OS, recomputing the full merged baseline from scratch. You go from *"which groups look interesting"* to *"what a device in them actually gets"* in one click. (All Devices / All Users always apply, so they're marked *always applies* rather than something you select.)
+
+![Send checked groups to the simulator](img/16-manifest-simulate.png)
+
+_Check groups in the Manifest, then simulate a device in exactly those groups._
+
+## Per-group policy "seating charts"
+
+As you check groups, a strip above the bar shows each one as a small bubble cluster — a preflight seating check. Every bubble is a policy the group carries, colored by **how shared it is: cool = unique to this group, hot = carried by many groups (bleed)** — with a distinct indigo ⚠ flag for anything scoped to All Devices / All Users *and* a direct group (an assignment Intune's portal normally disallows). A containment bar reads **"68% its own"** at a glance.
+
+Click a chart to open the full **named policy list**: heat-colored chips, unique policies first, and clicking any policy names exactly which other groups carry it. It answers, in one motion, whether a group is its own tidy container or quietly overcrowded with policies borrowed from everywhere — the shared-use view, with no guesswork.
+
+![Per-group seating charts](img/17-manifest-seating-charts.png)
+
+_Each checked group's policies as a heat cluster; click through to the named chip list and see which groups share each policy._
+
 ## Export
 
 Download the full manifest as CSV — the raw per-assignment detail, ready to pivot by Group or Policy in Excel.
@@ -231,7 +249,7 @@ Download the full manifest as CSV — the raw per-assignment detail, ready to pi
 
 _CSV export of every policy → group assignment for the selected platform._
 
-> **Possible roadmap item — policy collisions / shared use.** Surfacing where the *same policy* is assigned across multiple Entra groups (and where that overlap is redundant or risky) is a natural next step for the Manifest. See [ROADMAP.md](../ROADMAP.md).
+> **Shared use is now visible** through the per-group seating charts above — where the *same policy* is assigned across multiple Entra groups. Surfacing group *pairs* whose combined assignment produces conflicts is parked under *Under consideration* in [ROADMAP.md](../ROADMAP.md).
 
 ---
 
