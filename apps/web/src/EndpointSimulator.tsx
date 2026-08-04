@@ -124,20 +124,22 @@ export function EndpointSimulator({
   }, [groupTag, groups]);
 
   // Checking "Autopilot device" links the endpoint to every default
-  // Autopilot-joined dynamic group (bare "[ZTDId]" startsWith rule) by
-  // selecting them directly, the same way a Group Tag drives selection;
-  // unchecking removes them again. This keeps all group selection on the
-  // client and the server a pure "given these groups, compute the baseline".
+  // Autopilot-joined dynamic group (bare "[ZTDId]" startsWith rule) by selecting
+  // them directly, the same way a Group Tag drives selection. This only ever
+  // ADDS: it must NOT strip an Autopilot-joined group the user selected
+  // deliberately (e.g. handed off from the Manifest, or picked directly) just
+  // because Autopilot mode happens to be off -- doing so silently dropped that
+  // group from the simulation. Removal when the toggle is switched off is handled
+  // by toggleAutopilotDevice; switching the OS off Windows drops them via the
+  // platform filter above.
   useEffect(() => {
+    if (!isAutopilotDevice) return;
     const autopilotGroupIds = groups.filter((g) => isAutopilotJoinedRule(g.membershipRule)).map((g) => g.id);
     if (autopilotGroupIds.length === 0) return;
     setSelectedGroupIds((prev) => {
-      if (isAutopilotDevice) {
-        const merged = [...prev];
-        for (const id of autopilotGroupIds) if (!merged.includes(id)) merged.push(id);
-        return merged;
-      }
-      return prev.filter((id) => !autopilotGroupIds.includes(id));
+      const merged = [...prev];
+      for (const id of autopilotGroupIds) if (!merged.includes(id)) merged.push(id);
+      return merged;
     });
   }, [isAutopilotDevice, groups]);
 

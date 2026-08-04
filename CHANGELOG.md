@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.2.1] — 2026-08-04
+
+### Fixed
+- **Selecting an Autopilot-joined group in the Manifest now carries it into the
+  simulation.** The simulator's "Autopilot device" effect stripped any
+  Autopilot-joined dynamic group (a bare `[ZTDId]` rule, e.g. "Device - Windows -
+  Autopilot") whenever Autopilot mode was off — which it is by default on a
+  Manifest handoff — so the group was silently dropped from the simulated device.
+  The effect now only *adds* Autopilot groups when the toggle is on; it never
+  removes a group the user selected deliberately (removal on toggle-off is handled
+  separately).
+
 ## [1.2.0] — 2026-08-04
 
 ### Added
@@ -213,7 +225,8 @@ Initial public beta.
   platform scripts, Windows update profiles, Autopilot profiles, and Assignment Filters.
 - Docker Compose and `npm run dev` setup; MIT licensed.
 
-[Unreleased]: https://github.com/kevinmalinoski/intune-preflight/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/kevinmalinoski/intune-preflight/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/kevinmalinoski/intune-preflight/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/kevinmalinoski/intune-preflight/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/kevinmalinoski/intune-preflight/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/kevinmalinoski/intune-preflight/compare/v0.5.0-beta...v1.0.0
