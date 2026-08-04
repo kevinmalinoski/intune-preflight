@@ -45,9 +45,7 @@ The normal loop is deploy-and-pray: assign a policy, wait for devices to check i
 
 ## What's included in the baseline
 
-**Covered:** Device Configuration profiles (all platforms, incl. Apple/Android Wi-Fi, VPN, certs, custom) · Settings Catalog — **including Security Baselines and Endpoint Security policies** (Antivirus, Disk Encryption, etc.) now delivered through the unified settings platform · Compliance policies · Administrative Templates (ADMX) · Platform Scripts (Windows PowerShell + macOS shell) · Windows Feature / Quality / Driver Update profiles.
-
-**Not yet covered:** only **legacy Endpoint Security / Security Baselines still stored as `deviceManagement/intents`** — the older object model Microsoft has largely migrated into the Settings Catalog. Modern baselines are **already covered**; only tenants that still have old intents-based policies will see a gap. Planned for v2.
+**Covered:** Device Configuration profiles (all platforms, incl. Apple/Android Wi-Fi, VPN, certs, custom) · Settings Catalog — **including Security Baselines and Endpoint Security policies** (Antivirus, Disk Encryption, etc.) now delivered through the unified settings platform · **legacy Endpoint Security & Security Baselines** still stored as `deviceManagement/intents` (legacy BitLocker / Disk Encryption, Defender Antivirus, Firewall, ASR, …) · Compliance policies · Administrative Templates (ADMX) · Platform Scripts (Windows PowerShell + macOS shell) · Windows Feature / Quality / Driver Update profiles.
 
 **Intentionally excluded:** Proactive Remediations, enrollment-time policies (ESP / enrollment restrictions), and app-level MAM / app configuration.
 
@@ -55,11 +53,11 @@ The normal loop is deploy-and-pray: assign a policy, wait for devices to check i
 
 ## Known limitations
 
-Honest edges in v1.0 — none block the core use, but know them before you rely on a result:
+Honest edges in v1.1 — none block the core use, but know them before you rely on a result:
 
 - **Dynamic membership is evaluated best-effort, not queried.** Group Tag / Autopilot auto-selection reads only the `[OrderID]` and `[ZTDId]` clauses in `device.devicePhysicalIds` (`-eq` / `-startsWith`). A bare `[ZTDId]` clause combined with **`or`** is handled correctly (any satisfied branch grants membership); rules that gate it behind **`and`**, or that depend on other conditions entirely, may be **missed or over-matched**. Auto-selected and implied groups are always flagged in the UI so you can verify them against Entra.
 - **Conflict & overlap detection is Windows-only.** Other platforms don't map cleanly onto value-level comparison yet. The **merged baseline itself is still shown on every platform** — only the conflict/overlap flags are Windows-scoped.
-- **Legacy `deviceManagement/intents` are not read** (see coverage above).
+- **Legacy Endpoint Security intents use schema-agnostic setting names.** Legacy `deviceManagement/intents` (BitLocker, Defender AV, Firewall, …) are read, but their setting names are derived from the Graph `definitionId` rather than a hand-maintained CSP map, and their ids don't line up with the equivalent Settings Catalog setting — so a legacy intent and a modern Settings Catalog policy setting the *same* thing aren't yet cross-detected as a conflict (two legacy intents are).
 - **Settings flattening is schema-agnostic** — derived from each Graph resource's own properties rather than a hand-maintained CSP schema, so raw Graph field names show up as setting names in some cases.
 - **Tested against sandbox Microsoft 365 tenants.** Always verify against the Intune admin center before relying on a computed baseline for compliance decisions.
 

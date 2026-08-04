@@ -135,6 +135,66 @@ const policies: IntunePolicy[] = [
     assignmentFilters: [],
     settings: [s("update.deferfeature", "Windows Update", "Feature update deferral (days)", "30")],
   },
+  // Legacy Endpoint Security (deviceManagement/intents model) -- BitLocker /
+  // Disk Encryption and Defender Antivirus created the old template-based way,
+  // still present in many tenants. Settings are namespaced `endpointSecurity:`
+  // like the real normalizer, so an org-wide BitLocker intent and a corp
+  // override are detected as a genuine conflict (encryption method) plus an
+  // overlap (require encryption) -- Windows-only, like every other comparison.
+  {
+    id: "pol-es-bitlocker",
+    kind: "endpointSecurity",
+    displayName: "Windows - BitLocker (Endpoint Security)",
+    platform: "windows",
+    assignedGroupIds: [ALL_DEVICES],
+    excludedGroupIds: [],
+    assignmentFilters: [],
+    settings: [
+      s("endpointSecurity:bitlocker_requireEncryption", "BitLocker", "Require Device Encryption", "Enabled"),
+      s("endpointSecurity:bitlocker_encryptionMethod", "BitLocker", "Encryption Method For Operating System Drives", "XTS-AES 128-bit"),
+    ],
+  },
+  {
+    id: "pol-es-bitlocker-corp",
+    kind: "endpointSecurity",
+    displayName: "Windows - BitLocker Corp Override (Endpoint Security)",
+    platform: "windows",
+    assignedGroupIds: ["grp-corp-win"],
+    excludedGroupIds: [],
+    assignmentFilters: [],
+    settings: [
+      // Same value as the org-wide intent -> overlap; stronger cipher -> conflict.
+      s("endpointSecurity:bitlocker_requireEncryption", "BitLocker", "Require Device Encryption", "Enabled"),
+      s("endpointSecurity:bitlocker_encryptionMethod", "BitLocker", "Encryption Method For Operating System Drives", "XTS-AES 256-bit"),
+    ],
+  },
+  {
+    id: "pol-es-defender-av",
+    kind: "endpointSecurity",
+    displayName: "Windows - Microsoft Defender Antivirus (Endpoint Security)",
+    platform: "windows",
+    assignedGroupIds: ["grp-corp-win"],
+    excludedGroupIds: [],
+    assignmentFilters: [],
+    settings: [
+      s("endpointSecurity:defenderav_allowRealtimeMonitoring", "Microsoft Defender Antivirus", "Allow Realtime Monitoring", "Enabled"),
+      s("endpointSecurity:defenderav_cloudBlockLevel", "Microsoft Defender Antivirus", "Cloud Block Level", "High"),
+      s("endpointSecurity:defenderav_puaProtection", "Microsoft Defender Antivirus", "PUA Protection", "Block"),
+    ],
+  },
+  {
+    id: "pol-es-firewall-draft",
+    kind: "endpointSecurity",
+    displayName: "Windows - Firewall (Endpoint Security) (DRAFT)",
+    platform: "windows",
+    // No assignment -> shows up in the Policy Waitlist as a legacy ES intent.
+    assignedGroupIds: [],
+    excludedGroupIds: [],
+    assignmentFilters: [],
+    settings: [
+      s("endpointSecurity:firewall_enableDomainNetworkFirewall", "Microsoft Defender Firewall", "Enable Domain Network Firewall", "Enabled"),
+    ],
+  },
   {
     id: "pol-win-sharedpc",
     kind: "settingsCatalog",

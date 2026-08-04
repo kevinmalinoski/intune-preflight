@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  flattenIntentSettings,
   flattenSettingsCatalogEntries,
   flattenToCspSettings,
   parseAssignmentTarget,
+  platformFromIntentTemplate,
   platformFromOdataType,
   ruleImplies,
 } from "./normalize.js";
@@ -77,6 +79,58 @@ describe("ruleImplies (dynamic-rule implication)", () => {
     // Both branches under the same broader prefix -> implication holds.
     const bothUnder = `${startsWith("SALES-KIOSK-VM")} or ${startsWith("SALES-KIOSK-SINGLE")}`;
     expect(ruleImplies(bothUnder, startsWith("SALES-KIOSK"))).toBe(true);
+  });
+});
+
+describe("flattenIntentSettings (legacy Endpoint Security intents)", () => {
+  const defId = "deviceConfiguration--windows10EndpointProtectionConfiguration_bitLockerEncryptDevice";
+
+  it("normalizes scalar settings from `value`, keying on the definitionId", () => {
+    const [setting] = flattenIntentSettings(
+      [{ "@odata.type": "#microsoft.graph.deviceManagementBooleanSettingInstance", definitionId: defId, value: true }],
+      "BitLocker"
+    );
+    expect(setting.settingId).toBe(`endpointSecurity:${defId}`);
+    expect(setting.cspArea).toBe("BitLocker");
+    expect(setting.displayName).toBe("Bit Locker Encrypt Device");
+    expect(setting.value).toBe("true");
+  });
+
+  it("falls back to valueJson when there is no typed `value`", () => {
+    const [setting] = flattenIntentSettings(
+      [{ definitionId: "x_encryptionMethodWithXtsOsDrive", valueJson: "7" }],
+      "BitLocker"
+    );
+    expect(setting.value).toBe("7");
+  });
+
+  it("drops the notConfigured sentinel", () => {
+    expect(flattenIntentSettings([{ definitionId: "x_startupAuthenticationRequired", valueJson: '"notConfigured"' }], "BitLocker")).toEqual([]);
+  });
+
+  it("walks child instances of a complex/collection setting", () => {
+    const settings = flattenIntentSettings(
+      [
+        {
+          definitionId: "x_firewallRules",
+          value: [
+            { definitionId: "x_firewallRules_enableDomainNetworkFirewall", value: "allowed" },
+            { definitionId: "x_firewallRules_enablePublicNetworkFirewall", valueJson: '"allowed"' },
+          ],
+        },
+      ],
+      "Firewall"
+    );
+    expect(settings.map((s) => s.settingId)).toEqual([
+      "endpointSecurity:x_firewallRules_enableDomainNetworkFirewall",
+      "endpointSecurity:x_firewallRules_enablePublicNetworkFirewall",
+    ]);
+  });
+
+  it("defaults an unknown/absent template platform to Windows, not 'other'", () => {
+    expect(platformFromIntentTemplate("windows10AndLater")).toBe("windows");
+    expect(platformFromIntentTemplate("macOS")).toBe("macos");
+    expect(platformFromIntentTemplate(undefined)).toBe("windows");
   });
 });
 

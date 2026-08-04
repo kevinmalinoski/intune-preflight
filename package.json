@@ -1,16 +1,16 @@
 {
   "name": "intune-preflight",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "workspaces": [
     "apps/server",
     "apps/web",
     "packages/shared"
   ],
   "scripts": {
-    "dev": "concurrently -k -n server,web -c blue,green \"npm run dev -w apps/server\" \"npm run dev -w apps/web\"",
+    "dev": "npm run build -w packages/shared && concurrently -k -n shared,server,web -c gray,blue,green \"npm run dev -w packages/shared\" \"npm run dev -w apps/server\" \"npm run dev -w apps/web\"",
     "build": "npm run build -w packages/shared && npm run build -w apps/server && npm run build -w apps/web",
-    "lint": "npm run lint -w apps/server && npm run lint -w apps/web",
+    "lint": "npm run build -w packages/shared && npm run lint -w apps/server && npm run lint -w apps/web",
     "test": "vitest run",
     "test:watch": "vitest"
   },

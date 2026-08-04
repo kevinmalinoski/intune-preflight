@@ -5,15 +5,18 @@ import type {
   AutopilotProfileSetting,
   IntuneGroup,
   IntunePolicy,
+  Platform,
 } from "@intune-preflight/shared";
 import { getGraphStats, graphGetCollection, graphGetObject, mapWithConcurrency, resetGraphStats } from "./graphClient.js";
 import {
+  flattenIntentSettings,
   flattenScriptToCspSettings,
   flattenSettingsCatalogEntries,
   flattenToCspSettings,
   mapWellKnownGroupId,
   parseAssignmentTarget,
   platformFromAssignmentFilter,
+  platformFromIntentTemplate,
   platformFromOdataType,
   platformFromSettingsCatalog,
   VIRTUAL_GROUP_ALL_DEVICES,
@@ -593,6 +596,83 @@ async function fetchWindowsUpdateProfiles(): Promise<IntunePolicy[]> {
   return result;
 }
 
+/**
+ * Legacy Endpoint Security & Security Baseline policies -- BitLocker / Disk
+ * Encryption, Defender Antivirus, Firewall, Attack Surface Reduction, Account
+ * Protection, EDR -- created under the older `deviceManagement/intents` model
+ * rather than the Settings Catalog. Each intent references a `templateId` whose
+ * template gives the category name (BitLocker, Firewall, ...) and platform; the
+ * intent's settings come from a per-intent `/settings` sub-collection.
+ *
+ * Modern Endpoint Security policies already surface via the Settings Catalog
+ * fetcher; this covers only tenants that still have the legacy intents-based
+ * ones. Windows-centric, so they join Windows conflict/overlap detection.
+ */
+async function fetchEndpointSecurityIntents(): Promise<IntunePolicy[]> {
+  // Intents are a legacy resource served on BETA -- the per-intent /assignments
+  // and /settings sub-collections 400 on v1.0 -- so read the whole feature on beta.
+  let intents: Record<string, unknown>[];
+  try {
+    intents = await graphGetCollection<Record<string, unknown>>("/deviceManagement/intents", true);
+  } catch (err) {
+    console.warn(
+      `Skipping legacy Endpoint Security (intents): ${skipReason(err as Error, "If this is a 403, grant DeviceManagementConfiguration.Read.All to enable legacy Endpoint Security / Security Baselines.")}`
+    );
+    return [];
+  }
+  if (intents.length === 0) return [];
+
+  // Resolve each intent's template once (id -> category name + platform). A
+  // failure just falls back to a generic label rather than dropping the intents.
+  const templateInfo = new Map<string, { area: string; platform: Platform }>();
+  try {
+    const templates = await graphGetCollection<Record<string, unknown>>(
+      "/deviceManagement/templates?$select=id,displayName,platformType",
+      true
+    );
+    for (const t of templates) {
+      const id = t.id as string | undefined;
+      if (id) {
+        templateInfo.set(id, {
+          area: (t.displayName as string) ?? "Endpoint Security",
+          platform: platformFromIntentTemplate(t.platformType as string | undefined),
+        });
+      }
+    }
+  } catch (err) {
+    console.warn(`Could not read intent templates (categories will be generic): ${(err as Error).message}`);
+  }
+
+  return mapItems(intents, "Endpoint Security (legacy)", async (item): Promise<IntunePolicy> => {
+    const id = item.id as string;
+    const displayName = (item.displayName as string) ?? "Untitled";
+    const info = templateInfo.get(item.templateId as string);
+    const cspArea = info?.area ?? "Endpoint Security";
+
+    // Assignments MUST come from the per-intent sub-collection. The collection's
+    // $expand=assignments returns an EMPTY array even for assigned intents
+    // (verified live: isAssigned=true, expanded assignments []), so relying on it
+    // silently drops every group. Fetched on beta (the v1.0 sub-collection 400s);
+    // same target shape as every other resource, so exclude-wins and filters just
+    // work through the shared resolver.
+    const assignments = await graphGetCollection<RawAssignment>(`/deviceManagement/intents/${id}/assignments`, true);
+    const { includedGroupIds, excludedGroupIds, assignmentFilters } = resolveAssignmentGroupIds(assignments);
+
+    const rawSettings = await graphGetCollection<Record<string, unknown>>(`/deviceManagement/intents/${id}/settings`, true);
+    return {
+      id,
+      kind: "endpointSecurity",
+      displayName,
+      description: item.description as string | undefined,
+      platform: info?.platform ?? "windows",
+      settings: flattenIntentSettings(rawSettings, cspArea),
+      assignedGroupIds: includedGroupIds,
+      excludedGroupIds,
+      assignmentFilters,
+    };
+  });
+}
+
 export interface TenantData {
   policies: IntunePolicy[];
   groups: IntuneGroup[];
@@ -630,7 +710,7 @@ export async function loadTenantData(): Promise<TenantData> {
     loadWarnings = [];
     resetGraphStats();
     const startedAt = Date.now();
-    const [deviceConfigs, compliance, settingsCatalog, adminTemplates, platformScripts, updateProfiles, autopilotV1, autopilotV2, assignmentFilters] =
+    const [deviceConfigs, compliance, settingsCatalog, adminTemplates, platformScripts, updateProfiles, endpointSecurity, autopilotV1, autopilotV2, assignmentFilters] =
       await Promise.all([
         safeFetch("device configurations", fetchDeviceConfigurations),
         safeFetch("compliance policies", fetchCompliancePolicies),
@@ -638,13 +718,14 @@ export async function loadTenantData(): Promise<TenantData> {
         safeFetch("administrative templates", fetchAdminTemplates),
         safeFetch("platform scripts", fetchPlatformScripts),
         safeFetch("Windows update profiles", fetchWindowsUpdateProfiles),
+        safeFetch("legacy Endpoint Security (intents)", fetchEndpointSecurityIntents),
         safeFetch("Autopilot profiles", fetchAutopilotProfiles),
         safeFetch("Autopilot device preparation policies", fetchAutopilotV2Policies),
         safeFetch("assignment filters", fetchAssignmentFilters),
       ]);
     const autopilotProfiles = [...autopilotV1, ...autopilotV2];
 
-    const policies = [...deviceConfigs, ...compliance, ...settingsCatalog, ...adminTemplates, ...platformScripts, ...updateProfiles];
+    const policies = [...deviceConfigs, ...compliance, ...settingsCatalog, ...adminTemplates, ...platformScripts, ...updateProfiles, ...endpointSecurity];
 
     const groupIds = new Set<string>();
     for (const p of policies) {

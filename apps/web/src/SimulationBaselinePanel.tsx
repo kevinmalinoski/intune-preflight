@@ -4,7 +4,7 @@ import { filterExclusionReason } from "@intune-preflight/shared";
 import { api } from "./api.ts";
 import { msLearnCspUrl, splitCspRef } from "./cspDocs.ts";
 
-type ViewFilter = "all" | "conflicts" | "overlaps";
+type ViewFilter = "all" | "conflicts" | "overlaps" | "legacy";
 
 // Render the table in chunks: a 150+ policy tenant can produce thousands of
 // setting rows, and mounting them all at once visibly stalls the panel. Chunks
@@ -51,10 +51,13 @@ function applyScope(simulation: SimulationResult, scope: BaselineScope | null | 
   };
 }
 
+// `sourceKind` is the kind of the applied (winning) policy for the setting --
+// used by the "Legacy policies" view to show only settings contributed by the
+// legacy intents-based Endpoint Security policies.
 type DisplayRow =
-  | { kind: "normal"; settingId: string; cspPath?: string; cspArea: string; displayName: string; value: string; sourcePolicyName: string }
-  | { kind: "conflict"; settingId: string; cspPath?: string; cspArea: string; displayName: string; values: { value: string; sourcePolicyName: string }[] }
-  | { kind: "overlap"; settingId: string; cspPath?: string; cspArea: string; displayName: string; value: string; sources: string[] };
+  | { kind: "normal"; sourceKind: PolicyKind; settingId: string; cspPath?: string; cspArea: string; displayName: string; value: string; sourcePolicyName: string }
+  | { kind: "conflict"; sourceKind: PolicyKind; settingId: string; cspPath?: string; cspArea: string; displayName: string; values: { value: string; sourcePolicyName: string }[] }
+  | { kind: "overlap"; sourceKind: PolicyKind; settingId: string; cspPath?: string; cspArea: string; displayName: string; value: string; sources: string[] };
 
 /** The real CSP path if we resolved one, else the setting id (OMA-URI / type:key). */
 const cspRef = (r: DisplayRow) => r.cspPath ?? r.settingId;
@@ -129,6 +132,7 @@ function buildRows(simulation: SimulationResult): DisplayRow[] {
     if (conflict) {
       rows.push({
         kind: "conflict",
+        sourceKind: s.sourceKind,
         settingId: s.settingId,
         cspPath: s.cspPath,
         cspArea: conflict.cspArea,
@@ -141,6 +145,7 @@ function buildRows(simulation: SimulationResult): DisplayRow[] {
     if (overlap) {
       rows.push({
         kind: "overlap",
+        sourceKind: s.sourceKind,
         settingId: s.settingId,
         cspPath: s.cspPath,
         cspArea: overlap.cspArea,
@@ -152,6 +157,7 @@ function buildRows(simulation: SimulationResult): DisplayRow[] {
     }
     rows.push({
       kind: "normal",
+      sourceKind: s.sourceKind,
       settingId: s.settingId,
       cspPath: s.cspPath,
       cspArea: s.cspArea,
@@ -229,10 +235,20 @@ export function SimulationBaselinePanel({
 
   const scoped = useMemo(() => applyScope(simulation, scope), [simulation, scope]);
   const allRows = useMemo(() => buildRows(scoped), [scoped]);
+  // Count of settings contributed by legacy Endpoint Security (intents) policies,
+  // for the "Legacy policies" view option. From the unscoped prop, like the
+  // conflict/overlap counts shown alongside it.
+  const legacyCount = useMemo(
+    () => simulation.settings.filter((s) => s.sourceKind === "endpointSecurity").length,
+    [simulation]
+  );
   const needle = filter.toLowerCase();
   const rows = allRows.filter(
     (r) =>
-      (view === "all" || (view === "conflicts" && r.kind === "conflict") || (view === "overlaps" && r.kind === "overlap")) &&
+      (view === "all" ||
+        (view === "conflicts" && r.kind === "conflict") ||
+        (view === "overlaps" && r.kind === "overlap") ||
+        (view === "legacy" && r.sourceKind === "endpointSecurity")) &&
       (!filter || rowMatchesText(r, needle))
   );
 
@@ -489,6 +505,9 @@ export function SimulationBaselinePanel({
           </option>
           <option value="overlaps" disabled={simulation.overlaps.length === 0}>
             Policy overlap only ({simulation.overlaps.length})
+          </option>
+          <option value="legacy" disabled={legacyCount === 0}>
+            Legacy policies only ({legacyCount})
           </option>
         </select>
         <a

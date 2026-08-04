@@ -6,7 +6,11 @@ export type PolicyKind =
   | "settingsCatalog"
   | "compliancePolicy"
   | "adminTemplate"
-  | "platformScript";
+  | "platformScript"
+  // Legacy Endpoint Security & Security Baselines stored under
+  // deviceManagement/intents (the older template-based "intents" model) --
+  // e.g. legacy BitLocker / Disk Encryption, Defender Antivirus, Firewall, ASR.
+  | "endpointSecurity";
 
 /** Target OS platform for a policy. "other" covers resource types we can't confidently classify. */
 export type Platform = "windows" | "macos" | "ios" | "android" | "other";

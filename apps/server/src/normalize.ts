@@ -368,6 +368,94 @@ export function flattenScriptToCspSettings(raw: Record<string, unknown>, policyI
   return settings;
 }
 
+/**
+ * Legacy Endpoint Security & Security Baseline policies use the older
+ * `deviceManagement/intents` model. Each intent's settings come from a separate
+ * `/settings` sub-collection as typed "settingInstance" objects keyed on a
+ * `definitionId` (e.g. `deviceConfiguration--windows10EndpointProtectionConfiguration_bitLockerEncryptDevice`)
+ * with the value carried on `value` (scalar) or `valueJson` (JSON-encoded).
+ * Complex/collection settings nest child instances under `value` -- those are
+ * walked so a legacy BitLocker/Defender profile contributes each real setting.
+ *
+ * The settingId keys on the definitionId (not the policy name), so two legacy
+ * intents setting the same thing are detected as a conflict/overlap -- the same
+ * cross-policy detection the other normalizers provide.
+ */
+function intentSettingName(definitionId: string): string {
+  const tail = definitionId.split("_").filter(Boolean).pop() ?? definitionId;
+  return friendlyLabel(tail);
+}
+
+/** Child setting instances of a complex/collection intent setting, from `value` or a JSON `valueJson`. */
+function intentChildInstances(inst: Record<string, unknown>): Record<string, unknown>[] | undefined {
+  const isInstanceArray = (v: unknown): v is Record<string, unknown>[] =>
+    Array.isArray(v) && v.length > 0 && v.every((c) => c !== null && typeof c === "object" && "definitionId" in (c as object));
+  if (isInstanceArray(inst["value"])) return inst["value"] as Record<string, unknown>[];
+  const vj = inst["valueJson"];
+  if (typeof vj === "string" && (vj.startsWith("[") || vj.startsWith("{"))) {
+    try {
+      const parsed = JSON.parse(vj);
+      const arr = Array.isArray(parsed) ? parsed : [parsed];
+      if (isInstanceArray(arr)) return arr as Record<string, unknown>[];
+    } catch {
+      /* not structured -- treated as a scalar below */
+    }
+  }
+  return undefined;
+}
+
+/** Scalar value of an intent setting, preferring the typed `value`, falling back to `valueJson`. */
+function intentScalarValue(inst: Record<string, unknown>): string | undefined {
+  const v = inst["value"];
+  if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") return stringifyValue(v);
+  const vj = inst["valueJson"];
+  if (typeof vj === "string" && vj.length > 0 && vj !== "null") {
+    try {
+      const parsed = JSON.parse(vj);
+      if (parsed === null || typeof parsed === "object") return undefined;
+      return stringifyValue(parsed);
+    } catch {
+      return vj;
+    }
+  }
+  return undefined;
+}
+
+export function flattenIntentSettings(instances: Array<Record<string, unknown>>, cspArea: string): CspSetting[] {
+  const bySettingId = new Map<string, CspSetting>();
+  const visit = (inst: Record<string, unknown>): void => {
+    const definitionId = inst["definitionId"] as string | undefined;
+    if (!definitionId) return;
+    const children = intentChildInstances(inst);
+    if (children) {
+      children.forEach(visit);
+      return;
+    }
+    const value = intentScalarValue(inst);
+    if (value === undefined) return;
+    // "notConfigured" is Intune's sentinel for "this setting isn't set" -- drop it
+    // so unset defaults stay out of the baseline and out of conflict detection.
+    if (value.toLowerCase() === "notconfigured") return;
+    const settingId = `endpointSecurity:${definitionId}`;
+    if (bySettingId.has(settingId)) return;
+    bySettingId.set(settingId, { settingId, cspArea, displayName: intentSettingName(definitionId), value });
+  };
+  for (const inst of instances) visit(inst);
+  return [...bySettingId.values()];
+}
+
+/**
+ * Platform for a legacy Endpoint Security intent, from its template's
+ * `platformType` (e.g. "windows10AndLater", "macOS"). Legacy Endpoint Security
+ * intents are overwhelmingly Windows (BitLocker, Defender AV, Firewall, ASR),
+ * so an unknown/absent platformType defaults to Windows rather than "other"
+ * (which would hide the policy from every platform tab).
+ */
+export function platformFromIntentTemplate(platformType: string | undefined): Platform {
+  const p = classifyPlatform(platformType);
+  return p === "other" ? "windows" : p;
+}
+
 export interface AssignmentTarget {
   groupId?: string;
   isAllDevices?: boolean;

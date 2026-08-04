@@ -43,12 +43,15 @@ produce false conflicts. Both conflicts and overlaps are therefore suppressed of
 Windows. The **merged baseline** (every applied setting) is still shown on all
 platforms; only the conflict/overlap flags are Windows-only.
 
-### Legacy `deviceManagement/intents` not read
-Modern Security Baselines and Endpoint Security policies are delivered through the
-Settings Catalog (`configurationPolicies`, often with a `baseline` template
-family) and are **already covered**. Only *older* baselines / endpoint-security
-still stored in the legacy `intents` object model are missed — a shrinking gap,
-but a real one for tenants that still have them.
+### Legacy Endpoint Security intents: names not CSP-mapped
+Legacy Endpoint Security & Security Baselines in the `deviceManagement/intents`
+object model (BitLocker / Disk Encryption, Defender Antivirus, Firewall, ASR, …)
+are **read as of v1.1** — merged into the baseline and, being Windows, compared
+for conflicts/overlaps. Two remaining edges: their setting names come from the
+Graph `definitionId` (schema-agnostic, not a human CSP name), and their setting
+ids don't line up with the equivalent Settings Catalog ids — so a legacy intent
+and a modern Settings Catalog policy setting the *same* thing aren't yet
+cross-detected as a conflict (two legacy intents are). Both are v2 items below.
 
 ### Legacy device-config default noise
 Older template-based profiles serialize every property, including unset defaults.
@@ -71,9 +74,10 @@ group rather than its user assignment.
   `packages/shared/src/index.ts`; `ruleImplies` in `apps/server/src/normalize.ts`)
   with a real membership-rule expression parser + evaluator (tokenize → AST →
   evaluate against the simulated device's attributes).
-- **Legacy `deviceManagement/intents`** — read older baselines / endpoint-security
-  still in the intents object model (`deviceManagementSettingInstance` + `valueJson`,
-  `templateId`→platform mapping).
+- **Legacy Endpoint Security intents: CSP mapping** — the intents themselves are
+  read (v1.1); v2 maps each `definitionId` to a human CSP name and to the
+  equivalent Settings Catalog setting id, so a legacy intent and a modern
+  Settings Catalog policy setting the same thing are cross-detected as a conflict.
 - **Cross-platform conflict & overlap accuracy** — per-platform handling so
   macOS/iOS/Android conflicts and overlaps are accurate rather than suppressed
   (including framework-aware compliance handling, e.g. one-concern-per-policy).

@@ -7,6 +7,7 @@ const KIND_SHORT: Record<string, string> = {
   compliancePolicy: "Compliance",
   adminTemplate: "Admin Template",
   platformScript: "Script",
+  endpointSecurity: "Endpoint Security (legacy)",
 };
 
 /**

@@ -34,6 +34,17 @@ describe("demo tenant", () => {
     expect(listUnassignedPolicies(data, "windows").length).toBeGreaterThanOrEqual(3);
   });
 
+  it("surfaces legacy Endpoint Security (intents) policies, merged and compared", () => {
+    const sim = computeSimulation(data, { selectedGroupIds: ["grp-corp-win"], platform: "windows" });
+    // Org-wide + corp-override legacy BitLocker intents disagree on the cipher
+    // -> a real conflict, proving legacy intents join Windows conflict detection.
+    expect(sim.conflicts.some((c) => c.settingId === "endpointSecurity:bitlocker_encryptionMethod")).toBe(true);
+    // A legacy Defender Antivirus intent contributes to the merged baseline.
+    expect(sim.settings.some((setting) => setting.settingId === "endpointSecurity:defenderav_cloudBlockLevel")).toBe(true);
+    // An unassigned legacy Firewall intent is available in the Policy Waitlist.
+    expect(listUnassignedPolicies(data, "windows").some((p) => p.id === "pol-es-firewall-draft")).toBe(true);
+  });
+
   it("has an implied membership in the manifest (kiosk-multi implies kiosk)", () => {
     const report = buildAssignmentReport(data, "windows");
     const multi = report.groupOverlaps.find((o) => o.groupId === "grp-kiosk-multi");

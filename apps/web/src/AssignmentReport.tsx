@@ -19,6 +19,7 @@ const KIND_STYLE: Record<PolicyKind, { label: string; cls: string }> = {
   compliancePolicy: { label: "Compliance", cls: "bg-orange-500/15 text-orange-300" },
   adminTemplate: { label: "Admin Template", cls: "bg-yellow-500/15 text-yellow-300" },
   platformScript: { label: "Script", cls: "bg-emerald-500/15 text-emerald-300" },
+  endpointSecurity: { label: "Endpoint Security (Legacy)", cls: "bg-rose-500/15 text-rose-300" },
 };
 
 const GROUP_KIND_STYLE: Record<string, string> = {

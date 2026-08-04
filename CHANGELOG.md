@@ -6,6 +6,35 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-08-03
+
+### Added
+- **Legacy Endpoint Security & Security Baselines** (the older
+  `deviceManagement/intents` model) are now read into the baseline — legacy
+  **BitLocker / Disk Encryption**, **Defender Antivirus**, **Firewall**, **Attack
+  Surface Reduction**, Account Protection, and EDR intents. Each intent's
+  template supplies its category (BitLocker, Firewall, …) and platform; its
+  settings are normalized like any other policy, so they merge into the endpoint
+  baseline, appear in the Assignment Manifest, and — being Windows — join
+  conflict/overlap detection (two legacy BitLocker intents disagreeing on the
+  cipher is now flagged). Shown under a new **Endpoint Security (Legacy)** policy
+  type — in the diagram, the Policy Types legend, and the Assignment Manifest —
+  with a **Legacy policies** filter in the merged-baseline view to isolate what
+  the legacy intents contribute. Modern Endpoint Security policies already came
+  through the Settings Catalog; this closes the gap for tenants still on the
+  legacy intents. The demo tenant gains legacy BitLocker (org-wide + a corp
+  override that conflicts), Defender Antivirus, and an unassigned Firewall intent.
+
+### Fixed
+- **Docker image no longer 502s on startup.** The shared package's entry point
+  pointed at its TypeScript source (`./src/index.ts`), which dev tooling resolves
+  but the compiled server in the slim runtime image cannot — the shared module
+  failed to load at boot, the server never started, and every request returned
+  502. The package now resolves to its built output (`./dist` via `main`/`types`/
+  `exports`); `npm run dev` and `lint` build the shared package first so nothing
+  regresses. No Dockerfile change was needed — both images already built and
+  copied `packages/shared/dist`.
+
 ## [1.0.0] — 2026-07-20
 
 First stable release. Everything below is relative to the 0.5 beta.
@@ -152,6 +181,7 @@ Initial public beta.
   platform scripts, Windows update profiles, Autopilot profiles, and Assignment Filters.
 - Docker Compose and `npm run dev` setup; MIT licensed.
 
-[Unreleased]: https://github.com/kevinmalinoski/intune-preflight/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/kevinmalinoski/intune-preflight/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/kevinmalinoski/intune-preflight/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/kevinmalinoski/intune-preflight/compare/v0.5.0-beta...v1.0.0
 [0.5.0-beta]: https://github.com/kevinmalinoski/intune-preflight/releases/tag/v0.5.0-beta

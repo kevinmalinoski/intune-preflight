@@ -20,6 +20,7 @@ const KIND_COLOR: Record<string, string> = {
   compliancePolicy: "#f97316",
   adminTemplate: "#facc15",
   platformScript: "#34d399",
+  endpointSecurity: "#f43f5e",
 };
 
 const KIND_LABEL: Record<string, string> = {
@@ -28,6 +29,7 @@ const KIND_LABEL: Record<string, string> = {
   compliancePolicy: "Compliance Policy",
   adminTemplate: "Admin Template",
   platformScript: "Platform Script",
+  endpointSecurity: "Endpoint Security (Legacy)",
 };
 
 const SOURCE_STYLE: Record<SimulationGroup["source"], { border: string; bg: string; label: string }> = {
@@ -64,7 +66,7 @@ const TYPE_PADDING = 14;
 
 // Order the type bubbles top-to-bottom: compliance first, then configuration
 // surfaces (device config, settings catalog, admin templates), then scripts.
-const KIND_ORDER = ["compliancePolicy", "deviceConfiguration", "settingsCatalog", "adminTemplate", "platformScript"];
+const KIND_ORDER = ["compliancePolicy", "deviceConfiguration", "settingsCatalog", "endpointSecurity", "adminTemplate", "platformScript"];
 
 // A type bubble lists at most this many policies before collapsing the rest
 // behind a "+N more" row -- a 90-policy Settings Catalog bubble in a large
@@ -679,6 +681,7 @@ function Legend() {
     { color: "#f97316", label: "Compliance Policy" },
     { color: "#38bdf8", label: "Device Configuration" },
     { color: "#a78bfa", label: "Settings Catalog" },
+    { color: "#f43f5e", label: "Endpoint Security (Legacy)" },
     { color: "#facc15", label: "Admin Template" },
     { color: "#34d399", label: "Platform Script" },
     { color: "#fb7185", label: "Excluded" },
