@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Intune Preflight — see what Intune applies before you deploy</title>
+<meta name="description" content="A read-only, self-hosted, open-source tool that simulates an Intune endpoint and shows the exact merged policy baseline it would receive — conflicts, overlaps, Autopilot and all.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Intune Preflight">
+<meta property="og:description" content="See what Intune applies to a device — before you deploy it. Read-only, self-hosted, open source.">
+<meta property="og:image" content="https://raw.githubusercontent.com/kevinmalinoski/intune-preflight/main/docs/img/01-simulator-overview.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2334d399' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2 L15 10 L22 12 L15 14 L12 22 L9 14 L2 12 L9 10 Z'/%3E%3C/svg%3E">
+<style>
+    :root{
+      --bg:#0b0f17; --bg2:#11161f; --card:#131a26; --line:#242c3d; --line2:#334155;
+      --tx:#e2e8f0; --mut:#94a3b8; --dim:#64748b;
+      --em:#34d399; --sky:#38bdf8;
+      --sans: system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+      --mono: ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    }
+    *{box-sizing:border-box;}
+    body{margin:0;background:var(--bg);color:var(--tx);font-family:var(--sans);-webkit-font-smoothing:antialiased;line-height:1.55;text-wrap:pretty;}
+    a{color:var(--em);text-decoration:none;} a:hover{color:#6ee7b7;}
+    h1,h2,h3,p,ul{margin:0;padding:0;} li{list-style:none;}
+    .wrap{max-width:1140px;margin:0 auto;padding:0 40px;}
+    .sec{padding:96px 0;}
+    .kick{font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--em);}
+    .btn{display:inline-flex;align-items:center;gap:9px;border-radius:9px;padding:13px 22px;font-weight:600;font-size:15px;border:1px solid transparent;cursor:pointer;}
+    .btn-em{background:var(--em);color:#06210f;}
+    .btn-em:hover{background:#6ee7b7;}
+    .btn-gh{background:transparent;color:var(--tx);border:1px solid var(--line);}
+    .btn-gh:hover{border-color:var(--line2);background:var(--bg2);}
+    .btn-soon{background:var(--card);color:var(--dim);border:1px dashed var(--line2);cursor:not-allowed;font-weight:600;}
+    .soon{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);border:1px solid var(--line2);border-radius:5px;padding:2px 6px;}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:16px;}
+    .chip{font-family:var(--mono);font-size:12px;color:var(--mut);border:1px solid var(--line);border-radius:999px;padding:6px 13px;}
+    .frame{border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#0e131c;box-shadow:0 30px 70px rgba(0,0,0,.5);}
+    .frbar{display:flex;gap:7px;align-items:center;padding:11px 14px;border-bottom:1px solid var(--line);background:#0e131c;}
+    .dot{width:11px;height:11px;border-radius:50%;}
+    .shot{width:100%;display:block;}
+    .muted{color:var(--mut);} .dim{color:var(--dim);}
+    .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--sky);}
+  
+    @media (max-width:820px){
+      .sec{padding:60px 0 !important;}
+      .wrap{padding:0 22px !important;}
+      h1{font-size:38px !important;}
+      h2{font-size:28px !important;}
+      .wrap[style*="grid-template-columns"]{grid-template-columns:1fr !important;}
+      .nav-links a[href^="#"]{display:none !important;}
+    }
+</style>
+</head>
+<body>
+<div>
+  <!-- NAV -->
+  <div style="border-bottom:1px solid var(--line);background:rgba(11,15,23,.85);">
+    <div class="wrap" style="display:flex;align-items:center;gap:20px;height:68px;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 L15 10 L22 12 L15 14 L12 22 L9 14 L2 12 L9 10 Z"/></svg>
+        <span style="font-weight:700;font-size:17px;letter-spacing:-.01em;">Intune Preflight</span>
+      </div>
+      <div style="flex:1;"></div>
+      <div class="nav-links" style="display:flex;align-items:center;gap:26px;font-size:14px;">
+        <a href="#features" style="color:var(--mut);">Features</a>
+        <a href="#try" style="color:var(--mut);">How it works</a>
+        <a href="#try" style="color:var(--mut);">Self-host</a>
+        <a class="btn btn-em" href="https://github.com/kevinmalinoski/intune-preflight" style="padding:9px 16px;font-size:14px;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.5 2 2 6.6 2 12.2c0 4.5 2.9 8.3 6.8 9.6.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.4-3.4-1.4-.4-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.6 2.4 1.1 3 .9.1-.7.3-1.1.6-1.4-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 4.9 0c1.9-1.3 2.7-1 2.7-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.9-2.4 4.7-4.6 5 .3.3.6.9.6 1.9v2.8c0 .3.2.6.7.5 3.9-1.3 6.8-5.1 6.8-9.6C22 6.6 17.5 2 12 2Z"/></svg>
+          View on GitHub
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- HERO -->
+  <div class="sec" style="padding-top:84px;padding-bottom:40px;text-align:center;">
+    <div class="wrap" style="max-width:900px;">
+      <div class="kick">Read-only · Self-hosted · Open source</div>
+      <h1 style="font-size:60px;line-height:1.05;font-weight:800;letter-spacing:-.03em;margin-top:22px;">
+        See what Intune applies to a device.<br><span style="color:var(--em);">Before you deploy it.</span>
+      </h1>
+      <p style="font-size:20px;color:var(--mut);max-width:720px;margin:26px auto 0;line-height:1.55;">
+        Connect read-only to your tenant, pick an OS and the Entra groups a device belongs to, and see the exact
+        merged CSP baseline it would receive. Conflicts, overlaps, Autopilot and legacy Endpoint Security included.
+        No hardware, no enrollment, no writes.
+      </p>
+      <div style="display:flex;gap:13px;justify-content:center;align-items:center;flex-wrap:wrap;margin-top:34px;">
+        <a class="btn btn-em" href="https://github.com/kevinmalinoski/intune-preflight">
+          View it on GitHub
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </a>
+        <span class="btn btn-soon">Try the live demo <span class="soon">Soon</span></span>
+        <span class="btn btn-soon">Deploy your own <span class="soon">Soon</span></span>
+      </div>
+      <div class="mono" style="margin-top:20px;font-size:13px;color:var(--dim);">Live demo &amp; one-click deploy coming soon · for now, clone it and run in minutes</div>
+    </div>
+
+    <!-- hero shot -->
+    <div class="wrap" style="max-width:1100px;margin-top:56px;">
+      <div class="frame">
+        <div class="frbar"><span class="dot" style="background:#ff5f56;"></span><span class="dot" style="background:#febc2e;"></span><span class="dot" style="background:#28c840;"></span>
+          <span class="mono" style="margin-left:12px;font-size:12px;color:var(--dim);">localhost:5173 — Endpoint Preflight</span>
+        </div>
+        <img class="shot" src="./sim.jpg" alt="Endpoint simulator: a device resolved through Autopilot and Entra groups to its merged policy baseline">
+      </div>
+    </div>
+  </div>
+
+  <!-- TRUST BAND -->
+  <div class="sec" style="border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--bg2);padding:72px 0;">
+    <div class="wrap" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:36px;">
+      <div>
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.3-2.9 8-7 9-4.1-1-7-4.7-7-9V6l7-3Z"/><path d="M9 12l2 2 4-4"/></svg>
+        <h3 style="font-size:18px;font-weight:700;margin-top:16px;">Read-only, always</h3>
+        <p class="muted" style="margin-top:8px;font-size:15px;">Every Graph permission it asks for is <span class="mono" style="color:var(--tx);">*.Read.All</span>. It reads your tenant and never writes a single change to it.</p>
+      </div>
+      <div>
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+        <h3 style="font-size:18px;font-weight:700;margin-top:16px;">Your credentials stay put</h3>
+        <p class="muted" style="margin-top:8px;font-size:15px;">Self-hosted. Your tenant and client secret live in the server's <span class="mono" style="color:var(--tx);">.env</span>, are never sent to the browser, and never touch anyone else's infrastructure.</p>
+      </div>
+      <div>
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
+        <h3 style="font-size:18px;font-weight:700;margin-top:16px;">The whole tenant, unfiltered</h3>
+        <p class="muted" style="margin-top:8px;font-size:15px;">App-only permissions mean you see the complete configuration, not one admin's RBAC slice, so a preflight reflects the entire tenant.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- FEATURES -->
+  <div id="features" class="sec">
+    <div class="wrap" style="text-align:center;max-width:760px;">
+      <div class="eyebrow">What it does</div>
+      <h2 style="font-size:40px;font-weight:800;letter-spacing:-.02em;margin-top:16px;">Every policy. Every group. One clear picture.</h2>
+      <p class="muted" style="font-size:18px;margin-top:16px;">Intune tells you what you assigned. Preflight tells you what a device actually ends up with, and where your assignments collide.</p>
+    </div>
+
+    <!-- row: manifest -->
+    <div class="wrap" style="display:grid;grid-template-columns:1fr 1.15fr;gap:56px;align-items:center;margin-top:72px;">
+      <div>
+        <div class="chip" style="display:inline-block;">Assignment Manifest</div>
+        <h3 style="font-size:28px;font-weight:700;letter-spacing:-.01em;margin-top:18px;">Which groups carry which policies, tenant-wide</h3>
+        <p class="muted" style="font-size:16px;margin-top:14px;">One screen for every policy-to-group assignment across your tenant, per platform. Sort by direct assignments to find your hotspots, and expand any group to see exactly what a device in it effectively receives after Intune's exclude-wins rules.</p>
+        <ul style="margin-top:18px;display:flex;flex-direction:column;gap:10px;font-size:15px;">
+          <li style="display:flex;gap:10px;"><span style="color:var(--em);">→</span> Direct vs inherited (All Devices / All Users) at a glance</li>
+          <li style="display:flex;gap:10px;"><span style="color:var(--em);">→</span> Simulate assignment filters and watch every group re-resolve</li>
+          <li style="display:flex;gap:10px;"><span style="color:var(--em);">→</span> Export the whole map to CSV</li>
+        </ul>
+      </div>
+      <div class="frame"><div class="frbar"><span class="dot" style="background:#ff5f56;"></span><span class="dot" style="background:#febc2e;"></span><span class="dot" style="background:#28c840;"></span></div>
+        <img class="shot" src="./manifest.jpg" alt="Assignment Manifest: groups sorted by how many policies they carry">
+      </div>
+    </div>
+
+    <!-- row: seating charts -->
+    <div class="wrap" style="display:grid;grid-template-columns:1.15fr 1fr;gap:56px;align-items:center;margin-top:80px;">
+      <div class="frame"><div class="frbar"><span class="dot" style="background:#ff5f56;"></span><span class="dot" style="background:#febc2e;"></span><span class="dot" style="background:#28c840;"></span></div>
+        <img class="shot" src="./seating.jpg" alt="Per-group seating charts showing whether a group's policies are its own or shared">
+      </div>
+      <div>
+        <div class="chip" style="display:inline-block;">Seating charts</div>
+        <h3 style="font-size:28px;font-weight:700;letter-spacing:-.01em;margin-top:18px;">Spot the overcrowding before it's a conflict</h3>
+        <p class="muted" style="font-size:16px;margin-top:14px;">Check a group and see, at a glance, whether its policies are its own or borrowed from half the tenant. Cool means unique to the group; hot means shared widely. Then send those groups straight into the simulator to see the merged result on a device.</p>
+      </div>
+    </div>
+
+    <!-- feature grid -->
+    <div class="wrap" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px;margin-top:80px;">
+      <div class="card" style="padding:24px;">
+        <div class="eyebrow">Conflicts &amp; overlaps</div>
+        <p class="muted" style="font-size:15px;margin-top:12px;">Genuine value disagreements vs redundant duplicate config, surfaced separately (Windows).</p>
+      </div>
+      <div class="card" style="padding:24px;">
+        <div class="eyebrow">Autopilot V1 &amp; V2</div>
+        <p class="muted" style="font-size:15px;margin-top:12px;">Deployment profiles and device-preparation shown as an enrollment stage, dual-targeting and all.</p>
+      </div>
+      <div class="card" style="padding:24px;">
+        <div class="eyebrow">Legacy Endpoint Security</div>
+        <p class="muted" style="font-size:15px;margin-top:12px;">Intents-based BitLocker, Defender AV, Firewall and ASR read and merged with modern policies.</p>
+      </div>
+      <div class="card" style="padding:24px;">
+        <div class="eyebrow">Merged CSP baseline</div>
+        <p class="muted" style="font-size:15px;margin-top:12px;">Every setting in one filterable grid, with the real CSP path and a Microsoft Learn link per setting.</p>
+      </div>
+      <div class="card" style="padding:24px;">
+        <div class="eyebrow">Four platforms</div>
+        <p class="muted" style="font-size:15px;margin-top:12px;">Windows, macOS, iOS/iPadOS and Android, each scoped and resolved separately.</p>
+      </div>
+      <div class="card" style="padding:24px;">
+        <div class="eyebrow">Export</div>
+        <p class="muted" style="font-size:15px;margin-top:12px;">JSON or CSV from both the simulator and the Manifest, ready to pivot in Excel.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- TRY IT -->
+  <div id="try" class="sec" style="border-top:1px solid var(--line);background:var(--bg2);">
+    <div class="wrap" style="text-align:center;max-width:720px;">
+      <div class="eyebrow">Try it</div>
+      <h2 style="font-size:40px;font-weight:800;letter-spacing:-.02em;margin-top:16px;">Two ways in. Both take a minute.</h2>
+    </div>
+    <div class="wrap" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;margin-top:56px;">
+      <div class="card" style="padding:34px;display:flex;flex-direction:column;">
+        <h3 style="font-size:22px;font-weight:700;">Explore the live demo</h3>
+        <p class="muted" style="font-size:15px;margin-top:12px;flex:1;">A bundled synthetic tenant that exercises every feature — conflicts, overlaps, Autopilot, legacy Endpoint Security, the seating charts. No app registration, no sign-in, nothing to install. Landing here soon.</p>
+        <span class="btn btn-soon" style="margin-top:22px;align-self:flex-start;">Open the demo <span class="soon">Soon</span></span>
+      </div>
+      <div class="card" style="padding:34px;display:flex;flex-direction:column;">
+        <h3 style="font-size:22px;font-weight:700;">Run it on your tenant</h3>
+        <p class="muted" style="font-size:15px;margin-top:12px;">Clone it, add a read-only app registration, and point it at your tenant. Your credentials never leave your machine.</p>
+        <div style="margin-top:18px;background:#0a0e16;border:1px solid var(--line);border-radius:10px;padding:16px 18px;font-family:var(--mono);font-size:13.5px;line-height:1.9;color:#cbd5e1;">
+          <div><span style="color:var(--dim);">$</span> git clone github.com/kevinmalinoski/intune-preflight</div>
+          <div><span style="color:var(--dim);">$</span> npm install</div>
+          <div><span style="color:var(--dim);">$</span> npm run dev <span style="color:var(--dim);"># open localhost:5173</span></div>
+        </div>
+        <a class="btn btn-gh" href="https://github.com/kevinmalinoski/intune-preflight" style="margin-top:18px;align-self:flex-start;">Setup guide on GitHub →</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- FINAL CTA -->
+  <div class="sec" style="text-align:center;padding:104px 0;">
+    <div class="wrap" style="max-width:720px;">
+      <h2 style="font-size:44px;font-weight:800;letter-spacing:-.02em;">Preflight the change<br><span style="color:var(--em);">before the turbulence.</span></h2>
+      <p class="muted" style="font-size:18px;margin-top:18px;">See the full merged baseline, catch the conflicts, and know what lands on a device — all before you deploy.</p>
+      <div style="display:flex;gap:14px;justify-content:center;align-items:center;flex-wrap:wrap;margin-top:30px;">
+        <a class="btn btn-em" href="https://github.com/kevinmalinoski/intune-preflight">Star it on GitHub</a>
+        <span class="btn btn-soon">Live demo <span class="soon">Soon</span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <div style="border-top:1px solid var(--line);padding:40px 0;">
+    <div class="wrap" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">
+      <div style="display:flex;align-items:center;gap:9px;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 L15 10 L22 12 L15 14 L12 22 L9 14 L2 12 L9 10 Z"/></svg>
+        <span style="font-weight:600;">Intune Preflight</span>
+      </div>
+      <span class="dim" style="font-size:13px;">MIT licensed · open source</span>
+      <div style="flex:1;"></div>
+      <span class="dim" style="font-size:12px;max-width:560px;text-align:right;">Not affiliated with, endorsed by, or sponsored by Microsoft. Microsoft, Intune and Entra are trademarks of the Microsoft group of companies.</span>
+    </div>
+  </div>
+</div>
+</body>
+</html>
