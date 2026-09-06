@@ -4,7 +4,7 @@ import { filterExclusionReason } from "@intune-preflight/shared";
 import { api } from "./api.ts";
 import { msLearnCspUrl, splitCspRef } from "./cspDocs.ts";
 
-type ViewFilter = "all" | "conflicts" | "overlaps" | "legacy";
+type ViewFilter = "all" | "conflicts" | "overlaps" | "legacy" | "collision";
 
 // Render the table in chunks: a 150+ policy tenant can produce thousands of
 // setting rows, and mounting them all at once visibly stalls the panel. Chunks
@@ -55,9 +55,9 @@ function applyScope(simulation: SimulationResult, scope: BaselineScope | null | 
 // used by the "Legacy policies" view to show only settings contributed by the
 // legacy intents-based Endpoint Security policies.
 type DisplayRow =
-  | { kind: "normal"; sourceKind: PolicyKind; settingId: string; cspPath?: string; cspArea: string; displayName: string; value: string; sourcePolicyName: string }
-  | { kind: "conflict"; sourceKind: PolicyKind; settingId: string; cspPath?: string; cspArea: string; displayName: string; values: { value: string; sourcePolicyName: string }[] }
-  | { kind: "overlap"; sourceKind: PolicyKind; settingId: string; cspPath?: string; cspArea: string; displayName: string; value: string; sources: string[] };
+  | { kind: "normal"; sourceKind: PolicyKind; sourceLegacyTemplate?: boolean; settingId: string; cspPath?: string; docUrl?: string; cspArea: string; displayName: string; value: string; sourcePolicyName: string }
+  | { kind: "conflict"; sourceKind: PolicyKind; sourceLegacyTemplate?: boolean; settingId: string; cspPath?: string; docUrl?: string; cspArea: string; displayName: string; values: { value: string; sourcePolicyName: string }[] }
+  | { kind: "overlap"; sourceKind: PolicyKind; sourceLegacyTemplate?: boolean; settingId: string; cspPath?: string; docUrl?: string; cspArea: string; displayName: string; value: string; sources: string[] };
 
 /** The real CSP path if we resolved one, else the setting id (OMA-URI / type:key). */
 const cspRef = (r: DisplayRow) => r.cspPath ?? r.settingId;
@@ -69,10 +69,12 @@ const cspRef = (r: DisplayRow) => r.cspPath ?? r.settingId;
  * Microsoft Learn CSP reference when one exists, with a copy button.
  * stopPropagation everywhere -- these live inside clickable rows.
  */
-function CspRef({ refValue }: { refValue: string }) {
+function CspRef({ refValue, docUrl }: { refValue: string; docUrl?: string }) {
   const [copied, setCopied] = useState(false);
   const { prefix, tail } = splitCspRef(refValue);
-  const url = msLearnCspUrl(refValue);
+  // Prefer an explicit documentation URL (legacy intents carry one) over the
+  // best-effort link derived from the CSP ref.
+  const url = docUrl ?? msLearnCspUrl(refValue);
 
   const copy = (e: ReactMouseEvent) => {
     e.stopPropagation();
@@ -133,8 +135,10 @@ function buildRows(simulation: SimulationResult): DisplayRow[] {
       rows.push({
         kind: "conflict",
         sourceKind: s.sourceKind,
+        sourceLegacyTemplate: s.sourceLegacyTemplate,
         settingId: s.settingId,
         cspPath: s.cspPath,
+        docUrl: s.docUrl,
         cspArea: conflict.cspArea,
         displayName: conflict.displayName,
         values: conflict.values.map((v) => ({ value: v.value, sourcePolicyName: v.sourcePolicyName })),
@@ -146,8 +150,10 @@ function buildRows(simulation: SimulationResult): DisplayRow[] {
       rows.push({
         kind: "overlap",
         sourceKind: s.sourceKind,
+        sourceLegacyTemplate: s.sourceLegacyTemplate,
         settingId: s.settingId,
         cspPath: s.cspPath,
+        docUrl: s.docUrl,
         cspArea: overlap.cspArea,
         displayName: overlap.displayName,
         value: overlap.value,
@@ -158,8 +164,10 @@ function buildRows(simulation: SimulationResult): DisplayRow[] {
     rows.push({
       kind: "normal",
       sourceKind: s.sourceKind,
+      sourceLegacyTemplate: s.sourceLegacyTemplate,
       settingId: s.settingId,
       cspPath: s.cspPath,
+      docUrl: s.docUrl,
       cspArea: s.cspArea,
       displayName: s.displayName,
       value: s.value,
@@ -334,8 +342,22 @@ export function SimulationBaselinePanel({
           {cell("cspArea", "px-3 py-2 align-top text-slate-400", r.cspArea)}
           {cell("setting", "px-3 py-2 align-top text-slate-200", r.displayName)}
           {cell("value", "truncate px-3 py-2 align-top text-slate-300", <span title={r.value}>{r.value}</span>)}
-          {cell("source", "px-3 py-2 align-top text-slate-400", r.sourcePolicyName)}
-          {cell("cspPath", "px-3 py-2 align-top", <CspRef refValue={cspRef(r)} />)}
+          {cell(
+            "source",
+            "px-3 py-2 align-top text-slate-400",
+            <span className="inline-flex flex-wrap items-center gap-1">
+              {r.sourcePolicyName}
+              {r.sourceLegacyTemplate && (
+                <span
+                  className="rounded bg-amber-500/15 px-1 py-0.5 text-[9px] text-amber-300"
+                  title="Legacy device-config template — Microsoft recommends migrating to the Settings Catalog. Its settings also aren't cross-detected for conflicts/overlaps against Settings Catalog policies."
+                >
+                  Legacy
+                </span>
+              )}
+            </span>
+          )}
+          {cell("cspPath", "px-3 py-2 align-top", <CspRef refValue={cspRef(r)} docUrl={r.docUrl} />)}
         </tr>,
       ];
     }
@@ -353,7 +375,7 @@ export function SimulationBaselinePanel({
               <span className="ml-1.5 text-amber-400">⚠</span>
             </>
           )}
-          {cell("cspPath", "px-3 py-2 align-top", i === 0 ? <CspRef refValue={cspRef(r)} /> : "")}
+          {cell("cspPath", "px-3 py-2 align-top", i === 0 ? <CspRef refValue={cspRef(r)} docUrl={r.docUrl} /> : "")}
         </tr>
       ));
     }
@@ -377,7 +399,7 @@ export function SimulationBaselinePanel({
             <span className="ml-1.5 text-sky-400">⇄</span>
           </>
         )}
-        {cell("cspPath", "px-3 py-2 align-top", <CspRef refValue={cspRef(r)} />)}
+        {cell("cspPath", "px-3 py-2 align-top", <CspRef refValue={cspRef(r)} docUrl={r.docUrl} />)}
       </tr>,
     ];
     if (isExpanded) {
@@ -394,6 +416,49 @@ export function SimulationBaselinePanel({
       });
     }
     return out;
+  };
+
+  // Legacy-collision rows (view === "collision"): each cross-model finding is a
+  // group of one row per policy that targets the same CSP through a different model.
+  const collisionFindings =
+    view === "collision"
+      ? simulation.crossModel.filter(
+          (f) =>
+            !needle ||
+            f.cspNode.includes(needle) ||
+            f.displayName.toLowerCase().includes(needle) ||
+            f.entries.some(
+              (e) => e.sourcePolicyName.toLowerCase().includes(needle) || e.value.toLowerCase().includes(needle)
+            )
+        )
+      : [];
+
+  const renderCollision = (f: SimulationResult["crossModel"][number]) => {
+    const badge =
+      f.agreement === "differs"
+        ? { t: "conflict", c: "bg-rose-500/20 text-rose-300" }
+        : f.agreement === "same"
+          ? { t: "duplicate", c: "bg-sky-500/20 text-sky-300" }
+          : { t: "verify", c: "bg-slate-500/20 text-slate-300" };
+    const bg = f.agreement === "differs" ? "bg-rose-500/10" : "bg-amber-500/10";
+    return f.entries.map((e, i) => (
+      <tr key={`${f.cspNode}-${i}`} className={`border-t border-ink-800 ${bg}`}>
+        {cell("cspArea", "px-3 py-2 align-top", i === 0 ? <span className={`rounded px-1.5 py-0.5 text-[9px] font-medium ${badge.c}`}>{badge.t}</span> : "")}
+        {cell("setting", "px-3 py-2 align-top text-slate-200", i === 0 ? f.displayName : "")}
+        {cell("value", "truncate px-3 py-2 align-top text-slate-300", <span title={e.value}>{e.value}</span>)}
+        {cell(
+          "source",
+          "px-3 py-2 align-top text-slate-400",
+          <span className="inline-flex flex-wrap items-center gap-1">
+            {e.sourcePolicyName}
+            {e.sourceLegacyTemplate && (
+              <span className="rounded bg-amber-500/15 px-1 py-0.5 text-[9px] text-amber-300">Legacy</span>
+            )}
+          </span>
+        )}
+        {cell("cspPath", "px-3 py-2 align-top", i === 0 ? <span className="break-all font-mono text-[11px] text-slate-400">{f.cspNode}</span> : "")}
+      </tr>
+    ));
   };
 
   return (
@@ -424,6 +489,12 @@ export function SimulationBaselinePanel({
             <span className={simulation.overlaps.length ? "text-sky-400" : "text-emerald-400"}>
               {simulation.overlaps.length} overlaps
             </span>
+            {simulation.crossModel.length > 0 && (
+              <>
+                {" · "}
+                <span className="text-amber-400">{simulation.crossModel.length} legacy collision{simulation.crossModel.length > 1 ? "s" : ""}</span>
+              </>
+            )}
             {simulation.excludedPolicies.length > 0 && (
               <>
                 {" · "}
@@ -433,6 +504,17 @@ export function SimulationBaselinePanel({
           </div>
           {platform !== "windows" && (
             <div className="mt-1 text-[11px] text-slate-500">Overlap detection is Windows-only for now.</div>
+          )}
+          {simulation.crossModel.length > 0 && (
+            <div className="mt-1.5 text-[11px] text-amber-300/90">
+              ⚠ {simulation.crossModel.length} legacy policy collision{simulation.crossModel.length > 1 ? "s" : ""} — a legacy
+              template that targets the same CSP as the Settings Catalog can reflect the setting using opposite vocabulary.
+              Update your legacy policies to the Settings Catalog to participate in conflict/overlap detection.{" "}
+              <button onClick={() => setView("collision")} className="underline decoration-amber-400/50 hover:text-amber-200">
+                Review
+              </button>{" "}
+              <span className="text-amber-300/60">· best-effort</span>
+            </div>
           )}
           {scope && (
             <div className="mt-2 flex items-center gap-2">
@@ -509,15 +591,20 @@ export function SimulationBaselinePanel({
           <option value="legacy" disabled={legacyCount === 0}>
             Legacy policies only ({legacyCount})
           </option>
+          <option value="collision" disabled={simulation.crossModel.length === 0}>
+            Legacy collisions ({simulation.crossModel.length})
+          </option>
         </select>
         <a
           href={api.simulateExportUrl({ groupIds, platform, deviceFilterIds, unassignedPolicyIds }, "json")}
+          download="endpoint-baseline.json"
           className="rounded-md border border-ink-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-ink-800"
         >
           Export JSON
         </a>
         <a
           href={api.simulateExportUrl({ groupIds, platform, deviceFilterIds, unassignedPolicyIds }, "csv")}
+          download="endpoint-baseline.csv"
           className="rounded-md border border-ink-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-ink-800"
         >
           Export CSV
@@ -605,8 +692,8 @@ export function SimulationBaselinePanel({
             </tr>
           </thead>
           <tbody>
-            {visibleRows.flatMap(renderRow)}
-            {remaining > 0 && (
+            {view === "collision" ? collisionFindings.flatMap(renderCollision) : visibleRows.flatMap(renderRow)}
+            {view !== "collision" && remaining > 0 && (
               <tr className="border-t border-ink-800">
                 <td colSpan={visibleDefs.length} className="p-0">
                   <button
@@ -619,10 +706,10 @@ export function SimulationBaselinePanel({
                 </td>
               </tr>
             )}
-            {rows.length === 0 && (
+            {(view === "collision" ? collisionFindings.length === 0 : rows.length === 0) && (
               <tr>
                 <td colSpan={visibleDefs.length} className="px-3 py-6 text-center text-slate-500">
-                  No settings match.
+                  {view === "collision" ? "No legacy collisions match." : "No settings match."}
                 </td>
               </tr>
             )}

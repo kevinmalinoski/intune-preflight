@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-demo/
 build/
 # Ignore every .env variant (incl. backups like .envmalosandboxbackup); keep the example.
 .env*

@@ -6,6 +6,79 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [2.0.0] — 2026-09-03
+
+A major release centered on **legacy policy handling**, **cross-model conflict
+detection**, honest **dynamic-group (Group Tag)** surfacing, and a **public,
+zero-backend demo**.
+
+### Added
+- **Cross-model conflict/overlap detection ("legacy policy collisions").** The
+  same underlying CSP configured through *different* policy models — a legacy
+  device-config template and a Settings Catalog policy, or an OMA-URI custom
+  profile — used to slip past per-model detection entirely (`0 conflicts`, even
+  though the device gets both). Settings now resolve a canonical `cspNode` — exact
+  for Settings Catalog + OMA-URI via their real CSP path, and via a curated,
+  Microsoft-docs-grounded template→CSP crosswalk for legacy templates — and any
+  CSP touched by two models is surfaced as a collision (duplicate / conflict /
+  verify) with a migrate-to-Settings-Catalog nudge. Best-effort over common
+  settings, and labelled as such (a count next to conflicts/overlaps plus a
+  "Legacy collisions" filter).
+- **"Legacy template" flag.** The deprecated device-config *template* types
+  Microsoft is migrating to the Settings Catalog (Device restrictions/features,
+  Endpoint protection, Extensions) are flagged in the Assignment Manifest and the
+  merged baseline, nudging a Settings Catalog migration. The still-current
+  templates (certificates, VPN, Wi-Fi, email, wired network) are deliberately not
+  flagged.
+- **Real names, value labels and documentation links for legacy Endpoint Security
+  intents.** Legacy intents' settings now resolve their true Intune display names
+  and enum value labels from the template `settingDefinitions` (matching the
+  Settings Catalog), plus direct Microsoft Learn links — instead of `definitionId`
+  fragments and raw enum codes.
+- **Group Tag match transparency in the group picker.** Each dynamic group is
+  classified against the entered Group Tag: a confident `[OrderID]` match (badged,
+  auto-selected); a **+ conditions** match whose rule *also* hinges on a property a
+  tag can't decide (shown with the membership rule to verify); or a **conditional**
+  reference the flat evaluator can't confirm (surfaced, not auto-selected). Each
+  group's `[OrderID]` scope is shown inline, matches fade in, and the list sorts
+  selected → matches → conditional → rest.
+- **Public, zero-backend demo.** A static in-browser build runs the exact same
+  engine over a bundled sample tenant — no server, nothing leaves the browser —
+  hosted on GitHub Pages with a landing page, so the tool can be evaluated from a
+  link. The demo tenant is grounded on the community Open Intune Baseline.
+- **Small-screen notice** so phone visitors get a "built for a bigger screen"
+  message instead of a broken dense layout.
+
+### Changed
+- **Only genuine security/baseline intents are labelled "(Legacy)".** Modern and
+  migrated policies (which live in the Settings Catalog) can no longer be
+  mislabelled as legacy Endpoint Security.
+- **Legacy template default noise removed.** Fixed-schema template profiles
+  (device restrictions/general, endpoint protection, compliance) serialize their
+  *entire* schema; the unset defaults — `false` toggles and the `notConfigured` /
+  `userDefined` / `deviceDefault` / `unavailable` sentinels — are now dropped for
+  those types, so a profile contributes only what it actually configures (a Device
+  Restrictions profile that blocks 9 things reports 9, not ~200). Types where a
+  `false` is genuinely meaningful (e.g. an Update ring's `allowWindows11Upgrade`)
+  are left untouched.
+- **Group selector polish** — a cohesive tag-scope pill, muted structural chips,
+  matched-row accent, and roomier list.
+- **Autopilot enrollment stacks under the endpoint.** The V1/V2 enrollment cards
+  now sit directly beneath the "Configured Endpoint" node as one device unit
+  (device on top, its profiles below) instead of occupying a separate column
+  between the device and the groups — the endpoint *is* what enrolls, so it reads
+  as one thing that branches out to its groups. Every group hangs directly off the
+  device, with each profile drawing its own line to the specific device group it
+  targets.
+
+### Fixed
+- **Cross-model false positives on real tenants.** A complex/collection Settings
+  Catalog setting expands into many sub-settings that all normalize to one CSP
+  node within a single policy; the detector now requires two different policy
+  *models* (not merely two setting ids), so intra-policy settings never fire.
+- **Docker/type-check:** added the missing Vite client types so the web workspace
+  type-checks cleanly with the static-demo build.
+
 ## [1.2.1] — 2026-08-04
 
 ### Fixed

@@ -5,6 +5,7 @@ import type {
   AssignmentReportRow,
   BaselineSetting,
   ConflictingSetting,
+  CrossModelFinding,
   GroupKind,
   GroupOverlapSummary,
   GroupSummary,
@@ -72,6 +73,7 @@ function mergeSettings(
         sourcePolicyId: policy.id,
         sourcePolicyName: policy.displayName,
         sourceKind: policy.kind,
+        sourceLegacyTemplate: policy.legacyTemplate,
       };
       const list = bySettingId.get(setting.settingId) ?? [];
       list.push(entry);
@@ -208,7 +210,13 @@ export function buildAssignmentReport(data: TenantData, platform?: Platform): As
   const rows: AssignmentReportRow[] = [];
   for (const policy of policies) {
     const filterByGroupId = new Map(policy.assignmentFilters.map((f) => [f.groupId, f]));
-    const rowBase = { policyId: policy.id, policyName: policy.displayName, kind: policy.kind, platform: policy.platform };
+    const rowBase = {
+      policyId: policy.id,
+      policyName: policy.displayName,
+      kind: policy.kind,
+      platform: policy.platform,
+      legacyTemplate: policy.legacyTemplate,
+    };
 
     for (const groupId of policy.assignedGroupIds) {
       const { name, kind } = resolveGroup(groupId);
@@ -401,6 +409,7 @@ export function computeSimulation(
         id: policy.id,
         displayName: policy.displayName,
         kind: policy.kind,
+        legacyTemplate: policy.legacyTemplate,
         status: "excluded",
         settingsCount: policy.settings.length,
         viaGroupIds: rawViaGroupIds,
@@ -418,6 +427,7 @@ export function computeSimulation(
         id: policy.id,
         displayName: policy.displayName,
         kind: policy.kind,
+        legacyTemplate: policy.legacyTemplate,
         status: "excluded",
         settingsCount: policy.settings.length,
         viaGroupIds: rawViaGroupIds,
@@ -437,6 +447,7 @@ export function computeSimulation(
       id: policy.id,
       displayName: policy.displayName,
       kind: policy.kind,
+      legacyTemplate: policy.legacyTemplate,
       status: "included",
       settingsCount: policy.settings.length,
       viaGroupIds: passingGroupIds,
@@ -461,6 +472,7 @@ export function computeSimulation(
         id: policy.id,
         displayName: policy.displayName,
         kind: policy.kind,
+        legacyTemplate: policy.legacyTemplate,
         status: "included",
         settingsCount: policy.settings.length,
         viaGroupIds: [UNASSIGNED_SOURCE_GROUP.id],
@@ -512,6 +524,7 @@ export function computeSimulation(
   const isWindows = options.platform === "windows";
   const platformConflicts = isWindows ? conflicts : [];
   const platformOverlaps = isWindows ? overlaps : [];
+  const crossModel = isWindows ? detectCrossModel(settings) : [];
 
   return {
     groups,
@@ -521,7 +534,75 @@ export function computeSimulation(
     settings,
     conflicts: platformConflicts,
     overlaps: platformOverlaps,
+    crossModel,
   };
+}
+
+/**
+ * Cross-MODEL detection: the SAME underlying CSP (`cspNode`) configured by
+ * policies of DIFFERENT models -- e.g. a legacy Device Restrictions template and
+ * a Settings Catalog policy -- which the per-model settingId keying never sees as
+ * a conflict/overlap. Only settings with a known canonical `cspNode` participate
+ * (Settings Catalog + OMA-URI via their real path; legacy templates via the
+ * curated crosswalk), so this is best-effort over common settings. Operates on
+ * the already-deduped merged `settings` (one entry per settingId), so two
+ * policies of the SAME model don't trigger it -- that's a normal conflict/overlap.
+ */
+function detectCrossModel(settings: BaselineSetting[]): CrossModelFinding[] {
+  const byNode = new Map<string, BaselineSetting[]>();
+  for (const s of settings) {
+    if (!s.cspNode) continue;
+    const list = byNode.get(s.cspNode) ?? [];
+    list.push(s);
+    byNode.set(s.cspNode, list);
+  }
+  const canonical = (e: BaselineSetting): string | undefined => (e.sourceLegacyTemplate ? e.cspNodeValue : e.value);
+  // Coarse block/allow bucketing so equivalent labels across models
+  // ("Block" / "Not allowed" / "0" -- "Allow" / "Allowed" / "1") don't read as a
+  // false conflict. Anything unrecognized compares on its own lowercased value.
+  const RESTRICT = new Set(["block", "blocked", "not allowed", "notallowed", "disabled", "deny", "denied", "0", "false"]);
+  const PERMIT = new Set(["allow", "allowed", "enabled", "1", "true"]);
+  const coarse = (v: string): string => {
+    const t = v.trim().toLowerCase();
+    return RESTRICT.has(t) ? "restrict" : PERMIT.has(t) ? "permit" : t;
+  };
+  // The setting's policy MODEL, from its settingId scheme. A single policy's
+  // settings all share one model, so requiring 2+ models is what makes this
+  // cross-MODEL -- NOT merely 2+ settingIds (a complex/collection Settings Catalog
+  // setting expands into many sub-settings that all normalize to one cspNode
+  // within the SAME policy, which must not be flagged).
+  const modelOf = (id: string): string =>
+    id.startsWith("omaUri:") ? "oma" : id.startsWith("endpointSecurity:") ? "intent" : id.includes(":") ? "template" : "catalog";
+  const findings: CrossModelFinding[] = [];
+  for (const [cspNode, group] of byNode) {
+    // Collapse to one representative per source POLICY -- a complex Settings
+    // Catalog setting contributes several sub-settings on one node from one policy.
+    const perPolicy = [...new Map(group.map((g) => [g.sourcePolicyId, g])).values()];
+    // Genuinely cross-model only when 2+ policies of 2+ DIFFERENT models touch it.
+    if (perPolicy.length < 2 || new Set(perPolicy.map((g) => modelOf(g.settingId))).size < 2) continue;
+    const cvs = perPolicy.map(canonical);
+    const agreement: CrossModelFinding["agreement"] = cvs.some((v) => v === undefined)
+      ? "unknown"
+      : new Set(cvs.map((v) => coarse(v as string))).size > 1
+        ? "differs"
+        : "same";
+    findings.push({
+      cspNode,
+      // Prefer a Settings Catalog entry's name (nicest), else any entry's.
+      displayName: (perPolicy.find((g) => !g.sourceLegacyTemplate) ?? perPolicy[0]).displayName,
+      agreement,
+      entries: perPolicy.map((e) => ({
+        settingId: e.settingId,
+        value: e.value,
+        canonicalValue: canonical(e),
+        sourcePolicyId: e.sourcePolicyId,
+        sourcePolicyName: e.sourcePolicyName,
+        sourceKind: e.sourceKind,
+        sourceLegacyTemplate: e.sourceLegacyTemplate,
+      })),
+    });
+  }
+  return findings.sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" }));
 }
 
 export function simulationToCsv(simulation: SimulationResult): string {

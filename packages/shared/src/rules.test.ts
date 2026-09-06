@@ -1,5 +1,61 @@
 import { describe, expect, it } from "vitest";
-import { filterExclusionReason, groupTagMatchesRule, isAutopilotJoinedRule, isGroupTagRule } from "./index.js";
+import {
+  classifyGroupTagMatch,
+  filterExclusionReason,
+  groupTagMatchesRule,
+  groupTagScope,
+  isAutopilotJoinedRule,
+  isGroupTagRule,
+} from "./index.js";
+
+describe("groupTagScope (inline tag display)", () => {
+  it("shows a startsWith prefix with a * and an eq value verbatim", () => {
+    expect(groupTagScope('(device.devicePhysicalIds -any (_ -startsWith "[OrderID]:KIOSK"))')).toBe("KIOSK*");
+    expect(groupTagScope('(device.devicePhysicalIds -any (_ -eq "[OrderID]:KIOSK-01"))')).toBe("KIOSK-01");
+  });
+
+  it("returns undefined when there's no OrderID clause", () => {
+    expect(groupTagScope('(device.devicePhysicalIDs -any (_ -startsWith "[ZTDId]"))')).toBeUndefined();
+    expect(groupTagScope(undefined)).toBeUndefined();
+  });
+});
+
+describe("classifyGroupTagMatch (Group Tag in the picker)", () => {
+  const rule = (r: string) => r;
+  const orderId = rule('(device.devicePhysicalIds -any (_ -startsWith "[OrderID]:SALES-KIOSK"))');
+
+  it("confidently matches a flat OrderID rule the tag satisfies", () => {
+    const m = classifyGroupTagMatch(orderId, "SALES-KIOSK-01");
+    expect(m.state).toBe("match");
+    expect(m.fullyEvaluated).toBe(true);
+  });
+
+  it("returns none when the tag doesn't satisfy any OrderID clause", () => {
+    expect(classifyGroupTagMatch(orderId, "FINANCE-01").state).toBe("none");
+    expect(classifyGroupTagMatch(undefined, "SALES").state).toBe("none");
+    expect(classifyGroupTagMatch(orderId, "  ").state).toBe("none");
+  });
+
+  it("flags a match that also hinges on a property we can't evaluate (not fully evaluated)", () => {
+    // The OrderID clause matches, but the rule also requires deviceOSType -> best-effort.
+    const combined = rule(
+      '(device.devicePhysicalIds -any (_ -startsWith "[OrderID]:SALES-KIOSK")) and (device.deviceOSType -eq "Windows")'
+    );
+    const m = classifyGroupTagMatch(combined, "SALES-KIOSK-01");
+    expect(m.state).toBe("match"); // OrderID satisfied (the flat evaluator ignores deviceOSType)
+    expect(m.fullyEvaluated).toBe(false); // ...but it wasn't fully evaluated -> surface the rule
+  });
+
+  it("marks a satisfied OrderID clause the flat evaluator can't confirm as conditional", () => {
+    // Two ANDed OrderID tags: the tag satisfies one but not the other -> not a confident match,
+    // yet the tag IS referenced, so it's worth surfacing.
+    const twoTags = rule(
+      '(device.devicePhysicalIds -any (_ -eq "[OrderID]:SALES-KIOSK-01")) and (device.devicePhysicalIds -any (_ -eq "[OrderID]:OTHER"))'
+    );
+    const m = classifyGroupTagMatch(twoTags, "SALES-KIOSK-01");
+    expect(m.state).toBe("conditional");
+  });
+});
 
 describe("filterExclusionReason (include vs exclude are opposites)", () => {
   it("include: phrased as 'only targets matching devices, this one doesn't'", () => {

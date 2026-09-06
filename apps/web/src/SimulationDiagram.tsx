@@ -43,14 +43,16 @@ const SOURCE_STYLE: Record<SimulationGroup["source"], { border: string; bg: stri
 const UNASSIGNED_EDGE = "#fb923c";
 const AUTOPILOT_COLOR = "#818cf8";
 
-// Autopilot-card geometry. The cards form their own column between the device
-// and the groups (enrollment happens first), so they're narrower than bubbles.
+// Autopilot-card geometry. The cards stack UNDERNEATH the device as part of the
+// same "configured endpoint" unit (the device is what enrolls), so they share
+// the left column rather than forming one of their own.
 // Collapsed by default (header + a name/status row); expand to reveal settings.
 const AP_NODE_WIDTH = 320;
 const AP_HEADER_HEIGHT = 40;
-const AP_SUMMARY_BASE = 44; // the collapsed name + status row
+const AP_SUMMARY_BASE = 35; // the collapsed name + status row (measured ~75 w/ header)
 const AP_ROW_HEIGHT = 19; // one setting row when expanded (measured ~18.3)
 
+const DEVICE_NODE_WIDTH = 320; // matches DeviceNode's w-80 (== AP_NODE_WIDTH so the stack aligns)
 const GROUP_NODE_WIDTH = 250;
 const POLICY_NODE_WIDTH = 230;
 const TYPE_NODE_WIDTH = 400;
@@ -92,7 +94,7 @@ function estimateRowHeight(label: string): number {
 
 function DeviceNode({ data }: { data: { groupNames: string[]; filterNames: string[] } }) {
   return (
-    <div className="flex w-64 flex-col items-center gap-2 rounded-2xl border-2 border-emerald-400 bg-ink-900 px-5 py-4 text-emerald-100 shadow-[0_8px_30px_rgba(16,185,129,0.25)]">
+    <div className="flex w-80 flex-col items-center gap-2 rounded-2xl border-2 border-emerald-400 bg-ink-900 px-5 py-4 text-emerald-100 shadow-[0_8px_30px_rgba(16,185,129,0.25)]">
       <Handle type="source" position={Position.Right} className="opacity-0" />
       <span className="text-3xl" aria-hidden>
         🖥️
@@ -379,6 +381,9 @@ const nodeTypes = {
 };
 
 const COLUMN_GAP = 140;
+// Even vertical rhythm inside the device stack: device -> first profile and
+// profile -> profile use the same gap so the unit reads as one deliberate group.
+const STACK_GAP = 16;
 
 // Build the graph for the current visibility state. Hidden groups stay in the
 // group column as dimmed toggles (so they can be clicked back on), but the
@@ -400,16 +405,21 @@ function buildGraph(
   const nodes: Node[] = [];
   const edges: Edge[] = [];
 
-  // Autopilot enrollment cards occupy their own column BETWEEN the device and
-  // the groups -- enrollment happens first and is what lands the device in its
-  // groups (v1 via its assigned device groups, v2 via its configured
-  // just-in-time device group). When none are visible the column collapses and
-  // the groups sit in their usual spot.
+  // Autopilot enrollment cards stack UNDERNEATH the device as one "configured
+  // endpoint" unit (device on top, its profiles below) rather than occupying a
+  // column of their own -- the device is what enrolls (v1 via its assigned
+  // device groups, v2 via its configured just-in-time device group), so it reads
+  // as one thing that then branches out to the groups. The left column is as
+  // wide as the widest card in the stack; when no profiles are visible it's just
+  // the device.
   const visibleAps = (simulation.autopilotProfiles ?? []).filter((ap) => {
     const sources = [...ap.viaGroupIds, ...ap.excludedViaGroupIds];
     return sources.length === 0 || sources.some((id) => !hiddenGroupIds.has(id));
   });
-  const apX = 220 + COLUMN_GAP / 2;
+  const hasAps = visibleAps.length > 0;
+  const leftColWidth = hasAps ? AP_NODE_WIDTH : DEVICE_NODE_WIDTH;
+  const apX = 0;
+  const deviceX = hasAps ? (AP_NODE_WIDTH - DEVICE_NODE_WIDTH) / 2 : 0;
 
   // --- Group column (all groups; hidden ones dimmed) ---
   // The always-applies buckets (All Devices, then All Users) sit at the top;
@@ -419,7 +429,7 @@ function buildGraph(
     g.source === "all-devices" ? 0 : g.source === "all-users" ? 1 : g.source === "unassigned" ? 3 : 2;
   const orderedGroups = [...simulation.groups].sort((a, b) => groupRank(a) - groupRank(b));
 
-  const groupX = visibleAps.length > 0 ? apX + AP_NODE_WIDTH + COLUMN_GAP : apX;
+  const groupX = leftColWidth + COLUMN_GAP;
   let groupY = 0;
   for (const g of orderedGroups) {
     const off = hiddenGroupIds.has(g.id);
@@ -468,10 +478,11 @@ function buildGraph(
     });
   }
 
-  // --- Autopilot column: device -> profile -> the groups it targets ---
-  // The only lines enrollment adds: device -> profile, and profile -> its target
-  // groups. Those groups carry ONWARD to their policies, so we drop the direct
-  // device -> group edge for them (below) to avoid a duplicate crossing line.
+  // --- Autopilot stack: profiles sit under the device, each drawing a line to
+  // the groups it targets --- The device and its profiles read as one unit
+  // (stacked, no edge between them), so enrollment adds only profile -> target
+  // group lines. Those groups carry ONWARD to their policies, so we drop the
+  // direct device -> group edge for them (below) to avoid a duplicate line.
   // Exclusions are shown on the card text, not as extra edges.
   const apTargetedGroupIds = new Set<string>();
   let apY = 0;
@@ -491,18 +502,8 @@ function buildGraph(
     let h = AP_HEADER_HEIGHT + AP_SUMMARY_BASE + (nameLines - 1) * 18;
     // + the expanded section's border/padding (measured ~15px).
     if (expanded) h += ap.settings.length * AP_ROW_HEIGHT + (excluded ? 22 : 0) + 16;
-    apY += h + ROW_GAP;
+    apY += h + STACK_GAP;
 
-    // The endpoint enrolls through this profile.
-    edges.push({
-      id: `device->ap-${ap.id}`,
-      source: "device",
-      target: `autopilot:${ap.id}`,
-      type: "default",
-      style: excluded
-        ? { stroke: "#fb7185", strokeDasharray: "5 5", opacity: 0.45, strokeWidth: 2 }
-        : { stroke: AUTOPILOT_COLOR, opacity: 0.6, strokeWidth: 2 },
-    });
     // Profile -> target group edges (include only; the group carries on to policies).
     for (const gid of ap.viaGroupIds.filter((id) => !hiddenGroupIds.has(id))) {
       apTargetedGroupIds.add(gid);
@@ -515,14 +516,7 @@ function buildGraph(
       });
     }
   }
-  const apSpan = Math.max(apY - ROW_GAP, 0);
-  // With enrollment in the picture the device flows through the profile first, so
-  // every group -- including the always-apply All Devices / All Users -- should
-  // hang off a profile card, not draw a second line straight from the device
-  // across the Autopilot column. Anchor those on a single card (a targeted one if
-  // any, else the first) to keep it to one line each.
-  const anchorAp = visibleAps.find((ap) => ap.status !== "excluded") ?? visibleAps[0];
-  const groupAnchorId = anchorAp ? `autopilot:${anchorAp.id}` : "device";
+  const apSpan = Math.max(apY - STACK_GAP, 0);
 
   // --- Policy column: one bubble per type (grouped) or one node per policy ---
   let policySpan = 0;
@@ -623,42 +617,49 @@ function buildGraph(
     }
   }
 
-  // Freeze the device + group column; center the Autopilot and policy columns
-  // on the same line, each around its own span.
+  // Center the policy column on the same line as the groups.
   const centerline = groupSpan / 2;
   const policyOffset = centerline - policySpan / 2;
-  const apOffset = centerline - apSpan / 2;
   for (const n of nodes) {
     if (n.type === "policy" || n.type === "policyType")
       n.position = { ...n.position, y: n.position.y + policyOffset };
-    if (n.type === "autopilot") n.position = { ...n.position, y: n.position.y + apOffset };
   }
 
-  // Center the device node on the same line as the columns. Its height varies
-  // with how many group/filter names it lists, so estimate it from the content
-  // and offset by half -- a flat offset left it visibly low.
+  // The device + its enrollment cards share the left column as one stacked unit
+  // (device on top, profiles below), centered together on the group centerline.
+  // The device's height varies with how many group/filter names it lists, so
+  // estimate it from the content -- a flat offset left it visibly low.
+  // ~40 chars/line at the w-80 (320px) node width -- keep this in step with the
+  // node width so the estimated height matches what actually renders (an
+  // overestimate here shows up as an uneven gap above the first profile card).
   const deviceLines =
-    Math.max(1, Math.ceil((groupNames.join(", ").length || 4) / 30)) +
-    Math.max(1, Math.ceil((deviceFilterNames.join(", ").length || 4) / 30));
+    Math.max(1, Math.ceil((groupNames.join(", ").length || 4) / 40)) +
+    Math.max(1, Math.ceil((deviceFilterNames.join(", ").length || 4) / 40));
   const deviceHeight = 124 + deviceLines * LINE_HEIGHT;
+  const leftStackHeight = deviceHeight + (hasAps ? STACK_GAP + apSpan : 0);
+  const leftStackTop = centerline - leftStackHeight / 2;
+  const apOffset = leftStackTop + deviceHeight + STACK_GAP;
+  for (const n of nodes) {
+    if (n.type === "autopilot") n.position = { ...n.position, y: n.position.y + apOffset };
+  }
   nodes.unshift({
     id: "device",
     type: "device",
-    position: { x: 0, y: centerline - deviceHeight / 2 },
+    position: { x: deviceX, y: leftStackTop },
     data: { groupNames, filterNames: deviceFilterNames },
   });
   for (const g of simulation.groups) {
     // Groups an Autopilot profile targets get their line FROM the profile card
-    // (device -> profile -> group), so skip the direct device -> group edge to
-    // avoid a duplicate line crossing the Autopilot column.
+    // (profile -> group), so skip the direct device -> group edge for them to
+    // avoid a duplicate line. Every other group hangs directly off the device.
     if (apTargetedGroupIds.has(g.id)) continue;
     const off = hiddenGroupIds.has(g.id);
     // The "No assignment" bucket isn't a real membership path -- draw it dashed
     // orange so it doesn't read like the device belongs to it.
     const unassigned = g.source === "unassigned";
     edges.push({
-      id: `${groupAnchorId === "device" ? "device" : "ap-anchor"}->${g.id}`,
-      source: groupAnchorId,
+      id: `device->${g.id}`,
+      source: "device",
       target: `group:${g.id}`,
       type: "default",
       style: {

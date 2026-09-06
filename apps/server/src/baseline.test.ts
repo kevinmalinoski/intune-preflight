@@ -252,3 +252,102 @@ describe("buildAssignmentReport", () => {
     expect(report.rows.some((r) => r.policyId === "orphan")).toBe(false);
   });
 });
+
+describe("detectCrossModel (cross-model conflict/overlap)", () => {
+  const ALL = VIRTUAL_GROUP_ALL_DEVICES.id;
+  const tmplSetting: CspSetting = {
+    settingId: "windows10GeneralConfiguration:microsoftAccountBlocked",
+    cspArea: "Windows10 General Configuration",
+    displayName: "Microsoft Account Blocked",
+    value: "true",
+    cspNode: "accounts/allowmicrosoftaccountconnection",
+    cspNodeValue: "Block",
+  };
+  const scSetting = (value: string): CspSetting => ({
+    settingId: "device_vendor_msft_policy_config_accounts_allowmicrosoftaccountconnection",
+    cspArea: "Accounts",
+    displayName: "Allow Microsoft Account Connection",
+    value,
+    cspNode: "accounts/allowmicrosoftaccountconnection",
+  });
+
+  it("flags the same CSP set via a template AND Settings Catalog (invisible to per-model detection)", () => {
+    const data = tenant({
+      policies: [
+        policy({ id: "tmpl", legacyTemplate: true, assignedGroupIds: [ALL], settings: [tmplSetting] }),
+        policy({ id: "sc", kind: "settingsCatalog", assignedGroupIds: [ALL], settings: [scSetting("Block")] }),
+      ],
+    });
+    const sim = computeSimulation(data, { selectedGroupIds: [], platform: "windows" });
+    expect(sim.conflicts).toHaveLength(0); // different settingIds -> per-model detection can't see it
+    expect(sim.overlaps).toHaveLength(0);
+    expect(sim.crossModel).toHaveLength(1);
+    expect(sim.crossModel[0].cspNode).toBe("accounts/allowmicrosoftaccountconnection");
+    expect(sim.crossModel[0].agreement).toBe("same"); // both "Block" -> duplicate
+    expect(sim.crossModel[0].entries.some((e) => e.sourceLegacyTemplate)).toBe(true);
+  });
+
+  it("classifies differing canonical values as a conflict, and suppresses off Windows", () => {
+    const data = tenant({
+      policies: [
+        policy({ id: "tmpl", legacyTemplate: true, assignedGroupIds: [ALL], settings: [tmplSetting] }),
+        policy({ id: "sc", kind: "settingsCatalog", assignedGroupIds: [ALL], settings: [scSetting("Allow")] }),
+      ],
+    });
+    expect(computeSimulation(data, { selectedGroupIds: [], platform: "windows" }).crossModel[0].agreement).toBe("differs");
+    expect(computeSimulation(data, { selectedGroupIds: [], platform: "macos" }).crossModel).toEqual([]);
+  });
+
+  it("does not flag two policies of the SAME model (that's a normal conflict/overlap)", () => {
+    const data = tenant({
+      policies: [
+        policy({ id: "sc1", kind: "settingsCatalog", assignedGroupIds: [ALL], settings: [scSetting("Block")] }),
+        policy({ id: "sc2", kind: "settingsCatalog", assignedGroupIds: [ALL], settings: [scSetting("Block")] }),
+      ],
+    });
+    const sim = computeSimulation(data, { selectedGroupIds: [], platform: "windows" });
+    expect(sim.crossModel).toHaveLength(0); // same settingId -> handled as an overlap instead
+    expect(sim.overlaps).toHaveLength(1);
+  });
+
+  it("does NOT flag many sub-settings of ONE policy that share a cspNode (intra-policy explosion)", () => {
+    // A complex/collection Settings Catalog setting expands into several distinct
+    // sub-settings that all normalize to ONE cspNode -- from the SAME policy. This
+    // is not cross-model and must never fire (the real-tenant false-positive bug).
+    const node = "bitlocker/encryptionmethodbydrivetype";
+    const sub = (settingId: string, value: string): CspSetting => ({
+      settingId,
+      cspArea: "BitLocker",
+      displayName: settingId,
+      value,
+      cspNode: node,
+    });
+    const data = tenant({
+      policies: [
+        policy({
+          id: "bl",
+          kind: "settingsCatalog",
+          assignedGroupIds: [ALL],
+          settings: [
+            sub("device_vendor_msft_bitlocker_encryptionmethodbydrivetype", "Enabled"),
+            sub("device_vendor_msft_bitlocker_encryptionmethodbydrivetype_osdrive", "XTS-AES 256-bit"),
+            sub("device_vendor_msft_bitlocker_encryptionmethodbydrivetype_fixeddrive", "XTS-AES 256-bit"),
+          ],
+        }),
+      ],
+    });
+    expect(computeSimulation(data, { selectedGroupIds: [], platform: "windows" }).crossModel).toHaveLength(0);
+  });
+
+  it("does NOT flag two Settings Catalog policies (same model) sharing a cspNode via different settingIds", () => {
+    const node = "bitlocker/encryptionmethodbydrivetype";
+    const data = tenant({
+      policies: [
+        policy({ id: "a", kind: "settingsCatalog", assignedGroupIds: [ALL], settings: [{ settingId: "def_a", cspArea: "x", displayName: "a", value: "1", cspNode: node }] }),
+        policy({ id: "b", kind: "settingsCatalog", assignedGroupIds: [ALL], settings: [{ settingId: "def_b", cspArea: "x", displayName: "b", value: "1", cspNode: node }] }),
+      ],
+    });
+    // Two "catalog"-model policies -> not cross-MODEL (would be a same-model concern).
+    expect(computeSimulation(data, { selectedGroupIds: [], platform: "windows" }).crossModel).toHaveLength(0);
+  });
+});

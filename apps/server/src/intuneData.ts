@@ -13,6 +13,10 @@ import {
   flattenScriptToCspSettings,
   flattenSettingsCatalogEntries,
   flattenToCspSettings,
+  indexIntentSettingDefinitions,
+  type IntentSettingDef,
+  isLegacyTemplateType,
+  isSecurityIntentTemplate,
   mapWellKnownGroupId,
   parseAssignmentTarget,
   platformFromAssignmentFilter,
@@ -180,6 +184,7 @@ async function fetchDeviceConfigurations(): Promise<IntunePolicy[]> {
       assignedGroupIds: includedGroupIds,
       excludedGroupIds,
       assignmentFilters,
+      legacyTemplate: isLegacyTemplateType(item["@odata.type"] as string | undefined),
     };
   });
 }
@@ -597,6 +602,49 @@ async function fetchWindowsUpdateProfiles(): Promise<IntunePolicy[]> {
 }
 
 /**
+ * Resolve each legacy intent template's settings to their real Intune metadata
+ * (display name + enum value labels), keyed `templateId -> (definitionId -> def)`.
+ * These live on the template's `settingDefinitions` (the same metadata the
+ * Settings Catalog uses). Fetched via the intent's own categories --
+ * `/intents/{id}/categories` then per-category `/settingDefinitions` (the
+ * endpoints Graph actually exposes; a template-level expand isn't available) --
+ * and, because every intent built from a template shares the same definitions,
+ * resolved once per template using one representative intent and reused.
+ *
+ * A per-template failure just yields an empty map, so the caller falls back to
+ * the `definitionId`-derived heuristic and raw values rather than dropping data.
+ */
+async function loadIntentSettingDefinitions(
+  templateReps: Array<{ templateId: string; intentId: string }>
+): Promise<Map<string, Map<string, IntentSettingDef>>> {
+  const byTemplate = new Map<string, Map<string, IntentSettingDef>>();
+  await mapWithConcurrency(templateReps, 3, async ({ templateId, intentId }) => {
+    const allDefs: Record<string, unknown>[] = [];
+    try {
+      const categories = await graphGetCollection<Record<string, unknown>>(
+        `/deviceManagement/intents/${intentId}/categories`,
+        true
+      );
+      for (const cat of categories) {
+        const catId = cat.id as string | undefined;
+        if (!catId) continue;
+        const defs = await graphGetCollection<Record<string, unknown>>(
+          `/deviceManagement/intents/${intentId}/categories/${catId}/settingDefinitions`,
+          true
+        );
+        allDefs.push(...defs);
+      }
+    } catch (err) {
+      console.warn(
+        `Could not read setting definitions for template ${templateId} (its settings fall back to the definitionId + raw values): ${(err as Error).message}`
+      );
+    }
+    byTemplate.set(templateId, indexIntentSettingDefinitions(allDefs));
+  });
+  return byTemplate;
+}
+
+/**
  * Legacy Endpoint Security & Security Baseline policies -- BitLocker / Disk
  * Encryption, Defender Antivirus, Firewall, Attack Surface Reduction, Account
  * Protection, EDR -- created under the older `deviceManagement/intents` model
@@ -608,7 +656,7 @@ async function fetchWindowsUpdateProfiles(): Promise<IntunePolicy[]> {
  * fetcher; this covers only tenants that still have the legacy intents-based
  * ones. Windows-centric, so they join Windows conflict/overlap detection.
  */
-async function fetchEndpointSecurityIntents(): Promise<IntunePolicy[]> {
+export async function fetchEndpointSecurityIntents(): Promise<IntunePolicy[]> {
   // Intents are a legacy resource served on BETA -- the per-intent /assignments
   // and /settings sub-collections 400 on v1.0 -- so read the whole feature on beta.
   let intents: Record<string, unknown>[];
@@ -622,12 +670,14 @@ async function fetchEndpointSecurityIntents(): Promise<IntunePolicy[]> {
   }
   if (intents.length === 0) return [];
 
-  // Resolve each intent's template once (id -> category name + platform). A
-  // failure just falls back to a generic label rather than dropping the intents.
-  const templateInfo = new Map<string, { area: string; platform: Platform }>();
+  // Resolve each intent's template once (id -> category name + platform + whether
+  // it's a security/baseline template). A failure just falls back to a generic
+  // label rather than dropping the intents. templateType/@odata.type drive the
+  // security check, so a non-security intent isn't mislabeled Endpoint Security.
+  const templateInfo = new Map<string, { area: string; platform: Platform; isSecurity: boolean }>();
   try {
     const templates = await graphGetCollection<Record<string, unknown>>(
-      "/deviceManagement/templates?$select=id,displayName,platformType",
+      "/deviceManagement/templates?$select=id,displayName,platformType,templateType",
       true
     );
     for (const t of templates) {
@@ -636,6 +686,7 @@ async function fetchEndpointSecurityIntents(): Promise<IntunePolicy[]> {
         templateInfo.set(id, {
           area: (t.displayName as string) ?? "Endpoint Security",
           platform: platformFromIntentTemplate(t.platformType as string | undefined),
+          isSecurity: isSecurityIntentTemplate(t),
         });
       }
     }
@@ -643,11 +694,33 @@ async function fetchEndpointSecurityIntents(): Promise<IntunePolicy[]> {
     console.warn(`Could not read intent templates (categories will be generic): ${(err as Error).message}`);
   }
 
+  // Resolve real setting names + value labels per template (once each, via one
+  // representative intent), so the merged baseline shows Intune's names and
+  // human values rather than definitionIds and raw enum codes.
+  const templateReps = [
+    ...new Map(
+      intents
+        .filter((i) => i.templateId && i.id)
+        .map((i) => [
+          i.templateId as string,
+          { templateId: i.templateId as string, intentId: i.id as string },
+        ])
+    ).values(),
+  ];
+  const defsByTemplate = await loadIntentSettingDefinitions(templateReps);
+
   return mapItems(intents, "Endpoint Security (legacy)", async (item): Promise<IntunePolicy> => {
     const id = item.id as string;
     const displayName = (item.displayName as string) ?? "Untitled";
     const info = templateInfo.get(item.templateId as string);
     const cspArea = info?.area ?? "Endpoint Security";
+    const defs = defsByTemplate.get(item.templateId as string);
+    // Only genuine security/baseline templates get the "(Legacy) Endpoint
+    // Security" label. A rare intent from a non-security template (e.g. a legacy
+    // Office 365 device-config template) is a legacy device configuration, not ES.
+    // When the template is unknown (info absent), default to endpointSecurity --
+    // intents are overwhelmingly ES/baselines.
+    const kind: IntunePolicy["kind"] = info && !info.isSecurity ? "deviceConfiguration" : "endpointSecurity";
 
     // Assignments MUST come from the per-intent sub-collection. The collection's
     // $expand=assignments returns an EMPTY array even for assigned intents
@@ -661,11 +734,11 @@ async function fetchEndpointSecurityIntents(): Promise<IntunePolicy[]> {
     const rawSettings = await graphGetCollection<Record<string, unknown>>(`/deviceManagement/intents/${id}/settings`, true);
     return {
       id,
-      kind: "endpointSecurity",
+      kind,
       displayName,
       description: item.description as string | undefined,
       platform: info?.platform ?? "windows",
-      settings: flattenIntentSettings(rawSettings, cspArea),
+      settings: flattenIntentSettings(rawSettings, cspArea, defs),
       assignedGroupIds: includedGroupIds,
       excludedGroupIds,
       assignmentFilters,

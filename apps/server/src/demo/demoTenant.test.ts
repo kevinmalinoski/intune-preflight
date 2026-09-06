@@ -3,46 +3,51 @@ import { buildAssignmentReport, computeSimulation, listUnassignedPolicies } from
 import { demoTenantData } from "./demoTenant.js";
 
 // The demo tenant is the tool's shop window -- assert it keeps exercising every
-// headline feature so it can't silently go boring as the engine changes.
+// headline feature so it can't silently go boring as the engine changes. All
+// policy names and settings are the real Open Intune Baseline (Windows v3.8 /
+// macOS v1.0); only the assignment layer and the two "CORP" overrides are authored.
 describe("demo tenant", () => {
   const data = demoTenantData();
 
   it("produces a real conflict for a corporate Windows device", () => {
     const sim = computeSimulation(data, { selectedGroupIds: ["grp-corp-win"], platform: "windows" });
-    expect(sim.conflicts.some((c) => c.settingId === "password.minlength")).toBe(true);
+    // OIB AV Configuration ("High") vs the CORP Cloud Protection Tuning override
+    // ("Zero tolerance blocking level") on the same real Defender setting.
+    expect(sim.conflicts.some((c) => c.settingId === "defender.cloudblocklevel")).toBe(true);
   });
 
-  it("produces an overlap and an exclude for a kiosk device", () => {
-    const sim = computeSimulation(data, { selectedGroupIds: ["grp-kiosk"], platform: "windows" });
-    expect(sim.overlaps.length).toBeGreaterThan(0);
-    // Kiosk is explicitly excluded from the feature-update profile.
-    expect(sim.excludedPolicies.some((p) => p.id === "pol-win-feature-update")).toBe(true);
-  });
-
-  it("has an unassigned policy for the Policy Waitlist", () => {
-    expect(listUnassignedPolicies(data, "windows").some((p) => p.id === "pol-win-edge-draft")).toBe(true);
-  });
-
-  it("reads like a real OIB tenant: a rich baseline with the Defender submit-samples conflict", () => {
-    const sim = computeSimulation(data, { selectedGroupIds: [], platform: "windows" });
-    // Rich enough to be representative (the Open Intune Baseline Windows set).
-    expect(sim.settings.length).toBeGreaterThan(100);
-    // The AV Configuration vs Security Baseline "Submit samples consent"
-    // disagreement -- the headline conflict admins actually hit.
-    expect(sim.conflicts.some((c) => c.settingId === "defender.submitsamplesconsent")).toBe(true);
-    // The Waitlist showcases the OIB update rings, not just the one draft.
-    expect(listUnassignedPolicies(data, "windows").length).toBeGreaterThanOrEqual(3);
-  });
-
-  it("surfaces legacy Endpoint Security (intents) policies, merged and compared", () => {
+  it("produces an overlap for a corporate Windows device", () => {
     const sim = computeSimulation(data, { selectedGroupIds: ["grp-corp-win"], platform: "windows" });
-    // Org-wide + corp-override legacy BitLocker intents disagree on the cipher
-    // -> a real conflict, proving legacy intents join Windows conflict detection.
-    expect(sim.conflicts.some((c) => c.settingId === "endpointSecurity:bitlocker_encryptionMethod")).toBe(true);
-    // A legacy Defender Antivirus intent contributes to the merged baseline.
+    // Real-time monitoring is set the same ("Allowed") in both the OIB baseline
+    // and the CORP override -> a redundant overlap, not a conflict.
+    expect(sim.overlaps.some((o) => o.settingId === "defender.allowrealtimemonitoring")).toBe(true);
+  });
+
+  it("applies an exclude-wins carve-out (Pilot ring out of Production)", () => {
+    const sim = computeSimulation(data, { selectedGroupIds: ["grp-ring-pilot"], platform: "windows" });
+    expect(sim.excludedPolicies.some((p) => p.id === "pol-oib-defender-ring3")).toBe(true);
+  });
+
+  it("has unassigned policies for the Policy Waitlist", () => {
+    const waitlist = listUnassignedPolicies(data, "windows");
+    expect(waitlist.some((p) => p.id === "pol-oib-asr-l2-draft")).toBe(true);
+    // The Waitlist showcases the OIB update rings (ASR L2 + UAT ring, at least).
+    expect(waitlist.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("reads like a real OIB tenant: a rich All Devices baseline", () => {
+    const sim = computeSimulation(data, { selectedGroupIds: [], platform: "windows" });
+    // The Open Intune Baseline Windows set is broad enough to be representative.
+    expect(sim.settings.length).toBeGreaterThan(50);
+  });
+
+  it("surfaces legacy Endpoint Security (intents) policies in the merged baseline", () => {
+    const sim = computeSimulation(data, { selectedGroupIds: ["grp-corp-win"], platform: "windows" });
+    // The org-wide legacy BitLocker intent contributes to the merged baseline,
+    // proving legacy intents join the Windows comparison alongside Settings Catalog.
+    expect(sim.settings.some((setting) => setting.settingId === "endpointSecurity:bitlocker_requireEncryption")).toBe(true);
+    // A legacy Defender Antivirus intent on corporate devices also contributes.
     expect(sim.settings.some((setting) => setting.settingId === "endpointSecurity:defenderav_cloudBlockLevel")).toBe(true);
-    // An unassigned legacy Firewall intent is available in the Policy Waitlist.
-    expect(listUnassignedPolicies(data, "windows").some((p) => p.id === "pol-es-firewall-draft")).toBe(true);
   });
 
   it("has an implied membership in the manifest (kiosk-multi implies kiosk)", () => {
@@ -66,6 +71,20 @@ describe("demo tenant", () => {
     // The user-group assignment alone does NOT target the device-focused card.
     const userOnly = computeSimulation(data, { selectedGroupIds: ["grp-ap2-users"], platform: "windows" });
     expect(userOnly.autopilotProfiles).toEqual([]);
+  });
+
+  it("flags a legacy device-config template for the Settings Catalog migration nudge", () => {
+    const report = buildAssignmentReport(data, "windows");
+    expect(report.rows.some((r) => r.policyId === "pol-win-device-restrictions-template" && r.legacyTemplate)).toBe(true);
+  });
+
+  it("surfaces a cross-model overlap (legacy template MS-account block vs the Settings Catalog equivalent)", () => {
+    const sim = computeSimulation(data, { selectedGroupIds: [], platform: "windows" });
+    const finding = sim.crossModel.find((f) => f.cspNode === "accounts/allowmicrosoftaccountconnection");
+    expect(finding).toBeTruthy();
+    // Both block -> a redundant cross-model duplicate, and it's NOT a normal conflict/overlap.
+    expect(finding?.agreement).toBe("same");
+    expect(finding?.entries.some((e) => e.sourceLegacyTemplate)).toBe(true);
   });
 
   it("covers all four OS platforms", () => {

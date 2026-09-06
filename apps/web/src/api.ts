@@ -6,6 +6,15 @@ import type {
   SimulationResult,
   UnassignedPolicy,
 } from "@intune-preflight/shared";
+import { demoApi } from "./demoApi.ts";
+
+/**
+ * When true, the app is the self-contained public demo: it runs the pure engine
+ * over bundled sample data entirely in the browser, with no backend. Set at
+ * build/dev time via VITE_STATIC_DEMO=1. Statically false in the normal build,
+ * so the demo implementation (and the engine it pulls in) is tree-shaken away.
+ */
+export const STATIC_DEMO = import.meta.env.VITE_STATIC_DEMO === "1";
 
 async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(`/api${path}`, { signal });
@@ -40,7 +49,7 @@ export interface ServerStatus {
   loadWarnings?: string[];
 }
 
-export const api = {
+const serverApi = {
   health: () => getJson<ServerStatus>("/health"),
   setMode: async (mode: "demo" | "connected"): Promise<Omit<ServerStatus, "status">> => {
     const res = await fetch("/api/mode", {
@@ -72,3 +81,10 @@ export const api = {
   simulateExportUrl: (inputs: SimulationInputs, format: "json" | "csv") =>
     `/api/simulate/export?${simulationQuery(inputs)}&format=${format}`,
 };
+
+/**
+ * The active API. In the static public demo it's the in-browser implementation;
+ * otherwise the server-backed one. The ternary folds to a constant in each build,
+ * so only the chosen implementation ships.
+ */
+export const api = STATIC_DEMO ? (demoApi as typeof serverApi) : serverApi;

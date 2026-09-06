@@ -1,8 +1,12 @@
 import { useEffect, useState } from "react";
 import type { Platform } from "@intune-preflight/shared";
-import { api } from "./api.ts";
+import { api, STATIC_DEMO } from "./api.ts";
 import { EndpointSimulator } from "./EndpointSimulator.tsx";
 import { AssignmentReport } from "./AssignmentReport.tsx";
+import { SmallScreenNotice } from "./SmallScreenNotice.tsx";
+
+// Public repo, for the "deploy your own / self-host" nudges shown in demo mode.
+const REPO_URL = "https://github.com/kevinmalinoski/intune-preflight";
 
 type Tab = "simulate" | "assignments";
 
@@ -92,6 +96,7 @@ export default function App() {
 
   return (
     <div className="flex h-full flex-col">
+      <SmallScreenNotice />
       {/* Single top bar: brand · view tabs · mode · refresh */}
       <header className="flex items-center gap-5 border-b border-ink-700 bg-ink-900 px-5 py-2.5">
         <div className="flex items-baseline gap-2">
@@ -120,6 +125,22 @@ export default function App() {
             {MODES.map((m) => {
               const active = demo === (m.value === "demo");
               const disabled = m.value === "connected" && !hasCredentials;
+              // Static public demo: there's no backend to connect, so the
+              // "Connected" control becomes a nudge to self-host on GitHub.
+              if (STATIC_DEMO && m.value === "connected") {
+                return (
+                  <a
+                    key={m.value}
+                    href={REPO_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                    title="Connect your own Intune tenant by self-hosting — see the setup on GitHub."
+                    className="rounded px-2.5 py-1 text-xs font-medium text-slate-400 transition-colors hover:text-emerald-300"
+                  >
+                    Connect your tenant ↗
+                  </a>
+                );
+              }
               return (
                 <button
                   key={m.value}
@@ -168,12 +189,35 @@ export default function App() {
 
       {/* Demo banner */}
       {demo && (
-        <div className="flex items-center justify-center gap-2 border-b border-amber-500/20 bg-amber-500/10 px-4 py-1 text-[11px] text-amber-300">
+        <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 border-b border-amber-500/20 bg-amber-500/10 px-4 py-1 text-[11px] text-amber-300">
           <span aria-hidden>🧪</span>
-          <span>
-            <span className="font-medium">Demo data</span> — a synthetic sample tenant, not connected to Intune.
-            {hasCredentials ? " Switch to Connected to use your tenant." : " Add a .env to connect your own tenant."}
-          </span>
+          {STATIC_DEMO ? (
+            <span>
+              <span className="font-medium">Sample tenant</span> — synthetic data modelled on the{" "}
+              <a
+                href="https://github.com/SkipToTheEndpoint/OpenIntuneBaseline"
+                target="_blank"
+                rel="noreferrer"
+                className="underline decoration-amber-400/40 underline-offset-2 hover:text-amber-200"
+              >
+                Open Intune Baseline
+              </a>
+              . Nothing here is connected to a real tenant.{" "}
+              <a
+                href={REPO_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="font-medium text-emerald-300 underline decoration-emerald-400/40 underline-offset-2 hover:text-emerald-200"
+              >
+                Deploy your own to see your Intune →
+              </a>
+            </span>
+          ) : (
+            <span>
+              <span className="font-medium">Demo data</span> — a synthetic sample tenant, not connected to Intune.
+              {hasCredentials ? " Switch to Connected to use your tenant." : " Add a .env to connect your own tenant."}
+            </span>
+          )}
         </div>
       )}
       {modeError && (

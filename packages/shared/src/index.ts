@@ -40,6 +40,28 @@ export interface CspSetting {
    * for OMA-URI the settingId already is the path, and legacy profiles have none.
    */
   cspPath?: string;
+  /**
+   * An explicit Microsoft Learn documentation URL for this setting, when the
+   * source provides one directly (legacy Endpoint Security intents carry a
+   * `documentationUrl` on their setting definition). Preferred over the link
+   * derived from `cspPath`/`settingId`, which is only a best-effort guess.
+   */
+  docUrl?: string;
+  /**
+   * A model-agnostic canonical CSP identity (e.g. "accounts/allowmicrosoftaccountconnection")
+   * shared across policy models when known: derived from the real CSP path for
+   * Settings Catalog / OMA-URI, or from the template→CSP crosswalk for a legacy
+   * device-config template property. Lets the SAME underlying CSP configured via
+   * different models be cross-detected (see CrossModelFinding). Absent when no
+   * canonical identity is known -- most legacy settings have none.
+   */
+  cspNode?: string;
+  /**
+   * For a crosswalked legacy-template setting: its raw value mapped into the
+   * canonical CSP value space (e.g. `microsoftAccountBlocked: "true"` -> "Block"),
+   * so cross-model agreement can be judged against a Settings Catalog value.
+   */
+  cspNodeValue?: string;
 }
 
 /** An Intune Assignment Filter, used to scope an assignment to devices matching a rule (e.g. "Kiosk Devices"). */
@@ -70,6 +92,14 @@ export interface IntunePolicy {
   excludedGroupIds: string[];
   /** Assignment Filters attached to specific group assignments above, scoping them to matching devices */
   assignmentFilters: AssignmentFilterRef[];
+  /**
+   * True for the deprecated device-configuration TEMPLATE types Microsoft is
+   * migrating to the Settings Catalog -- Device restrictions/features, Endpoint
+   * protection, Extensions. Surfaced as a "Legacy template" flag nudging a
+   * Settings Catalog migration. The still-current templates (certificates, VPN,
+   * Wi-Fi, email, wired network) are deliberately NOT flagged.
+   */
+  legacyTemplate?: boolean;
 }
 
 /** One high-level Autopilot profile setting shown on the simulation card. */
@@ -137,6 +167,39 @@ export interface BaselineSetting extends CspSetting {
   sourcePolicyId: string;
   sourcePolicyName: string;
   sourceKind: PolicyKind;
+  /** True when the source policy is a deprecated device-config template. */
+  sourceLegacyTemplate?: boolean;
+}
+
+/**
+ * The SAME underlying CSP configured by two or more policies of DIFFERENT models
+ * (Settings Catalog, legacy device-config template, OMA-URI custom) -- which the
+ * per-model settingId keying can't see, so it never shows as a normal
+ * conflict/overlap. Best-effort: only settings with a known canonical `cspNode`
+ * participate (Settings Catalog + OMA-URI via their real path, plus the curated
+ * template→CSP crosswalk), so this checks common settings, not every one.
+ */
+export interface CrossModelFinding {
+  /** Canonical CSP identity shared by the entries. */
+  cspNode: string;
+  displayName: string;
+  /**
+   * How the entries' canonical values compare: "differs" = a real cross-model
+   * conflict; "same" = redundant cross-model overlap; "unknown" = a value we
+   * couldn't map into a common space, so verify manually.
+   */
+  agreement: "same" | "differs" | "unknown";
+  entries: {
+    settingId: string;
+    /** The value as shown in its own model (raw), for display. */
+    value: string;
+    /** The value mapped to the canonical CSP space when known, for comparison. */
+    canonicalValue?: string;
+    sourcePolicyId: string;
+    sourcePolicyName: string;
+    sourceKind: PolicyKind;
+    sourceLegacyTemplate?: boolean;
+  }[];
 }
 
 export interface GroupSummary {
@@ -180,6 +243,8 @@ export interface AssignmentReportRow {
   policyName: string;
   kind: PolicyKind;
   platform: Platform;
+  /** True for a deprecated device-config template (see IntunePolicy.legacyTemplate). */
+  legacyTemplate?: boolean;
   assignment: "Include" | "Exclude";
   groupId: string;
   groupName: string;
@@ -236,6 +301,8 @@ export interface SimulationPolicy {
   id: string;
   displayName: string;
   kind: PolicyKind;
+  /** True for a deprecated device-config template (see IntunePolicy.legacyTemplate). */
+  legacyTemplate?: boolean;
   status: "included" | "excluded";
   /**
    * How many settings this policy *itself* defines -- independent of the merged
@@ -268,6 +335,13 @@ export interface SimulationResult {
   settings: BaselineSetting[];
   conflicts: ConflictingSetting[];
   overlaps: PolicyOverlap[];
+  /**
+   * Cross-MODEL findings: the same CSP configured via different policy models
+   * (e.g. a legacy Device Restrictions template AND a Settings Catalog policy),
+   * which the per-model `conflicts`/`overlaps` above can't detect. Best-effort /
+   * common-settings only. Windows-only, like conflicts/overlaps.
+   */
+  crossModel: CrossModelFinding[];
 }
 
 /**
@@ -321,6 +395,19 @@ export function isGroupTagRule(membershipRule: string | undefined): boolean {
 }
 
 /**
+ * A compact display of the Group Tag(s) a rule is scoped to, for showing inline
+ * next to a group in the picker -- e.g. `-startsWith "[OrderID]:KIOSK"` -> "KIOSK*"
+ * (the `*` marks a prefix match), `-eq "[OrderID]:KIOSK-01"` -> "KIOSK-01". Returns
+ * undefined when the rule has no `[OrderID]` clause.
+ */
+export function groupTagScope(membershipRule: string | undefined): string | undefined {
+  if (!membershipRule) return undefined;
+  const orderIds = parsePhysicalIdClauses(membershipRule).filter((c) => c.tag === "orderid");
+  if (orderIds.length === 0) return undefined;
+  return orderIds.map((c) => (c.op === "startswith" ? `${c.value}*` : c.value)).join(", ");
+}
+
+/**
  * Whether a device carrying Autopilot Group Tag `groupTag` would be a member
  * of the group with this membership rule, evaluated over its `[OrderID]`
  * (Group Tag) clauses:
@@ -352,6 +439,54 @@ export function groupTagMatchesRule(membershipRule: string | undefined, groupTag
   };
   const combinesWithAnd = /\)\s+and\s+\(/i.test(membershipRule);
   return combinesWithAnd ? clauses.every(evaluate) : clauses.some(evaluate);
+}
+
+/**
+ * Whether a membership rule references device/user properties BEYOND the
+ * `devicePhysicalIds` (Group Tag / Autopilot) clauses -- e.g. `device.deviceOSType`,
+ * `device.deviceCategory`, an `extensionAttribute`. A simulated Group Tag can't
+ * decide those, so a match that hinges on them isn't fully evaluated.
+ */
+export function ruleReferencesOtherProperties(membershipRule: string | undefined): boolean {
+  if (!membershipRule) return false;
+  const stripped = membershipRule.replace(/device\.devicePhysicalIDs?\s+-any\s*\([^)]*\)/gi, " ");
+  return /\b(?:device|user)\.[a-zA-Z]/.test(stripped);
+}
+
+/** How a dynamic group's rule relates to a simulated Group Tag (for the picker). */
+export interface GroupTagMatch {
+  /**
+   * "match": the Group Tag confidently satisfies the rule's `[OrderID]` clauses
+   * (auto-selected). "conditional": an `[OrderID]` clause IS satisfied by the tag
+   * but the combined rule can't be confirmed by the flat evaluator (nesting /
+   * multiple ANDed tags) -- surface it, don't auto-select. "none": tag not referenced.
+   */
+  state: "match" | "conditional" | "none";
+  /**
+   * False when the rule also hinges on properties a Group Tag can't decide (see
+   * ruleReferencesOtherProperties) -- the result is best-effort on the tag alone.
+   */
+  fullyEvaluated: boolean;
+}
+
+/**
+ * Classify a dynamic group's membership rule against a simulated Autopilot Group
+ * Tag. Practical by design: the Group Tag ([OrderID]) is evaluated; other device
+ * properties are NOT guessed -- they only downgrade `fullyEvaluated` so the UI can
+ * show the rule and let a human confirm, rather than over-claiming a match.
+ */
+export function classifyGroupTagMatch(membershipRule: string | undefined, groupTag: string): GroupTagMatch {
+  const tag = groupTag.trim();
+  if (!membershipRule || !tag) return { state: "none", fullyEvaluated: true };
+  const gt = tag.toLowerCase();
+  const orderIdSatisfied = parsePhysicalIdClauses(membershipRule).some(
+    (c) => c.tag === "orderid" && (c.op === "eq" ? gt === c.value.toLowerCase() : gt.startsWith(c.value.toLowerCase()))
+  );
+  if (!orderIdSatisfied) return { state: "none", fullyEvaluated: true };
+  return {
+    state: groupTagMatchesRule(membershipRule, tag) ? "match" : "conditional",
+    fullyEvaluated: !ruleReferencesOtherProperties(membershipRule),
+  };
 }
 
 /**

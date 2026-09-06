@@ -35,18 +35,19 @@ Three things happen automatically:
 
 ## Autopilot Group Tag simulation (V1)
 
-Flag the endpoint as an Autopilot device and enter its **Group Tag**. The tool auto-selects the dynamic groups whose Group Tag rule matches.
+Flag the endpoint as an Autopilot device and enter its **Group Tag**. Each dynamic group is classified against the tag and the list re-sorts so the relevant ones rise to the top (selected → matches → conditional → rest), with each group's `[OrderID]` scope shown inline (e.g. `KIOSK*`) and matches fading in.
 
 ![Autopilot Group Tag simulation](img/03-autopilot-group-tag.png)
 
-_Set the Group Tag and the matching dynamic groups are selected for you, each flagged so you can verify it._
+_Set the Group Tag and the matching dynamic groups float to the top and select themselves, each badged so you can verify it._
 
-> **⚠️ Known restriction — dynamic group auto-selection.**
-> Auto-selection reads **only** the `[OrderID]` (Group Tag) and `[ZTDId]` (Autopilot-joined) clauses inside `device.devicePhysicalIds`, using `-eq` / `-startsWith` (plus `-contains` for `[ZTDId]`).
->
-> Any **other** condition in a membership rule — device model, OS version, enrollment profile, ownership — is **ignored**. A group whose membership actually comes from one of those conditions may be **missed**, and a group with extra narrowing conditions may be **over-matched**.
->
-> Auto-selected and implied groups are always surfaced in the UI, and you can always select or deselect groups manually. A full rule-expression evaluator is the headline item for v2 — see [ROADMAP.md](../ROADMAP.md).
+**Three match states — surfaced, not guessed:**
+
+- **`group tag`** — the rule's `[OrderID]` clause confidently matches the tag, and nothing else in the rule needs evaluating. **Auto-selected.**
+- **`+ conditions`** — the tag matches, but the rule *also* hinges on a property a Group Tag can't decide (`deviceOSType`, `deviceCategory`, enrollment profile, …). Still auto-selected (as before), but flagged with the **full membership rule shown** so you can verify the rest.
+- **`conditional`** — the tag is referenced but the flat evaluator can't confirm the combined rule (e.g. two ANDed `[OrderID]` tags). **Surfaced but not auto-selected** — review the rule and tick it if it applies.
+
+> **Why not a full evaluator?** Auto-selection reads the `[OrderID]` (Group Tag) and `[ZTDId]` (Autopilot-joined) clauses in `device.devicePhysicalIds` (`-eq` / `-startsWith`, plus `-contains` for `[ZTDId]`). Other device properties can't be evaluated from a Group Tag alone, so rather than pretend to be Entra's membership engine, the tool **shows the rule and the match state** and lets you judge. A real membership-rule evaluator is a post-2.0 accuracy upgrade — see [ROADMAP.md](../ROADMAP.md).
 
 **`or` is handled correctly, with operator precedence.** A bare `[ZTDId]` clause is satisfied by *every* Autopilot-registered device, so whenever it stands as a top-level `or` branch the group is selected — any satisfied branch grants membership. Entra applies standard precedence (`and` binds tighter than `or`), so this very common real-tenant shape resolves as `(ownership and trust and appId and osType) or (ZTDId)` — and an Autopilot device is a member via that last branch regardless of the `and` chain:
 
@@ -135,7 +136,13 @@ When two applied policies touch the same setting, the tool distinguishes:
 
 _Genuine conflicts and redundant overlaps, surfaced separately with every contributing policy._
 
-> **Windows only.** Value-level comparison isn't trustworthy on other platforms yet — macOS `.mobileconfig` profiles share metadata that reads as false overlaps, and the common one-concern-per-macOS-compliance-policy pattern produces false conflicts. Both flags are therefore suppressed off Windows. **The merged baseline itself still renders on every platform** — only the conflict/overlap flags are Windows-scoped. See [ROADMAP.md](../ROADMAP.md).
+### Legacy policy collisions (cross-model)
+
+Native conflict/overlap detection keys each setting on an id derived from its policy **model**, and the models don't share an id space — so the same underlying CSP configured through a **legacy device-config template** *and* a **Settings Catalog** policy (or an OMA-URI custom profile) slips past it entirely, reporting `0 conflicts` even though the device gets both. This is common mid-migration.
+
+The tool catches these separately as **legacy policy collisions**: each setting resolves a canonical `cspNode` — exact for Settings Catalog and OMA-URI (they carry a real CSP path), and via a curated, Microsoft-docs-grounded **template → CSP crosswalk** for legacy templates — and any CSP touched by two different models is surfaced as a **duplicate** (same value), **conflict** (different), or **verify** (values that can't be compared). A count sits next to conflicts/overlaps, a **Legacy collisions** filter lists them, and a one-line disclaimer nudges migrating the legacy template to the Settings Catalog (the real fix). It's **best-effort over common settings** — the crosswalk is a hand-verified set, not every CSP.
+
+> **Windows only.** Value-level comparison isn't trustworthy on other platforms yet — macOS `.mobileconfig` profiles share metadata that reads as false overlaps, and the common one-concern-per-macOS-compliance-policy pattern produces false conflicts. Both flags (and cross-model collisions) are therefore suppressed off Windows. **The merged baseline itself still renders on every platform** — only the conflict/overlap flags are Windows-scoped. See [ROADMAP.md](../ROADMAP.md).
 
 ## Autopilot profile associations (V1 & V2)
 

@@ -416,6 +416,7 @@ export function AssignmentReport({
         </div>
         <a
           href={api.assignmentReportCsvUrl(os)}
+          download="policy-group-assignments.csv"
           className="rounded-md border border-emerald-400/50 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20"
         >
           Download CSV
@@ -615,6 +616,14 @@ export function AssignmentReport({
                                     {r.policyName}
                                   </span>
                                   <div className="flex shrink-0 items-center justify-end gap-1.5">
+                                    {r.legacyTemplate && (
+                                      <span
+                                        className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] text-amber-300"
+                                        title="Legacy device-configuration template — Microsoft is migrating these to the Settings Catalog and deprecating new template creation. Consider rebuilding it as a Settings Catalog policy. Note: its settings aren't cross-detected for conflicts/overlaps against Settings Catalog policies."
+                                      >
+                                        Legacy template
+                                      </span>
+                                    )}
                                     {inheritedFrom && (
                                       <span
                                         className={`rounded px-1.5 py-0.5 text-[9px] ${

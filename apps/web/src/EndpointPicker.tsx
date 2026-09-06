@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { groupTagMatchesRule, isGroupTagRule, isAutopilotJoinedRule } from "@intune-preflight/shared";
+import { classifyGroupTagMatch, groupTagScope, isGroupTagRule, isAutopilotJoinedRule } from "@intune-preflight/shared";
 import type { AssignmentFilter, GroupSummary, Platform } from "@intune-preflight/shared";
 
 const PLATFORM_OPTIONS: { value: Platform; label: string }[] = [
@@ -55,6 +55,20 @@ export function EndpointPicker({
   );
 
   const trimmedGroupTag = groupTag.trim();
+
+  // Float the relevant groups up: selected first, then confident Group Tag
+  // matches, then conditional references, then the rest alphabetically. Re-sorts
+  // as you select or type a tag, so what matters rises to the top.
+  const sortedGroups = useMemo(() => {
+    const rankOf = (g: GroupSummary): number => {
+      if (selectedGroupIds.includes(g.id)) return 0;
+      const state = trimmedGroupTag ? classifyGroupTagMatch(g.membershipRule, trimmedGroupTag).state : "none";
+      return state === "match" ? 1 : state === "conditional" ? 2 : 3;
+    };
+    return [...filteredGroups].sort(
+      (a, b) => rankOf(a) - rankOf(b) || a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" })
+    );
+  }, [filteredGroups, selectedGroupIds, trimmedGroupTag]);
 
   const platformFilters = useMemo(() => filters.filter((f) => f.platform === platform), [filters, platform]);
 
@@ -204,9 +218,18 @@ export function EndpointPicker({
             placeholder="Search groups…"
             className="mb-1 w-full rounded-md border border-ink-700 bg-ink-800 px-2.5 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 focus:border-sky-400 focus:outline-none"
           />
-          <div className="overflow-y-auto rounded-md border border-ink-700" style={{ maxHeight: "140px" }}>
-            {filteredGroups.map((g) => {
-              const isTagMatch = Boolean(trimmedGroupTag) && groupTagMatchesRule(g.membershipRule, trimmedGroupTag);
+          <div className="overflow-y-auto rounded-md border border-ink-700" style={{ maxHeight: "176px" }}>
+            {sortedGroups.map((g) => {
+              const tm = trimmedGroupTag
+                ? classifyGroupTagMatch(g.membershipRule, trimmedGroupTag)
+                : ({ state: "none", fullyEvaluated: true } as const);
+              const isMatch = tm.state === "match";
+              const isConditional = tm.state === "conditional";
+              const tagScope = groupTagScope(g.membershipRule);
+              const tagActive = isMatch || isConditional;
+              // Show the rule when we couldn't fully decide it from the Group Tag
+              // (conditional, or a match that also hinges on other properties).
+              const showRule = isConditional || (isMatch && !tm.fullyEvaluated);
               const isAutopilotJoined = isAutopilotJoinedRule(g.membershipRule);
               const title = isGroupTagRule(g.membershipRule)
                 ? `Autopilot Group Tag group — rule: ${g.membershipRule}`
@@ -221,9 +244,9 @@ export function EndpointPicker({
               return (
                 <label
                   key={g.id}
-                  className={`flex items-start gap-2 border-b border-ink-800 px-2.5 py-1.5 text-xs last:border-b-0 hover:bg-ink-800 ${
-                    locked ? "cursor-default" : "cursor-pointer"
-                  }`}
+                  className={`flex items-start gap-2.5 border-b border-l-2 border-ink-800 px-2.5 py-2 text-xs last:border-b-0 transition-colors ${
+                    tagActive ? "border-l-amber-400/60 bg-amber-500/[0.06]" : "border-l-transparent"
+                  } ${locked ? "cursor-default" : "cursor-pointer"} hover:bg-ink-800`}
                   title={
                     locked
                       ? `Locked on by the “Autopilot device” checkbox — uncheck it to change. Rule: ${g.membershipRule}`
@@ -237,26 +260,73 @@ export function EndpointPicker({
                     onChange={() => onToggleGroup(g.id)}
                     className="mt-0.5 shrink-0 accent-sky-400 disabled:opacity-70"
                   />
-                  <span className="min-w-0 flex-1 break-words leading-snug text-slate-200">{g.displayName}</span>
-                  {isTagMatch && (
-                    <span className="shrink-0 rounded bg-amber-500/20 px-1 py-0.5 text-[9px] font-medium text-amber-300">
-                      group tag
-                    </span>
-                  )}
-                  {isAutopilotJoined && isAutopilotDevice && (
-                    <span className="shrink-0 rounded bg-amber-500/20 px-1 py-0.5 text-[9px] font-medium text-amber-300">
-                      🔒 autopilot
-                    </span>
-                  )}
-                  {g.isDynamic && (
-                    <span className="shrink-0 rounded bg-violet-500/20 px-1 py-0.5 text-[9px] font-medium text-violet-300">
-                      dynamic
-                    </span>
-                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start gap-1.5">
+                      <span className="min-w-0 flex-1 break-words leading-snug text-slate-200">{g.displayName}</span>
+                      {/* Tag scope pill — subsumes the "group tag" label: amber when the
+                          entered tag matches, muted otherwise; always exposes the [OrderID] scope. */}
+                      {tagScope && (
+                        <span
+                          className={`inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-medium leading-none ring-1 ring-inset ${
+                            tagActive
+                              ? "animate-fade-in bg-amber-500/20 text-amber-200 ring-amber-400/30"
+                              : "text-slate-500 ring-ink-700"
+                          }`}
+                          title={tagActive ? `Group Tag match — scope ${tagScope}` : `Group Tag scope ${tagScope}`}
+                        >
+                          <svg viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" strokeWidth="2.4" className="shrink-0">
+                            <path d="M20.6 13.4 12 22l-8-8V4h10l6.6 6.6a2 2 0 0 1 0 2.8Z" strokeLinejoin="round" />
+                            <circle cx="7.5" cy="7.5" r="1.3" fill="currentColor" stroke="none" />
+                          </svg>
+                          {tagScope}
+                        </span>
+                      )}
+                      {isMatch && !tm.fullyEvaluated && (
+                        <span
+                          className="animate-fade-in inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[9px] font-medium leading-none text-amber-300/90 ring-1 ring-inset ring-amber-400/40"
+                          title="Matched on the Group Tag, but this rule also depends on properties a Group Tag can't decide — verify against the rule."
+                        >
+                          + conditions
+                        </span>
+                      )}
+                      {isConditional && (
+                        <span
+                          className="animate-fade-in inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[9px] font-medium leading-none text-amber-300/90 ring-1 ring-inset ring-amber-400/40"
+                          title="The Group Tag is referenced in this rule, but full membership can't be confirmed from the tag alone — review the rule and select manually if it applies."
+                        >
+                          conditional
+                        </span>
+                      )}
+                      {isAutopilotJoined && isAutopilotDevice && (
+                        <span
+                          className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-medium leading-none text-amber-300 ring-1 ring-inset ring-amber-400/20"
+                          title="Auto-included by the Autopilot device checkbox."
+                        >
+                          🔒 autopilot
+                        </span>
+                      )}
+                      {g.isDynamic && (
+                        <span
+                          className="inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[9px] font-medium leading-none text-slate-500 ring-1 ring-inset ring-ink-700"
+                          title="Dynamic membership group"
+                        >
+                          dynamic
+                        </span>
+                      )}
+                    </div>
+                    {showRule && g.membershipRule && (
+                      <div
+                        className="mt-1 truncate border-l border-ink-700 pl-2 font-mono text-[10px] text-slate-500"
+                        title={g.membershipRule}
+                      >
+                        {g.membershipRule}
+                      </div>
+                    )}
+                  </div>
                 </label>
               );
             })}
-            {filteredGroups.length === 0 && (
+            {sortedGroups.length === 0 && (
               <div className="px-3 py-2 text-center text-xs text-slate-500">
                 {loading ? "Loading groups from Intune…" : "No groups found."}
               </div>
@@ -280,7 +350,7 @@ export function EndpointPicker({
               No filters for this platform
             </div>
           ) : (
-            <div className="overflow-y-auto rounded-md border border-ink-700" style={{ maxHeight: "140px" }}>
+            <div className="overflow-y-auto rounded-md border border-ink-700" style={{ maxHeight: "176px" }}>
               {platformFilters.map((f) => (
                 <label
                   key={f.id}

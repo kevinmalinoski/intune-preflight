@@ -1,4 +1,5 @@
 import type { CspSetting, Platform } from "@intune-preflight/shared";
+import { crosswalkTemplateSetting, normalizeCspNode } from "./crosswalk.js";
 
 // Metadata fields present on most Graph device-management resources that aren't
 // actual configuration settings -- excluded when flattening a policy into CSP settings.
@@ -130,35 +131,71 @@ function flattenOmaSettings(omaSettings: Array<Record<string, unknown>>): CspSet
       cspArea: "Custom (OMA-URI)",
       displayName: (oma["displayName"] as string) || lastSegment,
       value,
+      // The OMA-URI IS a real CSP path -> canonical node for cross-model detection.
+      cspNode: normalizeCspNode(uri),
     });
   }
   return settings;
 }
 
 /**
- * A compliance policy's Graph resource is a FIXED, flat schema: Graph serializes
- * every property whether or not the admin touched it, populating the untouched
- * ones with their schema default. Unlike a Settings Catalog policy (which only
- * returns configured settings) or a legacy config profile (which uses the
- * `"notConfigured"` sentinel), a compliance policy has no "unset" marker -- the
- * default IS "not enforced": `false` for booleans, and `"notConfigured"` /
- * `"deviceDefault"` / `"unavailable"` for the enum fields.
+ * Legacy "template" profiles -- device restrictions / general configuration,
+ * endpoint protection, and compliance -- have a FIXED, flat Graph schema:
+ * every property is serialized whether or not the admin touched it, untouched
+ * ones carrying their schema default. Unlike a Settings Catalog policy (which
+ * returns only configured settings), these have no reliable "unset" marker other
+ * than the default value itself: `false` for the Block/Require/Disable/Hide/Allow
+ * toggles (an unchecked box in the Intune UI), and `"notConfigured"` /
+ * `"userDefined"` / `"deviceDefault"` / `"unavailable"` for the enum fields.
  *
- * So these values represent a rule the policy does NOT enforce, and emitting them
- * as configured settings is what makes the baseline "hallucinate" settings a
- * macOS/iOS compliance policy never set -- and, across the OIB-style pattern of
- * one-concern-per-policy, invents cross-policy conflicts (policy A requires
- * encryption, policy B "sets" storageRequireEncryption=false by default -> a
- * false conflict, when B simply doesn't evaluate encryption). Drop them so a
- * compliance policy contributes only the rules it actually enforces.
+ * These represent settings the profile does NOT configure, so emitting them makes
+ * the baseline "hallucinate" hundreds of settings the admin never set -- e.g. a
+ * Device Restrictions profile that blocks 9 things reports ~200 -- and invents
+ * cross-policy conflicts Intune itself never flags (an unchecked toggle doesn't
+ * apply or conflict). Drop them so the profile contributes only what it enforces.
  */
-function isUnenforcedComplianceDefault(value: unknown): boolean {
+function isUnsetTemplateDefault(value: unknown): boolean {
   if (value === false) return true;
   if (typeof value === "string") {
     const v = value.toLowerCase();
-    return v === "notconfigured" || v === "devicedefault" || v === "unavailable";
+    return v === "notconfigured" || v === "userdefined" || v === "devicedefault" || v === "unavailable";
   }
   return false;
+}
+
+/**
+ * Whether a resource is one of those fixed-schema restriction/protection/
+ * compliance template types (Windows/iOS/Android/macOS *General* device
+ * configuration, *EndpointProtection*, any *CompliancePolicy*), so the unset
+ * defaults above should be dropped. Deliberately NOT applied to types like
+ * Windows Update rings, where a boolean `false` (e.g. `allowWindows11Upgrade`)
+ * is a genuine enforced value rather than an unchecked restriction.
+ */
+function isFixedSchemaTemplateType(odataType: string | undefined): boolean {
+  const t = (odataType ?? "").toLowerCase();
+  return t.includes("general") || t.includes("endpointprotection") || t.includes("compliancepolicy");
+}
+
+/**
+ * Whether a device configuration is one of the deprecated TEMPLATE types
+ * Microsoft is migrating to the Settings Catalog -- Device restrictions/features
+ * (`*GeneralDeviceConfiguration` / `windows10GeneralConfiguration`,
+ * `*DeviceFeaturesConfiguration`), Endpoint protection
+ * (`windows10EndpointProtectionConfiguration`) and Extensions
+ * (`macOSExtensionsConfiguration`). Per Microsoft's own guidance these "will be
+ * migrated to use the settings catalog policy type and the ability to create new
+ * templates will be deprecated." The still-current templates (certificates, VPN,
+ * Wi-Fi, email, wired network) are deliberately excluded. Only ever called on
+ * `deviceConfigurations` items, so a bare "general" match is unambiguous there.
+ */
+export function isLegacyTemplateType(odataType: string | undefined): boolean {
+  const t = (odataType ?? "").toLowerCase();
+  return (
+    t.includes("general") ||
+    t.includes("devicefeatures") ||
+    t.includes("endpointprotection") ||
+    t.includes("extensionsconfiguration")
+  );
 }
 
 export function flattenToCspSettings(raw: Record<string, unknown>): CspSetting[] {
@@ -175,16 +212,18 @@ export function flattenToCspSettings(raw: Record<string, unknown>): CspSetting[]
   // singleton system-config types keep a shared "<type>:<key>" id so genuine
   // cross-policy disagreements are still detected.
   const additive = isAdditivePolicyType(raw["@odata.type"] as string | undefined);
-  const isCompliance = ((raw["@odata.type"] as string) ?? "").toLowerCase().includes("compliancepolicy");
+  // Fixed-schema template profiles (device restrictions/general, endpoint
+  // protection, compliance) serialize every property with its default, so their
+  // unset defaults must be dropped -- otherwise a profile reports settings it
+  // never configured (see isUnsetTemplateDefault / isFixedSchemaTemplateType).
+  const suppressUnsetDefaults = isFixedSchemaTemplateType(raw["@odata.type"] as string | undefined);
   const policyId = (raw["id"] as string) ?? "";
   const settings: CspSetting[] = [];
   for (const [key, value] of Object.entries(raw)) {
     if (isNonSettingKey(key)) continue;
-    // A compliance policy's schema defaults mean "not enforced", not "configured
-    // to this value" -- drop them so the policy only contributes real rules (see
-    // isUnenforcedComplianceDefault). Applied before stringify so `false` booleans
-    // and enum sentinels are caught, not just null/empty.
-    if (isCompliance && isUnenforcedComplianceDefault(value)) continue;
+    // Drop the schema defaults before stringify, so `false` booleans and enum
+    // sentinels are caught, not just null/empty.
+    if (suppressUnsetDefaults && isUnsetTemplateDefault(value)) continue;
     const stringValue = stringifyValue(value);
     if (stringValue === undefined) continue;
     // "notConfigured" is Intune's sentinel for "this legacy setting isn't set".
@@ -192,11 +231,17 @@ export function flattenToCspSettings(raw: Record<string, unknown>): CspSetting[]
     // of conflict/overlap detection -- a policy that leaves a setting unset does
     // not actually disagree with one that sets it.
     if (stringValue.toLowerCase() === "notconfigured") continue;
+    // Legacy template properties carry no CSP path; the crosswalk resolves the
+    // canonical node + mapped value for the (curated) common ones, so a template
+    // and a Settings Catalog policy setting the same CSP can be cross-detected.
+    const cw = crosswalkTemplateSetting(raw["@odata.type"] as string | undefined, key, stringValue);
     settings.push({
       settingId: additive ? `${typeKey}:${policyId}:${key}` : `${typeKey}:${key}`,
       cspArea,
       displayName: friendlyLabel(key),
       value: stringValue,
+      cspNode: cw?.cspNode,
+      cspNodeValue: cw?.cspNodeValue,
     });
   }
   return settings;
@@ -325,7 +370,16 @@ export function flattenSettingsCatalogEntries(
         const baseUri = def?.["baseUri"] as string | undefined;
         const offsetUri = def?.["offsetUri"] as string | undefined;
         const cspPath = baseUri ? `${baseUri}${offsetUri ?? ""}` : undefined;
-        bySettingId.set(definitionId, { settingId: definitionId, cspArea: area, displayName, value, cspPath });
+        bySettingId.set(definitionId, {
+          settingId: definitionId,
+          cspArea: area,
+          displayName,
+          value,
+          cspPath,
+          // The real CSP path -> canonical node, so a Settings Catalog setting can
+          // cross-detect against an OMA-URI (or crosswalked template) same-CSP setting.
+          cspNode: normalizeCspNode(cspPath),
+        });
       }
     }
     // Settings Catalog settings are hierarchical -- a choice or group can carry
@@ -433,7 +487,58 @@ function intentScalarValue(inst: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
-export function flattenIntentSettings(instances: Array<Record<string, unknown>>, cspArea: string): CspSetting[] {
+/**
+ * A legacy intent template setting definition, resolved from Graph
+ * `settingDefinitions`: the real Intune display name, an optional direct docs
+ * URL, and (for enum settings) the raw-value -> human-label map so a stored code
+ * like "xtsAes256" reads as "AES 256bit XTS", matching the Settings Catalog.
+ */
+export interface IntentSettingDef {
+  displayName?: string;
+  documentationUrl?: string;
+  valueLabels?: Map<string, string>;
+}
+
+/**
+ * Index a template's flat `settingDefinitions` list by `definitionId` -- Graph
+ * flattens parent complex settings and their nested children into one array, so
+ * one pass captures every setting's display name, docs URL and enum value labels.
+ */
+export function indexIntentSettingDefinitions(defs: Array<Record<string, unknown>>): Map<string, IntentSettingDef> {
+  const byId = new Map<string, IntentSettingDef>();
+  for (const d of defs) {
+    const id = d["id"] as string | undefined;
+    if (!id) continue;
+    let valueLabels: Map<string, string> | undefined;
+    for (const c of (d["constraints"] as Array<Record<string, unknown>> | undefined) ?? []) {
+      if (!((c["@odata.type"] as string | undefined) ?? "").includes("EnumConstraint")) continue;
+      for (const v of (c["values"] as Array<Record<string, unknown>> | undefined) ?? []) {
+        const raw = v["value"];
+        const label = v["displayName"] as string | undefined;
+        // Skip the null/"notConfigured" placeholder rows -- unset settings are dropped anyway.
+        if (typeof raw === "string" && raw && label) (valueLabels ??= new Map()).set(raw, label);
+      }
+    }
+    byId.set(id, {
+      displayName: d["displayName"] as string | undefined,
+      documentationUrl: (d["documentationUrl"] as string | undefined) || undefined,
+      valueLabels,
+    });
+  }
+  return byId;
+}
+
+/**
+ * @param defs Optional map of `definitionId` -> its resolved template definition
+ * (real name + enum value labels). Present names/values are used; anything
+ * missing falls back to the `intentSettingName` heuristic and the raw value, so a
+ * failed/partial definitions fetch degrades gracefully rather than dropping data.
+ */
+export function flattenIntentSettings(
+  instances: Array<Record<string, unknown>>,
+  cspArea: string,
+  defs?: Map<string, IntentSettingDef>
+): CspSetting[] {
   const bySettingId = new Map<string, CspSetting>();
   const visit = (inst: Record<string, unknown>): void => {
     const definitionId = inst["definitionId"] as string | undefined;
@@ -443,14 +548,17 @@ export function flattenIntentSettings(instances: Array<Record<string, unknown>>,
       children.forEach(visit);
       return;
     }
-    const value = intentScalarValue(inst);
-    if (value === undefined) return;
+    const raw = intentScalarValue(inst);
+    if (raw === undefined) return;
     // "notConfigured" is Intune's sentinel for "this setting isn't set" -- drop it
     // so unset defaults stay out of the baseline and out of conflict detection.
-    if (value.toLowerCase() === "notconfigured") return;
+    if (raw.toLowerCase() === "notconfigured") return;
     const settingId = `endpointSecurity:${definitionId}`;
     if (bySettingId.has(settingId)) return;
-    bySettingId.set(settingId, { settingId, cspArea, displayName: intentSettingName(definitionId), value });
+    const def = defs?.get(definitionId);
+    const displayName = def?.displayName ?? intentSettingName(definitionId);
+    const value = def?.valueLabels?.get(raw) ?? raw;
+    bySettingId.set(settingId, { settingId, cspArea, displayName, value, docUrl: def?.documentationUrl });
   };
   for (const inst of instances) visit(inst);
   return [...bySettingId.values()];
@@ -466,6 +574,23 @@ export function flattenIntentSettings(instances: Array<Record<string, unknown>>,
 export function platformFromIntentTemplate(platformType: string | undefined): Platform {
   const p = classifyPlatform(platformType);
   return p === "other" ? "windows" : p;
+}
+
+/**
+ * Whether a `deviceManagement/templates` entry is a security / baseline template
+ * -- i.e. an intent built from it is genuinely Endpoint Security or a Security
+ * Baseline (BitLocker, Defender, Firewall, ASR, the MDM/Edge/Defender baselines,
+ * ...) rather than a legacy device-configuration template (the built-in
+ * `deviceConfigurationForOffice365` Email / Device restrictions / Compliance
+ * templates). Guards the "(Legacy)" Endpoint Security label so a non-security
+ * intent can never be mislabeled -- security baselines carry the
+ * `securityBaselineTemplate` OData subtype, and every ES/baseline `templateType`
+ * reads as security/baseline (or cloudPC for the Windows 365 baseline).
+ */
+export function isSecurityIntentTemplate(template: Record<string, unknown>): boolean {
+  if (String(template["@odata.type"] ?? "").toLowerCase().includes("securitybaselinetemplate")) return true;
+  const type = String(template["templateType"] ?? "").toLowerCase();
+  return type.includes("security") || type.includes("baseline") || type === "cloudpc";
 }
 
 export interface AssignmentTarget {

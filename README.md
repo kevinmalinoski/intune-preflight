@@ -12,7 +12,9 @@ _Pick an OS and the Entra groups an endpoint belongs to, and see exactly which p
 
 ## Try it in 30 seconds (demo mode)
 
-No tenant and no app registration required — the tool ships with a **bundled sample tenant**. Clone the repo, or download the [latest release](https://github.com/kevinmalinoski/intune-preflight/releases/latest):
+**▶️ Try the live demo in your browser — [kevinmalinoski.github.io/intune-preflight/demo](https://kevinmalinoski.github.io/intune-preflight/demo/)** — the full tool running over a bundled sample tenant, entirely in your browser (no backend, nothing leaves the page). Best on a desktop-sized screen.
+
+Or run it yourself — no tenant and no app registration required, it ships with a **bundled sample tenant**. Clone the repo, or download the [latest release](https://github.com/kevinmalinoski/intune-preflight/releases/latest):
 
 ```bash
 npm install
@@ -36,8 +38,9 @@ The normal loop is deploy-and-pray: assign a policy, wait for devices to check i
 - 🎯 **Assignment Filter simulation** — toggle the filters a device matches and watch every policy re-resolve; include and exclude filters are handled as the opposites they are.
 - 🎫 **Policy Waitlist** — pull an *unassigned* policy into the simulation to preview "what if I assigned this?"
 - 🔍 **Merged baseline drill-down** — every setting from every applied policy in one filterable grid, with the real **CSP path** and a **Microsoft Learn** link per setting.
-- ⚔️ **Conflicts & overlaps** — genuine value disagreements vs redundant duplicate configuration, surfaced separately (Windows).
-- 🛡️ **Legacy Endpoint Security** — intents-based BitLocker, Defender Antivirus, Firewall and ASR policies read and merged alongside modern Settings Catalog ones.
+- ⚔️ **Conflicts, overlaps & cross-model collisions** — genuine value disagreements vs redundant duplicates, surfaced separately (Windows) — plus **"legacy policy collisions"**: the same CSP configured through *different* policy models (a legacy template *and* a Settings Catalog policy) that per-model detection can't see, with a migrate-to-Settings-Catalog nudge.
+- 🛡️ **Legacy Endpoint Security & template flags** — intents-based BitLocker, Defender Antivirus, Firewall and ASR policies read and merged with their **real names, value labels and doc links**; deprecated device-config **templates are flagged for migration** to the Settings Catalog.
+- 🏷️ **Group Tag transparency** — dynamic groups are classified against the entered Group Tag (confident match, *+ conditions*, or *conditional*) with each group's `[OrderID]` scope shown inline — surfaced honestly rather than pretending to be Entra's evaluator.
 - 📋 **Assignment Manifest** — a tenant-wide map of which groups carry which policies, with filter simulation and CSV export.
 - 🔗 **Manifest ↔ Simulator** — check groups in the Manifest and *simulate a device in exactly those groups*; per-group **"seating charts"** reveal at a glance whether a group's policies are its own or shared across the tenant.
 - 🌐 **Four platforms** — Windows, macOS, iOS/iPadOS, and Android, scoped separately.
@@ -55,15 +58,15 @@ The normal loop is deploy-and-pray: assign a policy, wait for devices to check i
 
 ## Known limitations
 
-Honest edges in v1.1 — none block the core use, but know them before you rely on a result:
+Honest edges in v2.0 — none block the core use, but know them before you rely on a result:
 
-- **Dynamic membership is evaluated best-effort, not queried.** Group Tag / Autopilot auto-selection reads only the `[OrderID]` and `[ZTDId]` clauses in `device.devicePhysicalIds` (`-eq` / `-startsWith`). A bare `[ZTDId]` clause combined with **`or`** is handled correctly (any satisfied branch grants membership); rules that gate it behind **`and`**, or that depend on other conditions entirely, may be **missed or over-matched**. Auto-selected and implied groups are always flagged in the UI so you can verify them against Entra.
+- **Dynamic membership is surfaced, not fully evaluated.** Group Tag / Autopilot auto-selection reads the `[OrderID]` and `[ZTDId]` clauses in `device.devicePhysicalIds` (`-eq` / `-startsWith`); a confident match is auto-selected. When a rule *also* hinges on a property a tag can't decide (`deviceOSType`, `deviceCategory`, …), the group is flagged **+ conditions** with its rule shown, and a tag that's merely referenced is flagged **conditional** (not auto-selected) — so the edge is visible per group rather than guessed. A real membership-rule engine is a post-2.0 accuracy upgrade.
 - **Conflict & overlap detection is Windows-only.** Other platforms don't map cleanly onto value-level comparison yet. The **merged baseline itself is still shown on every platform** — only the conflict/overlap flags are Windows-scoped.
-- **Legacy Endpoint Security intents use schema-agnostic setting names.** Legacy `deviceManagement/intents` (BitLocker, Defender AV, Firewall, …) are read, but their setting names are derived from the Graph `definitionId` rather than a hand-maintained CSP map, and their ids don't line up with the equivalent Settings Catalog setting — so a legacy intent and a modern Settings Catalog policy setting the *same* thing aren't yet cross-detected as a conflict (two legacy intents are).
-- **Settings flattening is schema-agnostic** — derived from each Graph resource's own properties rather than a hand-maintained CSP schema, so raw Graph field names show up as setting names in some cases.
+- **Cross-model collision detection is best-effort.** Settings Catalog ↔ OMA-URI is exact (shared CSP path); the legacy-template → CSP crosswalk is a small, hand-verified set, and legacy Endpoint Security intents aren't crosswalked yet — so it checks *common* cross-model settings, not every one. Migrating legacy templates to the Settings Catalog is the real fix, which the "Legacy template" flag encourages.
+- **Settings flattening is schema-agnostic** — derived from each Graph resource's own properties rather than a hand-maintained CSP schema, so raw Graph field names can show up as setting names in some cases (legacy intents now resolve real names/values from their template definitions).
 - **Tested against sandbox Microsoft 365 tenants.** Always verify against the Intune admin center before relying on a computed baseline for compliance decisions.
 
-➡️ **[Full limitations and planned v2 work — ROADMAP.md](ROADMAP.md)**
+➡️ **[Full limitations and post-2.0 work — ROADMAP.md](ROADMAP.md)**
 
 ## Security
 

@@ -1,20 +1,29 @@
 import type { CspSetting, IntuneGroup, IntunePolicy } from "@intune-preflight/shared";
 import type { TenantData } from "../intuneData.js";
-import { VIRTUAL_GROUP_ALL_DEVICES } from "../normalize.js";
+import { VIRTUAL_GROUP_ALL_DEVICES, VIRTUAL_GROUP_ALL_USERS } from "../normalize.js";
 
-// Synthetic sample tenant for demo mode -- no real tenant identifiers. Crafted
-// to exercise every feature the tool surfaces: a conflict, an overlap, an
-// exclude-wins case, dynamic group-tag implication, an unassigned policy (for
-// Policy Waitlist), an assignment filter, and Autopilot, across four OSes.
-// Keep it in sync with the demo test in intuneData/demo — that test asserts the
-// data still produces those interesting cases as the engine evolves.
-//
-// The Windows set mirrors the naming and structure of the Open Intune Baseline
-// (openintunebaseline.com), a community-standard set of Intune profiles, so the
-// demo reads like a real hardened tenant to any Intune admin. It is recognizable
-// sample data only -- no configuration is copied verbatim.
+// Synthetic sample tenant for demo mode -- no real tenant identifiers, and no
+// invented settings. Every Windows/macOS profile NAME and every setting name +
+// value below is taken verbatim from the community-standard Open Intune Baseline
+// (github.com/SkipToTheEndpoint/OpenIntuneBaseline, Windows v3.8 / macOS v1.0),
+// so the demo reads like a real hardened tenant to any Intune admin. Only the
+// grouping/assignment layer and two clearly-labelled "CORP" override policies are
+// authored, to exercise the tool's features on real settings:
+//   * a genuine conflict   (Defender Cloud Block Level: OIB "High" vs a corp
+//                            override "Zero tolerance blocking level")
+//   * an overlap           (Defender real-time monitoring set the same in two policies)
+//   * an exclude-wins case  (Pilot ring carved out of the Production ring)
+//   * an include filter     (VPN policy scoped to VPN-Eligible devices)
+//   * an exclude filter     (baseline scoped away from Corporate-Owned)
+//   * a dynamic group       (kiosk devices by Group Tag)
+//   * All Devices + All Users virtual scopes
+//   * legacy Endpoint Security intents  (the older template model)
+//   * a Policy Waitlist     (unassigned OIB rings/policies)
+//   * Autopilot v1 + v2
+// The demoTenant test asserts those cases still hold as the engine evolves.
 
 const ALL_DEVICES = VIRTUAL_GROUP_ALL_DEVICES.id;
+const ALL_USERS = VIRTUAL_GROUP_ALL_USERS.id;
 const s = (settingId: string, cspArea: string, displayName: string, value: string, cspPath?: string): CspSetting => ({
   settingId,
   cspArea,
@@ -25,6 +34,7 @@ const s = (settingId: string, cspArea: string, displayName: string, value: strin
 
 const groups: IntuneGroup[] = [
   { id: "grp-corp-win", displayName: "Windows - Corporate Devices" },
+  { id: "grp-ring-pilot", displayName: "Windows - Update Ring - Pilot" },
   {
     id: "grp-kiosk",
     displayName: "Windows - Kiosk",
@@ -35,6 +45,8 @@ const groups: IntuneGroup[] = [
     id: "grp-kiosk-multi",
     displayName: "Windows - Autopilot - Kiosk - Multi User",
     isDynamic: true,
+    // Rule starts with "[OrderID]:KIOSK-MULTI", which implies the broader
+    // "[OrderID]:KIOSK" kiosk rule -> a dynamic membership implication.
     membershipRule: '(device.devicePhysicalIds -any (_ -startsWith "[OrderID]:KIOSK-MULTI"))',
   },
   {
@@ -43,6 +55,16 @@ const groups: IntuneGroup[] = [
     isDynamic: true,
     membershipRule: '(device.devicePhysicalIDs -any (_ -startsWith "[ZTDId]"))',
   },
+  {
+    // Combined rule: the Group Tag clause is evaluable, but the extra
+    // deviceOSType condition is not -- so a tag match here is flagged
+    // "+ conditions" (verify) rather than claimed outright.
+    id: "grp-kiosk-corp",
+    displayName: "Windows - Kiosk - Corporate (Win only)",
+    isDynamic: true,
+    membershipRule:
+      '(device.devicePhysicalIds -any (_ -startsWith "[OrderID]:KIOSK")) and (device.deviceOSType -eq "Windows")',
+  },
   { id: "grp-ap2-users", displayName: "Users - Autopilot Device Preparation" },
   { id: "grp-mac", displayName: "macOS - Laptops" },
   { id: "grp-ios", displayName: "iOS - Corporate" },
@@ -50,180 +72,7 @@ const groups: IntuneGroup[] = [
 ];
 
 const policies: IntunePolicy[] = [
-  {
-    id: "pol-win-vpn",
-    kind: "settingsCatalog",
-    displayName: "Windows - Always-On VPN",
-    platform: "windows",
-    // All Devices, but scoped by an INCLUDE filter: it only applies to devices
-    // that MATCH "VPN-Eligible Devices". So by default (a device that doesn't
-    // match) it is NOT applied -- the inverse of the exclude case below, and the
-    // one that's easy to misread. Selecting the filter in the simulator makes it
-    // apply.
-    assignedGroupIds: [ALL_DEVICES],
-    excludedGroupIds: [],
-    assignmentFilters: [{ groupId: ALL_DEVICES, filterId: "flt-vpn-eligible", filterType: "include" }],
-    settings: [s("vpn.alwayson", "VPN", "Always On VPN", "Enabled")],
-  },
-  {
-    id: "pol-win-baseline",
-    kind: "settingsCatalog",
-    displayName: "Windows - Security Baseline",
-    platform: "windows",
-    assignedGroupIds: [ALL_DEVICES],
-    excludedGroupIds: [],
-    // An exclude-type Corporate-Owned filter, to demo assignment filters: the
-    // baseline applies by default, and selecting the filter in the simulator
-    // drops it (exclude wins), so the interaction is visible without hiding the
-    // baseline from the out-of-the-box view.
-    assignmentFilters: [{ groupId: ALL_DEVICES, filterId: "flt-corp-owned", filterType: "exclude" }],
-    settings: [
-      s("bitlocker.require", "BitLocker", "Require device encryption", "Enabled", "./Device/Vendor/MSFT/BitLocker/RequireDeviceEncryption"),
-      s("defender.realtime", "Defender", "Real-time protection", "Enabled", "./Device/Vendor/MSFT/Policy/Config/Defender/AllowRealtimeMonitoring"),
-      s("password.minlength", "Password", "Minimum password length", "8", "./Device/Vendor/MSFT/Policy/Config/DeviceLock/MinDevicePasswordLength"),
-    ],
-  },
-  {
-    id: "pol-win-corp",
-    kind: "deviceConfiguration",
-    displayName: "Windows - Device Restrictions",
-    platform: "windows",
-    assignedGroupIds: ["grp-corp-win"],
-    excludedGroupIds: [],
-    assignmentFilters: [],
-    settings: [
-      // Conflicts with the baseline's "8" -> a real conflict on a corp device.
-      s("password.minlength", "Password", "Minimum password length", "12"),
-      s("firewall.enable", "Firewall", "Enable Windows Firewall", "Enabled"),
-    ],
-  },
-  {
-    id: "pol-win-compliance",
-    kind: "compliancePolicy",
-    displayName: "Windows - Compliance Policy",
-    platform: "windows",
-    assignedGroupIds: [ALL_DEVICES],
-    excludedGroupIds: [],
-    assignmentFilters: [],
-    settings: [
-      // Same value as the baseline -> a (redundant) overlap, not a conflict.
-      s("defender.realtime", "Defender", "Real-time protection", "Enabled"),
-      s("compliance.minosversion", "Compliance", "Minimum OS version", "10.0.22631"),
-    ],
-  },
-  {
-    id: "pol-win-kiosk",
-    kind: "deviceConfiguration",
-    displayName: "Windows - Kiosk Lockdown",
-    platform: "windows",
-    assignedGroupIds: ["grp-kiosk"],
-    excludedGroupIds: [],
-    assignmentFilters: [],
-    settings: [
-      s("kiosk.mode", "Kiosk", "Kiosk mode", "Single-app"),
-      s("password.minlength", "Password", "Minimum password length", "8"),
-    ],
-  },
-  {
-    id: "pol-win-feature-update",
-    kind: "deviceConfiguration",
-    displayName: "Windows - Feature Update Deferral",
-    platform: "windows",
-    assignedGroupIds: [ALL_DEVICES],
-    // Kiosk devices are carved out -> exclude-wins demo.
-    excludedGroupIds: ["grp-kiosk"],
-    assignmentFilters: [],
-    settings: [s("update.deferfeature", "Windows Update", "Feature update deferral (days)", "30")],
-  },
-  // Legacy Endpoint Security (deviceManagement/intents model) -- BitLocker /
-  // Disk Encryption and Defender Antivirus created the old template-based way,
-  // still present in many tenants. Settings are namespaced `endpointSecurity:`
-  // like the real normalizer, so an org-wide BitLocker intent and a corp
-  // override are detected as a genuine conflict (encryption method) plus an
-  // overlap (require encryption) -- Windows-only, like every other comparison.
-  {
-    id: "pol-es-bitlocker",
-    kind: "endpointSecurity",
-    displayName: "Windows - BitLocker (Endpoint Security)",
-    platform: "windows",
-    assignedGroupIds: [ALL_DEVICES],
-    excludedGroupIds: [],
-    assignmentFilters: [],
-    settings: [
-      s("endpointSecurity:bitlocker_requireEncryption", "BitLocker", "Require Device Encryption", "Enabled"),
-      s("endpointSecurity:bitlocker_encryptionMethod", "BitLocker", "Encryption Method For Operating System Drives", "XTS-AES 128-bit"),
-    ],
-  },
-  {
-    id: "pol-es-bitlocker-corp",
-    kind: "endpointSecurity",
-    displayName: "Windows - BitLocker Corp Override (Endpoint Security)",
-    platform: "windows",
-    assignedGroupIds: ["grp-corp-win"],
-    excludedGroupIds: [],
-    assignmentFilters: [],
-    settings: [
-      // Same value as the org-wide intent -> overlap; stronger cipher -> conflict.
-      s("endpointSecurity:bitlocker_requireEncryption", "BitLocker", "Require Device Encryption", "Enabled"),
-      s("endpointSecurity:bitlocker_encryptionMethod", "BitLocker", "Encryption Method For Operating System Drives", "XTS-AES 256-bit"),
-    ],
-  },
-  {
-    id: "pol-es-defender-av",
-    kind: "endpointSecurity",
-    displayName: "Windows - Microsoft Defender Antivirus (Endpoint Security)",
-    platform: "windows",
-    assignedGroupIds: ["grp-corp-win"],
-    excludedGroupIds: [],
-    assignmentFilters: [],
-    settings: [
-      s("endpointSecurity:defenderav_allowRealtimeMonitoring", "Microsoft Defender Antivirus", "Allow Realtime Monitoring", "Enabled"),
-      s("endpointSecurity:defenderav_cloudBlockLevel", "Microsoft Defender Antivirus", "Cloud Block Level", "High"),
-      s("endpointSecurity:defenderav_puaProtection", "Microsoft Defender Antivirus", "PUA Protection", "Block"),
-    ],
-  },
-  {
-    id: "pol-es-firewall-draft",
-    kind: "endpointSecurity",
-    displayName: "Windows - Firewall (Endpoint Security) (DRAFT)",
-    platform: "windows",
-    // No assignment -> shows up in the Policy Waitlist as a legacy ES intent.
-    assignedGroupIds: [],
-    excludedGroupIds: [],
-    assignmentFilters: [],
-    settings: [
-      s("endpointSecurity:firewall_enableDomainNetworkFirewall", "Microsoft Defender Firewall", "Enable Domain Network Firewall", "Enabled"),
-    ],
-  },
-  {
-    id: "pol-win-sharedpc",
-    kind: "settingsCatalog",
-    displayName: "Windows - Shared PC Mode",
-    platform: "windows",
-    assignedGroupIds: ["grp-kiosk-multi"],
-    excludedGroupIds: [],
-    assignmentFilters: [],
-    settings: [s("sharedpc.enabled", "Shared PC", "Enable shared PC mode", "True")],
-  },
-  {
-    id: "pol-win-edge-draft",
-    kind: "settingsCatalog",
-    displayName: "Windows - Edge Hardening (DRAFT)",
-    platform: "windows",
-    // No assignment -> shows up in the Policy Waitlist as unassigned.
-    assignedGroupIds: [],
-    excludedGroupIds: [],
-    assignmentFilters: [],
-    settings: [
-      s("edge.smartscreen", "Edge", "SmartScreen", "Enabled"),
-      s("edge.passwordmanager", "Edge", "Built-in password manager", "Disabled"),
-    ],
-  },
-
-  // ---- Open Intune Baseline (OIB) style Windows set (applied to All Devices) ----
-  // A realistic hardened baseline. Note the Defender "Submit samples consent"
-  // CONFLICT between AV Configuration and the Security Baseline below, and the
-  // several Defender/BitLocker OVERLAPS with the existing policies above.
+  // ============================ WINDOWS -- Open Intune Baseline (All Devices) ============================
   {
     id: "pol-oib-av-config",
     kind: "settingsCatalog",
@@ -231,18 +80,20 @@ const policies: IntunePolicy[] = [
     platform: "windows",
     assignedGroupIds: [ALL_DEVICES],
     excludedGroupIds: [],
-    assignmentFilters: [],
+    // Exclude filter: the baseline applies by default; selecting "Corporate-Owned"
+    // in the simulator drops it (exclude wins), so the filter interaction is visible.
+    assignmentFilters: [{ groupId: ALL_DEVICES, filterId: "flt-corp-owned", filterType: "exclude" }],
     settings: [
-      s("defender.realtime", "Defender", "Real-time protection", "Enabled", "./Device/Vendor/MSFT/Policy/Config/Defender/AllowRealtimeMonitoring"),
-      s("defender.cloudprotection", "Defender", "Cloud-delivered protection", "Enabled", "./Device/Vendor/MSFT/Policy/Config/Defender/AllowCloudProtection"),
-      s("defender.submitsamplesconsent", "Defender", "Submit samples consent", "Send safe samples automatically", "./Device/Vendor/MSFT/Policy/Config/Defender/SubmitSamplesConsent"),
-      s("defender.pua", "Defender", "Detect potentially unwanted apps", "Enabled", "./Device/Vendor/MSFT/Policy/Config/Defender/PUAProtection"),
-      s("defender.cloudblocklevel", "Defender", "Cloud block level", "High", "./Device/Vendor/MSFT/Policy/Config/Defender/CloudBlockLevel"),
-      s("defender.cloudchecktimeout", "Defender", "Cloud extended timeout (s)", "50", "./Device/Vendor/MSFT/Policy/Config/Defender/CloudExtendedTimeout"),
-      s("defender.scanarchives", "Defender", "Scan archive files", "Enabled", "./Device/Vendor/MSFT/Policy/Config/Defender/AllowArchiveScanning"),
-      s("defender.networkprotection", "Defender", "Network protection", "Enabled", "./Device/Vendor/MSFT/Policy/Config/Defender/EnableNetworkProtection"),
-      s("defender.scanremovable", "Defender", "Scan removable drives", "Enabled", "./Device/Vendor/MSFT/Policy/Config/Defender/AllowFullScanRemovableDriveScanning"),
-      s("defender.signatureupdatehours", "Defender", "Signature update interval (hours)", "4", "./Device/Vendor/MSFT/Policy/Config/Defender/SignatureUpdateInterval"),
+      s("defender.allowrealtimemonitoring", "Defender", "Allow Realtime Monitoring", "Allowed"),
+      s("defender.allowcloudprotection", "Defender", "Allow Cloud Protection", "Allowed"),
+      s("defender.allowbehaviormonitoring", "Defender", "Allow Behavior Monitoring", "Allowed"),
+      s("defender.cloudblocklevel", "Defender", "Cloud Block Level", "High"),
+      s("defender.cloudextendedtimeout", "Defender", "Cloud Extended Timeout", "50"),
+      s("defender.avgcpuloadfactor", "Defender", "Avg CPU Load Factor", "50"),
+      s("defender.allowarchivescanning", "Defender", "Allow Archive Scanning", "Allowed"),
+      s("defender.allowfullscanremovable", "Defender", "Allow Full Scan Removable Drive Scanning", "Allowed"),
+      s("defender.allowscanningnetworkfiles", "Defender", "Allow Scanning Network Files", "Allowed"),
+      s("defender.allowemailscanning", "Defender", "Allow Email Scanning", "Allowed"),
     ],
   },
   {
@@ -254,29 +105,37 @@ const policies: IntunePolicy[] = [
     excludedGroupIds: [],
     assignmentFilters: [],
     settings: [
-      s("defender.tamperprotection", "Security Experience", "Tamper protection", "Enabled"),
-      s("defender.notifications", "Security Experience", "Hide non-critical notifications", "Enabled"),
-      s("defender.headlessuimode", "Security Experience", "Hide Windows Security UI", "Disabled"),
-      s("defender.ransomwaredatafolder", "Security Experience", "Controlled folder access", "Audit Mode"),
+      s("defender.tamperprotection", "Windows Security Experience", "Tamper Protection", "On"),
+      s("defender.hidesecuritynotifarea", "Windows Security Experience", "Hide Windows Security Notification Area Control", "Disabled"),
+      s("defender.disableenhancednotifications", "Windows Security Experience", "Disable Enhanced Notifications", "Disabled"),
     ],
   },
   {
-    id: "pol-oib-asr",
+    id: "pol-oib-av-additional",
     kind: "settingsCatalog",
-    displayName: "Win - OIB - ES - Attack Surface Reduction - D - ASR Rules - v3.7",
+    displayName: "Win - OIB - SC - Defender Antivirus - D - Additional Configuration - v3.8",
     platform: "windows",
     assignedGroupIds: [ALL_DEVICES],
     excludedGroupIds: [],
     assignmentFilters: [],
     settings: [
-      s("asr.blockexecutablecontent", "ASR", "Block executable content from email/webmail", "Block"),
-      s("asr.blockofficecreateprocess", "ASR", "Block Office apps creating child processes", "Block"),
-      s("asr.blockofficecreateexe", "ASR", "Block Office apps creating executable content", "Block"),
-      s("asr.blockcredentialstealing", "ASR", "Block credential stealing from LSASS", "Block"),
-      s("asr.blockuntrustedusb", "ASR", "Block untrusted/unsigned USB processes", "Block"),
-      s("asr.blockadobechild", "ASR", "Block Adobe Reader child processes", "Block"),
-      s("asr.blockscriptdownloaded", "ASR", "Block JS/VBS launching downloaded content", "Block"),
-      s("asr.blockpersistencewmi", "ASR", "Block persistence via WMI event subscription", "Audit Mode"),
+      s("defender.enablefilehashcomputation", "Defender", "Enable File Hash Computation", "Enabled"),
+      s("defender.hideexclusionslocaladmins", "Defender", "Hide Exclusions From Local Admins", "Enabled"),
+      s("defender.hideexclusionslocalusers", "Defender", "Hide Exclusions From Local Users", "Enabled"),
+      s("defender.convertwarntoblock", "Defender", "Enable Convert Warn To Block", "Enabled"),
+    ],
+  },
+  {
+    id: "pol-oib-asr",
+    kind: "settingsCatalog",
+    displayName: "Win - OIB - ES - Attack Surface Reduction - D - ASR Rules (Audit Mode) - v3.1",
+    platform: "windows",
+    assignedGroupIds: [ALL_DEVICES],
+    excludedGroupIds: [],
+    assignmentFilters: [],
+    settings: [
+      s("defender.asrrules", "Defender", "Attack Surface Reduction Rules", "Configured"),
+      s("defender.controlledfolderaccess", "Defender", "Enable Controlled Folder Access", "Audit Mode"),
     ],
   },
   {
@@ -288,173 +147,188 @@ const policies: IntunePolicy[] = [
     excludedGroupIds: [],
     assignmentFilters: [],
     settings: [
-      s("bitlocker.require", "BitLocker", "Require device encryption", "Enabled", "./Device/Vendor/MSFT/BitLocker/RequireDeviceEncryption"),
-      s("bitlocker.osencryptiontype", "BitLocker", "OS drive encryption type", "Full encryption", "./Device/Vendor/MSFT/BitLocker/SystemDrivesEncryptionType"),
-      s("bitlocker.startupauth", "BitLocker", "Startup authentication", "TPM required", "./Device/Vendor/MSFT/BitLocker/SystemDrivesRequireStartupAuthentication"),
-      s("bitlocker.minpinlength", "BitLocker", "Minimum PIN length", "6", "./Device/Vendor/MSFT/BitLocker/SystemDrivesMinimumPINLength"),
-      s("bitlocker.encryptionmethod", "BitLocker", "Encryption method", "XTS-AES 256-bit", "./Device/Vendor/MSFT/BitLocker/EncryptionMethodByDriveType"),
-      s("bitlocker.recoverystore", "BitLocker", "Save recovery info to Entra", "Required", "./Device/Vendor/MSFT/BitLocker/SystemDrivesRecoveryOptions"),
-    ],
-  },
-  {
-    id: "pol-oib-security-baseline",
-    kind: "settingsCatalog",
-    displayName: "Win - OIB - Device - D - Security Baseline - 24H2",
-    platform: "windows",
-    assignedGroupIds: [ALL_DEVICES],
-    excludedGroupIds: [],
-    assignmentFilters: [],
-    settings: [
-      // Conflicts with pol-oib-av-config: "Send all samples" vs "Send safe samples".
-      s("defender.submitsamplesconsent", "Defender", "Submit samples consent", "Send all samples automatically", "./Device/Vendor/MSFT/Policy/Config/Defender/SubmitSamplesConsent"),
-      s("defender.realtime", "Defender", "Real-time protection", "Enabled", "./Device/Vendor/MSFT/Policy/Config/Defender/AllowRealtimeMonitoring"),
-      s("password.minlength", "Password", "Minimum password length", "8", "./Device/Vendor/MSFT/Policy/Config/DeviceLock/MinDevicePasswordLength"),
-      s("smartscreen.enabled", "SmartScreen", "SmartScreen for Explorer", "Enabled", "./Device/Vendor/MSFT/Policy/Config/SmartScreen/EnableSmartScreenInShell"),
-      s("smartscreen.blockoverride", "SmartScreen", "Block user override", "Enabled", "./Device/Vendor/MSFT/Policy/Config/SmartScreen/PreventOverride"),
-      s("uac.adminapproval", "User Account Control", "Admin approval mode", "Enabled", "./Device/Vendor/MSFT/Policy/Config/LocalPoliciesSecurityOptions/UserAccountControl_RunAllAdministratorsInAdminApprovalMode"),
-      s("uac.elevationprompt", "User Account Control", "Elevation prompt for admins", "Prompt for consent on secure desktop"),
-      s("lsa.runasppl", "Local Security Authority", "LSA protection (RunAsPPL)", "Enabled with UEFI lock"),
-      s("credentialguard.enable", "Credential Guard", "Virtualization-based Credential Guard", "Enabled with UEFI lock"),
-      s("firewall.domainprofile", "Firewall", "Domain profile enabled", "Enabled"),
-      s("firewall.privateprofile", "Firewall", "Private profile enabled", "Enabled"),
-      s("firewall.publicprofile", "Firewall", "Public profile enabled", "Enabled"),
-      s("rdp.nla", "Remote Desktop", "Require Network Level Authentication", "Enabled"),
-      s("powershell.scriptblocklogging", "PowerShell", "Script block logging", "Enabled"),
-      s("autorun.disable", "AutoPlay", "Disable AutoRun for all drives", "Enabled"),
-      s("netbios.disable", "Network", "Disable NetBIOS over TCP/IP", "Enabled"),
-      s("legacyprotocols.smb1", "Network", "SMBv1 client", "Disabled"),
-      s("wdigest.disable", "Credentials", "WDigest credential caching", "Disabled"),
-      s("password.history", "Password", "Enforce password history", "24"),
-      s("account.lockoutthreshold", "Account", "Account lockout threshold", "10"),
-      s("smb.signing", "Network", "SMB client signing", "Required"),
-      s("ldap.clientsigning", "Network", "LDAP client signing", "Negotiate signing"),
-      s("kerberos.encryptiontypes", "Credentials", "Kerberos supported encryption", "AES128 + AES256"),
-      s("audit.logon", "Audit", "Audit logon events", "Success and Failure"),
-      s("audit.processcreation", "Audit", "Audit process creation", "Success"),
-      s("attachmentmanager.antivirus", "Attachment Manager", "Notify antivirus on open", "Enabled"),
-      s("dma.blocknewdevices", "Device Guard", "Block DMA until sign-in", "Enabled"),
-      s("installer.elevatedalways", "Windows Installer", "Always install elevated", "Disabled"),
-      s("rpc.restrictremoteclients", "Remote Procedure Call", "Restrict unauthenticated RPC clients", "Authenticated"),
-      s("wifi.autoconnecthotspots", "Network", "Auto-connect to open hotspots", "Disabled"),
-      s("cloud.consumeraccounts", "Accounts", "Block Microsoft consumer accounts", "Enabled"),
-      s("edge.baseline.smartscreen", "Microsoft Edge", "SmartScreen enabled", "Enabled"),
-      s("edge.baseline.typosquatting", "Microsoft Edge", "Typosquatting checker", "Enabled"),
-      s("winrm.basicauth", "Remote Management", "WinRM Basic authentication", "Disabled"),
+      s("bitlocker.requiredeviceencryption", "BitLocker", "Require Device Encryption", "Enabled"),
+      s("bitlocker.enforceencryptiontype", "Operating System Drives", "Enforce drive encryption type on operating system drives", "Enabled"),
+      s("bitlocker.requirestartupauth", "Operating System Drives", "Require additional authentication at startup", "Enabled"),
+      s("bitlocker.encryptionmethod", "BitLocker Drive Encryption", "Choose drive encryption method and cipher strength (Windows 10 [Version 1511] and later)", "Enabled"),
+      s("bitlocker.recoveryrotation", "BitLocker", "Configure Recovery Password Rotation", "Refresh on for Entra ID-joined devices"),
+      s("bitlocker.disallowstdpinchange", "Operating System Drives", "Disallow standard users from changing the PIN or password", "Enabled"),
     ],
   },
   {
     id: "pol-oib-firewall",
     kind: "settingsCatalog",
-    displayName: "Win - OIB - ES - Firewall - D - Configuration - v3.1",
+    displayName: "Win - OIB - ES - Windows Firewall - D - Firewall Configuration - v3.1",
     platform: "windows",
     assignedGroupIds: [ALL_DEVICES],
     excludedGroupIds: [],
     assignmentFilters: [],
     settings: [
-      s("fw.domain.enabled", "Firewall", "Domain profile — firewall enabled", "Enabled"),
-      s("fw.domain.inbound", "Firewall", "Domain profile — default inbound action", "Block"),
-      s("fw.domain.outbound", "Firewall", "Domain profile — default outbound action", "Allow"),
-      s("fw.private.enabled", "Firewall", "Private profile — firewall enabled", "Enabled"),
-      s("fw.private.inbound", "Firewall", "Private profile — default inbound action", "Block"),
-      s("fw.public.enabled", "Firewall", "Public profile — firewall enabled", "Enabled"),
-      s("fw.public.inbound", "Firewall", "Public profile — default inbound action", "Block"),
-      s("fw.public.notifications", "Firewall", "Public profile — display notifications", "Disabled"),
-      s("fw.public.localrules", "Firewall", "Public profile — allow local rule merge", "Disabled"),
-      s("fw.logging.droppedpackets", "Firewall", "Log dropped packets", "Enabled"),
+      s("firewall.domain", "Firewall", "Enable Domain Network Firewall", "True"),
+      s("firewall.private", "Firewall", "Enable Private Network Firewall", "True"),
+      s("firewall.public", "Firewall", "Enable Public Network Firewall", "True"),
+      s("firewall.statefulftp", "Firewall", "Disable Stateful Ftp", "True"),
+      s("firewall.auditfpconn", "Auditing", "Object Access Audit Filtering Platform Connection", "Failure"),
     ],
   },
   {
-    id: "pol-oib-update-ring",
-    kind: "deviceConfiguration",
-    displayName: "Win - OIB - Update - D - Windows Update Ring - Production - v3.1",
-    platform: "windows",
-    assignedGroupIds: [ALL_DEVICES],
-    excludedGroupIds: [],
-    assignmentFilters: [],
-    settings: [
-      // Conflicts with "Windows - Feature Update Deferral" (30 vs 7 days).
-      s("update.deferfeature", "Windows Update", "Feature update deferral (days)", "7"),
-      s("update.deferquality", "Windows Update", "Quality update deferral (days)", "3"),
-      s("update.automaticupdatemode", "Windows Update", "Automatic update behavior", "Auto install at maintenance time"),
-      s("update.activehoursstart", "Windows Update", "Active hours start", "8"),
-      s("update.activehoursend", "Windows Update", "Active hours end", "17"),
-      s("update.deadlinequality", "Windows Update", "Quality update deadline (days)", "5"),
-      s("update.deadlinefeature", "Windows Update", "Feature update deadline (days)", "7"),
-      s("update.gracedays", "Windows Update", "Deadline grace period (days)", "2"),
-      s("update.deliveryoptimization", "Delivery Optimization", "Download mode", "HTTP + peering (LAN)"),
-      s("update.pauseupdates", "Windows Update", "Allow user to pause updates", "Disabled"),
-      s("update.prereleasebuilds", "Windows Update", "Pre-release builds", "Disabled"),
-      s("update.driverupdates", "Windows Update", "Exclude drivers from quality updates", "Allow"),
-    ],
-  },
-  {
-    id: "pol-oib-device-restrictions",
-    kind: "deviceConfiguration",
-    displayName: "Win - OIB - Device - D - Device Restrictions - v3.1",
-    platform: "windows",
-    assignedGroupIds: [ALL_DEVICES],
-    excludedGroupIds: [],
-    assignmentFilters: [],
-    settings: [
-      s("restrict.cortana", "Device Restrictions", "Cortana", "Blocked"),
-      s("restrict.consumerfeatures", "Device Restrictions", "Consumer features", "Blocked"),
-      s("restrict.tips", "Device Restrictions", "Windows tips", "Blocked"),
-      s("restrict.spotlight", "Device Restrictions", "Windows Spotlight", "Blocked"),
-      s("restrict.telemetry", "Device Restrictions", "Diagnostic data", "Required only"),
-      s("restrict.oneddrivesync", "Device Restrictions", "Block personal OneDrive sync", "Enabled"),
-      s("restrict.storagecard", "Device Restrictions", "Removable storage", "Allowed"),
-      s("restrict.camera", "Device Restrictions", "Camera", "Allowed"),
-      s("restrict.copypaste", "Device Restrictions", "Clipboard cloud sync", "Blocked"),
-      s("restrict.locationservices", "Device Restrictions", "Location services", "User controlled"),
-      s("restrict.findmydevice", "Device Restrictions", "Find My Device", "Enabled"),
-      s("restrict.addprovisioningpackage", "Device Restrictions", "Add provisioning packages", "Blocked"),
-      s("restrict.devicediscovery", "Device Restrictions", "Nearby device discovery", "Blocked"),
-      s("restrict.inkworkspace", "Device Restrictions", "Ink Workspace", "Blocked above lock"),
-    ],
-  },
-  {
-    id: "pol-oib-hello",
+    id: "pol-oib-whfb",
     kind: "settingsCatalog",
-    displayName: "Win - OIB - Device - D - Windows Hello for Business - v3.1",
+    displayName: "Win - OIB - ES - Windows Hello for Business - D - WHfB Configuration - v3.2",
     platform: "windows",
     assignedGroupIds: [ALL_DEVICES],
     excludedGroupIds: [],
     assignmentFilters: [],
     settings: [
-      s("hello.usepassport", "Windows Hello", "Use Windows Hello for Business", "Enabled"),
-      s("hello.requiresecuritydevice", "Windows Hello", "Require TPM", "Enabled"),
-      s("hello.minpinlength", "Windows Hello", "Minimum PIN length", "6"),
-      s("hello.enhancedantispoofing", "Windows Hello", "Enhanced anti-spoofing", "Enabled"),
+      s("whfb.antispoofing", "Windows Hello For Business", "Facial Features Use Enhanced Anti Spoofing", "Enabled"),
+      s("whfb.devicescoped", "Windows Hello For Business", "Device-scoped settings", "Not configured"),
     ],
   },
   {
-    id: "pol-oib-laps",
+    id: "pol-oib-hardening",
     kind: "settingsCatalog",
-    displayName: "Win - OIB - Device - D - LAPS - v3.1",
+    displayName: "Win - OIB - SC - Device Security - D - Security Hardening - v3.7",
     platform: "windows",
     assignedGroupIds: [ALL_DEVICES],
     excludedGroupIds: [],
     assignmentFilters: [],
     settings: [
-      s("laps.backupdirectory", "LAPS", "Backup directory", "Microsoft Entra ID"),
-      s("laps.passwordage", "LAPS", "Password age (days)", "30"),
-      s("laps.passwordcomplexity", "LAPS", "Password complexity", "Large + small letters + numbers + specials"),
-      s("laps.postauthaction", "LAPS", "Post-authentication action", "Reset password and logoff"),
+      s("hardening.smb1client", "MS Security Guide", "Configure SMB v1 client driver", "Enabled"),
+      s("hardening.smb1server", "MS Security Guide", "Configure SMB v1 server", "Disabled"),
+      s("hardening.pssblocklogging", "Windows PowerShell", "Turn on PowerShell Script Block Logging", "Enabled"),
+      s("hardening.winrmclientbasicauth", "WinRM Client", "Allow Basic authentication", "Disabled"),
+      s("hardening.winrmservicebasicauth", "WinRM Service", "Allow Basic authentication", "Disabled"),
+      s("hardening.turnoffautoplay", "AutoPlay Policies", "Turn off Autoplay", "Enabled"),
+      s("hardening.smartscreenexplorer", "File Explorer", "Configure Windows Defender SmartScreen", "Enabled"),
+      s("hardening.ie11standalone", "Internet Explorer", "Disable Internet Explorer 11 as a standalone browser", "Enabled"),
+      s("hardening.encryptionoracle", "Credentials Delegation", "Encryption Oracle Remediation", "Enabled"),
+      s("hardening.homegroup", "HomeGroup", "Prevent the computer from joining a homegroup", "Enabled"),
+      s("hardening.phonepclinking", "Connectivity", "Allow Phone PC Linking", "Block"),
+      s("hardening.solicitedra", "Remote Assistance", "Configure Solicited Remote Assistance", "Disabled"),
     ],
   },
   {
-    id: "pol-oib-compliance-password",
+    id: "pol-oib-edge-security",
+    kind: "settingsCatalog",
+    displayName: "Win - OIB - SC - Microsoft Edge - D - Security - v3.8",
+    platform: "windows",
+    assignedGroupIds: [ALL_DEVICES],
+    excludedGroupIds: [],
+    assignmentFilters: [],
+    settings: [
+      s("edge.downloadrestrictions", "Microsoft Edge", "Allow download restrictions", "Enabled"),
+      s("edge.importsavedpasswords", "Microsoft Edge", "Allow importing of saved passwords", "Disabled"),
+      s("edge.importpaymentinfo", "Microsoft Edge", "Allow importing of payment info", "Disabled"),
+      s("edge.intrusiveads", "Microsoft Edge", "Ads setting for sites with intrusive ads", "Enabled"),
+      s("edge.personalizationads", "Microsoft Edge", "Allow personalization of ads, search and news by sending browsing history to Microsoft", "Disabled"),
+      s("edge.iemodereload", "Microsoft Edge", "Allow unconfigured sites to be reloaded in Internet Explorer mode", "Disabled"),
+    ],
+  },
+  {
+    id: "pol-oib-office-security",
+    kind: "settingsCatalog",
+    displayName: "Win - OIB - SC - Microsoft Office - D - Security - v3.6",
+    platform: "windows",
+    assignedGroupIds: [ALL_DEVICES],
+    excludedGroupIds: [],
+    assignmentFilters: [],
+    settings: [
+      s("office.blockflash", "MS Security Guide", "Block Flash activation in Office documents", "Enabled"),
+      s("office.legacyjscript", "MS Security Guide", "Restrict legacy JScript execution for Office", "Enabled"),
+      s("office.addonmanagement", "IE Security", "Add-on Management", "Enabled"),
+      s("office.consistentmime", "IE Security", "Consistent Mime Handling", "Enabled"),
+      s("office.lmzlockdown", "IE Security", "Local Machine Zone Lockdown Security", "Enabled"),
+    ],
+  },
+  {
+    id: "pol-oib-timezone",
+    kind: "settingsCatalog",
+    displayName: "Win - OIB - SC - Device Security - D - Timezone - v3.4",
+    platform: "windows",
+    assignedGroupIds: [ALL_DEVICES],
+    excludedGroupIds: [],
+    assignmentFilters: [],
+    settings: [
+      s("timezone.configurentpclient", "Time Providers", "Configure Windows NTP Client", "Enabled"),
+      s("timezone.enablentpclient", "Time Providers", "Enable Windows NTP Client", "Enabled"),
+    ],
+  },
+  {
+    id: "pol-oib-loginlock",
+    kind: "settingsCatalog",
+    displayName: "Win - OIB - SC - Device Security - D - Login and Lock Screen - v3.8",
+    platform: "windows",
+    assignedGroupIds: [ALL_DEVICES],
+    excludedGroupIds: [],
+    assignmentFilters: [],
+    settings: [
+      s("login.cortanaabovelock", "Above Lock", "Allow Cortana Above Lock", "Block"),
+      s("login.lockscreencamera", "Personalization", "Prevent enabling lock screen camera", "Enabled"),
+      s("login.lockscreenslideshow", "Personalization", "Prevent enabling lock screen slide show", "Enabled"),
+      s("login.locknotifications", "Logon", "Turn off app notifications on the lock screen", "Enabled"),
+    ],
+  },
+  {
+    id: "pol-oib-delivery-opt",
+    kind: "settingsCatalog",
+    displayName: "Win - OIB - SC - Windows Update for Business - D - Delivery Optimisation - v3.0",
+    platform: "windows",
+    assignedGroupIds: [ALL_DEVICES],
+    excludedGroupIds: [],
+    assignmentFilters: [],
+    settings: [
+      s("do.downloadmode", "Delivery Optimization", "DO Download Mode", "HTTP blended with peering behind the same NAT"),
+      s("do.restrictpeerselection", "Delivery Optimization", "DO Restrict Peer Selection By", "Local discovery (DNS-SD)"),
+      s("do.minbattery", "Delivery Optimization", "DO Min Battery Percentage Allowed To Upload", "40"),
+      s("do.groupidsource", "Delivery Optimization", "DO Group Id Source", "Entra ID Tenant ID"),
+      s("do.maxcachesize", "Delivery Optimization", "DO Max Cache Size", "20"),
+    ],
+  },
+
+  // ---- Defender AV update rings: Production to All Devices (minus Pilot), Pilot to the pilot ring ----
+  {
+    id: "pol-oib-defender-ring3",
+    kind: "settingsCatalog",
+    displayName: "Win - OIB - ES - Defender Antivirus Updates - Ring 3 - Production - v3.4",
+    platform: "windows",
+    assignedGroupIds: [ALL_DEVICES],
+    // Pilot devices are carved out of Production -> exclude-wins demo.
+    excludedGroupIds: ["grp-ring-pilot"],
+    assignmentFilters: [],
+    settings: [
+      s("defenderupd.enginechannel", "Defender Update controls", "Engine Updates Channel", "Current Channel (Broad)"),
+      s("defenderupd.platformchannel", "Defender Update controls", "Platform Updates Channel", "Current Channel (Broad)"),
+      s("defenderupd.sigchannel", "Defender Update controls", "Security Intelligence Updates Channel", "Current"),
+    ],
+  },
+  {
+    id: "pol-oib-defender-ring1",
+    kind: "settingsCatalog",
+    displayName: "Win - OIB - ES - Defender Antivirus Updates - Ring 1 - Pilot - v3.4",
+    platform: "windows",
+    assignedGroupIds: ["grp-ring-pilot"],
+    excludedGroupIds: [],
+    assignmentFilters: [],
+    settings: [
+      s("defenderupd.enginechannel", "Defender Update controls", "Engine Updates Channel", "Current Channel (Preview)"),
+      s("defenderupd.platformchannel", "Defender Update controls", "Platform Updates Channel", "Current Channel (Preview)"),
+      s("defenderupd.sigchannel", "Defender Update controls", "Security Intelligence Updates Channel", "Not configured"),
+    ],
+  },
+
+  // ---- Compliance (OIB assigns these to users -> All Users virtual scope) ----
+  {
+    id: "pol-oib-compliance-devhealth",
     kind: "compliancePolicy",
-    displayName: "Win - OIB - Compliance - U - Password - v3.1",
+    displayName: "Win - OIB - Compliance - U - Device Health - v3.1",
     platform: "windows",
-    assignedGroupIds: [ALL_DEVICES],
+    assignedGroupIds: [ALL_USERS],
     excludedGroupIds: [],
     assignmentFilters: [],
     settings: [
-      s("compliance.passwordrequired", "Compliance", "Require a password", "Required"),
-      s("compliance.passwordminlength", "Compliance", "Minimum password length", "8"),
-      s("compliance.passwordtype", "Compliance", "Required password type", "Alphanumeric"),
-      s("compliance.passwordexpirydays", "Compliance", "Password expiration (days)", "0"),
+      s("compliance.bitlocker", "Compliance", "Require BitLocker", "Require"),
+      s("compliance.secureboot", "Compliance", "Require Secure Boot to be enabled on the device", "Require"),
+      s("compliance.codeintegrity", "Compliance", "Require code integrity", "Require"),
     ],
   },
   {
@@ -462,40 +336,165 @@ const policies: IntunePolicy[] = [
     kind: "compliancePolicy",
     displayName: "Win - OIB - Compliance - U - Device Security - v3.1",
     platform: "windows",
-    assignedGroupIds: [ALL_DEVICES],
+    assignedGroupIds: [ALL_USERS],
     excludedGroupIds: [],
     assignmentFilters: [],
     settings: [
-      s("compliance.bitlocker", "Compliance", "Require BitLocker", "Required"),
-      s("compliance.securebootrequired", "Compliance", "Require Secure Boot", "Required"),
-      s("compliance.codeintegrity", "Compliance", "Require code integrity", "Required"),
-      s("compliance.tpm", "Compliance", "Require TPM", "Required"),
-      s("compliance.defenderav", "Compliance", "Microsoft Defender Antivirus", "Required"),
+      s("compliance.firewall", "Compliance", "Firewall", "Require"),
+      s("compliance.antivirus", "Compliance", "Antivirus", "Require"),
+      s("compliance.antispyware", "Compliance", "Antispyware", "Require"),
+      s("compliance.rtp", "Compliance", "Microsoft Defender Antimalware real-time protection", "Require"),
     ],
   },
+
+  // ---- Legacy Endpoint Security (deviceManagement/intents template model) ----
+  // Still present in many tenants; namespaced `endpointSecurity:` like the real
+  // normalizer, and shown as "(Legacy)" in the UI.
   {
-    id: "pol-oib-chrome",
-    kind: "adminTemplate",
-    displayName: "Win - OIB - Device - D - 3rd Party Browser Policy - Chrome - v3.1",
+    id: "pol-es-bitlocker-legacy",
+    kind: "endpointSecurity",
+    displayName: "Windows - BitLocker (Legacy Disk Encryption Intent)",
     platform: "windows",
     assignedGroupIds: [ALL_DEVICES],
     excludedGroupIds: [],
     assignmentFilters: [],
     settings: [
-      s("chrome.passwordmanager", "Google Chrome", "Password manager enabled", "Disabled"),
-      s("chrome.safebrowsing", "Google Chrome", "Safe Browsing protection level", "Enhanced"),
-      s("chrome.metricsreporting", "Google Chrome", "Metrics reporting", "Disabled"),
+      s("endpointSecurity:bitlocker_requireEncryption", "BitLocker", "Require Device Encryption", "Enabled"),
+      s("endpointSecurity:bitlocker_encryptionMethod", "BitLocker", "Encryption Method For Operating System Drives", "XTS-AES 256-bit"),
     ],
   },
   {
-    id: "pol-oib-timezone",
-    kind: "platformScript",
-    displayName: "Win - OIB - Device - D - Set Time Zone",
+    id: "pol-es-defender-av-legacy",
+    kind: "endpointSecurity",
+    displayName: "Windows - Microsoft Defender Antivirus (Legacy Intent)",
+    platform: "windows",
+    assignedGroupIds: ["grp-corp-win"],
+    excludedGroupIds: [],
+    assignmentFilters: [],
+    settings: [
+      s("endpointSecurity:defenderav_allowRealtimeMonitoring", "Microsoft Defender Antivirus", "Allow Realtime Monitoring", "Enabled"),
+      s("endpointSecurity:defenderav_cloudBlockLevel", "Microsoft Defender Antivirus", "Cloud Block Level", "High"),
+    ],
+  },
+
+  // ---- Authored CORP layer on top of OIB (real settings, alternative real values) ----
+  {
+    id: "pol-corp-defender-override",
+    kind: "settingsCatalog",
+    displayName: "CORP - Defender - Cloud Protection Tuning",
+    platform: "windows",
+    description: "Corporate override layered on the OIB baseline for managed corporate devices.",
+    assignedGroupIds: ["grp-corp-win"],
+    excludedGroupIds: [],
+    assignmentFilters: [],
+    settings: [
+      // CONFLICT with OIB AV Configuration (High vs Zero tolerance) on the same setting.
+      s("defender.cloudblocklevel", "Defender", "Cloud Block Level", "Zero tolerance blocking level"),
+      // OVERLAP with OIB AV Configuration (same value, same setting).
+      s("defender.allowrealtimemonitoring", "Defender", "Allow Realtime Monitoring", "Allowed"),
+    ],
+  },
+  {
+    id: "pol-corp-vpn",
+    kind: "settingsCatalog",
+    displayName: "CORP - Always On VPN",
+    platform: "windows",
+    description: "Device Tunnel VPN, scoped to VPN-eligible devices by an include filter.",
+    assignedGroupIds: [ALL_DEVICES],
+    excludedGroupIds: [],
+    // Include filter: applies ONLY to devices that match "VPN-Eligible Devices".
+    // A default device does NOT get it until the filter is selected in the simulator.
+    assignmentFilters: [{ groupId: ALL_DEVICES, filterId: "flt-vpn-eligible", filterType: "include" }],
+    settings: [
+      s("vpn.alwayson", "VPN", "Always On", "Enabled"),
+      s("vpn.devicetunnel", "VPN", "Device Tunnel", "Enabled"),
+    ],
+  },
+  {
+    id: "pol-corp-kiosk",
+    kind: "deviceConfiguration",
+    displayName: "CORP - Kiosk Lockdown (Single App)",
+    platform: "windows",
+    assignedGroupIds: ["grp-kiosk"],
+    excludedGroupIds: [],
+    assignmentFilters: [],
+    settings: [
+      s("kiosk.mode", "Kiosk", "Kiosk mode", "Single app, full-screen"),
+      s("kiosk.autologon", "Kiosk", "User logon type", "Auto logon"),
+    ],
+  },
+  {
+    id: "pol-corp-kiosk-branding",
+    kind: "settingsCatalog",
+    displayName: "CORP - Kiosk Branding",
+    platform: "windows",
+    assignedGroupIds: ["grp-kiosk-corp"],
+    excludedGroupIds: [],
+    assignmentFilters: [],
+    settings: [s("kiosk.branding.logo", "Kiosk", "Custom lock-screen logo", "Enabled")],
+  },
+  {
+    id: "pol-corp-sharedpc",
+    kind: "settingsCatalog",
+    displayName: "CORP - Shared PC Mode",
+    platform: "windows",
+    assignedGroupIds: ["grp-kiosk-multi"],
+    excludedGroupIds: [],
+    assignmentFilters: [],
+    settings: [
+      s("sharedpc.enablesharedpcmode", "Shared PC", "Enable Shared PC Mode", "True"),
+      s("sharedpc.accountmanagement", "Shared PC", "Enable Account Management", "True"),
+    ],
+  },
+  {
+    // A legacy device-configuration TEMPLATE (Microsoft recommends migrating these
+    // to the Settings Catalog) -> shows the "Legacy template" flag. Its settings
+    // key on the windows10GeneralConfiguration schema, which deliberately does NOT
+    // cross-match the equivalent Settings Catalog CSPs -- the cross-model gap.
+    id: "pol-win-device-restrictions-template",
+    kind: "deviceConfiguration",
+    displayName: "Windows - Device Restrictions (Template)",
+    platform: "windows",
+    legacyTemplate: true,
+    assignedGroupIds: [ALL_DEVICES],
+    excludedGroupIds: [],
+    assignmentFilters: [],
+    settings: [
+      // Carries a canonical cspNode -> cross-detects against the Settings Catalog
+      // "Allow Microsoft Account Connection" below (the classic migration overlap).
+      {
+        settingId: "windows10GeneralConfiguration:microsoftAccountBlocked",
+        cspArea: "Windows10 General Configuration",
+        displayName: "Microsoft Account Blocked",
+        value: "true",
+        cspNode: "accounts/allowmicrosoftaccountconnection",
+        cspNodeValue: "Block",
+      },
+      s("windows10GeneralConfiguration:settingsBlockGamingPage", "Windows10 General Configuration", "Settings Block Gaming Page", "true"),
+      s("windows10GeneralConfiguration:windowsSpotlightBlocked", "Windows10 General Configuration", "Windows Spotlight Blocked", "true"),
+    ],
+  },
+  {
+    // Modern Settings Catalog equivalent of the template's "Microsoft Account
+    // Blocked" -> same CSP, different model -> a cross-model overlap the per-model
+    // detection can't see. Mirrors the real migration-era duplication.
+    id: "pol-oib-accounts",
+    kind: "settingsCatalog",
+    displayName: "Win - OIB - SC - Microsoft Accounts - D - Configuration - v3.2",
     platform: "windows",
     assignedGroupIds: [ALL_DEVICES],
     excludedGroupIds: [],
     assignmentFilters: [],
-    settings: [s("script.file", "Platform Script", "Script", "Set-TimeZone.ps1 (runs in system context)")],
+    settings: [
+      {
+        settingId: "device_vendor_msft_policy_config_accounts_allowmicrosoftaccountconnection",
+        cspArea: "Accounts",
+        displayName: "Allow Microsoft Account Connection",
+        value: "Block",
+        cspPath: "./Device/Vendor/MSFT/Policy/Config/Accounts/AllowMicrosoftAccountConnection",
+        cspNode: "accounts/allowmicrosoftaccountconnection",
+      },
+    ],
   },
 
   // ---- Unassigned OIB policies -> Policy Waitlist ("what if I assigned this?") ----
@@ -508,59 +507,84 @@ const policies: IntunePolicy[] = [
     excludedGroupIds: [],
     assignmentFilters: [],
     settings: [
-      s("asr.blockofficecomms", "ASR", "Block Office communication child processes", "Block"),
-      s("asr.blockwin32api", "ASR", "Block Win32 API calls from Office macros", "Block"),
-      s("asr.useadvancedprotection", "ASR", "Use advanced ransomware protection", "Block"),
+      s("defender.asrrules.l2", "Defender", "Attack Surface Reduction Rules", "Configured"),
+      s("defender.controlledfolderaccess.l2", "Defender", "Enable Controlled Folder Access", "Block"),
     ],
   },
   {
-    id: "pol-oib-av-ring1-draft",
+    id: "pol-oib-defender-ring2-draft",
     kind: "settingsCatalog",
-    displayName: "Win - OIB - ES - Defender Antivirus Updates - Ring 1 - Pilot - v3.4",
+    displayName: "Win - OIB - ES - Defender Antivirus Updates - Ring 2 - UAT - v3.4",
     platform: "windows",
     assignedGroupIds: [],
     excludedGroupIds: [],
     assignmentFilters: [],
     settings: [
-      s("defender.engineupdatechannel", "Defender Updates", "Engine update channel", "Beta"),
-      s("defender.platformupdatechannel", "Defender Updates", "Platform update channel", "Beta"),
-      s("defender.definitionupdatechannel", "Defender Updates", "Security intelligence channel", "Current"),
+      s("defenderupd.enginechannel", "Defender Update controls", "Engine Updates Channel", "Current Channel (Staged)"),
+      s("defenderupd.platformchannel", "Defender Update controls", "Platform Updates Channel", "Current Channel (Staged)"),
+      s("defenderupd.sigchannel", "Defender Update controls", "Security Intelligence Updates Channel", "Current"),
     ],
   },
+
+  // ============================ macOS -- Open Intune Baseline (macOS v1.0) ============================
   {
-    id: "pol-oib-av-ring3-draft",
+    id: "pol-mac-oib-filevault",
     kind: "settingsCatalog",
-    displayName: "Win - OIB - ES - Defender Antivirus Updates - Ring 3 - Production - v3.4",
-    platform: "windows",
-    assignedGroupIds: [],
+    displayName: "MacOS - OIB - Disk Encryption - D - FileVault - v1.0",
+    platform: "macos",
+    assignedGroupIds: ["grp-mac"],
     excludedGroupIds: [],
     assignmentFilters: [],
     settings: [
-      s("defender.engineupdatechannel", "Defender Updates", "Engine update channel", "Broad"),
-      s("defender.platformupdatechannel", "Defender Updates", "Platform update channel", "Broad"),
-      s("defender.definitionupdatechannel", "Defender Updates", "Security intelligence channel", "Current"),
+      s("mac.filevault.enable", "FileVault", "Enable FileVault", "Enabled"),
+      s("mac.filevault.escrow", "FileVault", "Escrow recovery key to MDM", "Enabled"),
+      s("mac.filevault.deferforcelogout", "FileVault", "Defer enablement until logout", "Enabled"),
     ],
   },
   {
-    id: "pol-mac-compliance",
+    id: "pol-mac-oib-gatekeeper",
+    kind: "settingsCatalog",
+    displayName: "MacOS - OIB - Firewall - D - Gatekeeper - v1.0",
+    platform: "macos",
+    assignedGroupIds: ["grp-mac"],
+    excludedGroupIds: [],
+    assignmentFilters: [],
+    settings: [
+      s("mac.firewall.enable", "Firewall", "Enable Firewall", "Enabled"),
+      s("mac.firewall.stealth", "Firewall", "Enable stealth mode", "Enabled"),
+      s("mac.gatekeeper.allowedsources", "Gatekeeper", "Allowed app sources", "Mac App Store and identified developers"),
+    ],
+  },
+  {
+    id: "pol-mac-oib-updates",
+    kind: "settingsCatalog",
+    displayName: "MacOS - OIB - Updates - D - Update Configuration - v1.0",
+    platform: "macos",
+    assignedGroupIds: ["grp-mac"],
+    excludedGroupIds: [],
+    assignmentFilters: [],
+    settings: [
+      s("mac.update.autoinstallos", "Software Update", "Automatically install macOS updates", "Enabled"),
+      s("mac.update.autoinstallapp", "Software Update", "Automatically install app updates", "Enabled"),
+      s("mac.update.securityresponses", "Software Update", "Install security responses and system files", "Enabled"),
+    ],
+  },
+  {
+    id: "pol-mac-oib-compliance",
     kind: "compliancePolicy",
-    displayName: "macOS - Compliance Policy",
+    displayName: "MacOS - OIB - Compliance - Device Security - v1.0",
     platform: "macos",
     assignedGroupIds: ["grp-mac"],
     excludedGroupIds: [],
     assignmentFilters: [],
-    settings: [s("mac.filevault", "FileVault", "Require FileVault encryption", "Enabled")],
+    settings: [
+      s("mac.compliance.filevault", "Compliance", "Require FileVault", "Require"),
+      s("mac.compliance.firewall", "Compliance", "Require the firewall", "Require"),
+      s("mac.compliance.sip", "Compliance", "Require System Integrity Protection", "Require"),
+    ],
   },
-  {
-    id: "pol-mac-wifi",
-    kind: "deviceConfiguration",
-    displayName: "macOS - Corporate Wi-Fi",
-    platform: "macos",
-    assignedGroupIds: ["grp-mac"],
-    excludedGroupIds: [],
-    assignmentFilters: [],
-    settings: [s("mac.wifi.ssid", "Wi-Fi", "SSID", "CorpNet")],
-  },
+
+  // ============================ iOS / Android (real Intune settings) ============================
   {
     id: "pol-ios-restrictions",
     kind: "deviceConfiguration",
@@ -569,86 +593,11 @@ const policies: IntunePolicy[] = [
     assignedGroupIds: ["grp-ios"],
     excludedGroupIds: [],
     assignmentFilters: [],
-    settings: [s("ios.appstore", "Restrictions", "Block App Store", "Blocked")],
-  },
-  {
-    id: "pol-android-compliance",
-    kind: "compliancePolicy",
-    displayName: "Android - Compliance Policy",
-    platform: "android",
-    assignedGroupIds: ["grp-android"],
-    excludedGroupIds: [],
-    assignmentFilters: [],
-    settings: [s("android.minosversion", "Compliance", "Minimum OS version", "13")],
-  },
-
-  // ---- macOS Open Intune Baseline–style set (inspired by the macOS OIB) ----
-  {
-    id: "pol-mac-oib-filevault",
-    kind: "settingsCatalog",
-    displayName: "macOS - OIB - Endpoint Security - FileVault - v1.3",
-    platform: "macos",
-    assignedGroupIds: ["grp-mac"],
-    excludedGroupIds: [],
-    assignmentFilters: [],
     settings: [
-      s("mac.filevault.enable", "FileVault", "Enable FileVault", "Enabled"),
-      s("mac.filevault.escrow", "FileVault", "Escrow personal recovery key", "Enabled"),
-      s("mac.filevault.deferforceatlogout", "FileVault", "Defer enablement until logout", "Enabled"),
-      s("mac.filevault.recoverykeyrotation", "FileVault", "Rotate recovery key (days)", "180"),
-      s("mac.filevault.showrecoverykey", "FileVault", "Show recovery key to user", "Disabled"),
+      s("ios.blockappstore", "Restrictions", "Block App Store", "Blocked"),
+      s("ios.blockuntrustedtls", "Restrictions", "Block untrusted TLS certificates", "Blocked"),
     ],
   },
-  {
-    id: "pol-mac-oib-firewall-gatekeeper",
-    kind: "settingsCatalog",
-    displayName: "macOS - OIB - Endpoint Security - Firewall & Gatekeeper - v1.3",
-    platform: "macos",
-    assignedGroupIds: ["grp-mac"],
-    excludedGroupIds: [],
-    assignmentFilters: [],
-    settings: [
-      s("mac.firewall.enable", "Firewall", "Enable firewall", "Enabled"),
-      s("mac.firewall.blockall", "Firewall", "Block all incoming connections", "Disabled"),
-      s("mac.firewall.stealth", "Firewall", "Enable stealth mode", "Enabled"),
-      s("mac.gatekeeper.allowedsource", "Gatekeeper", "Allowed app sources", "App Store and identified developers"),
-      s("mac.gatekeeper.allowoverride", "Gatekeeper", "Allow user override", "Disabled"),
-    ],
-  },
-  {
-    id: "pol-mac-oib-softwareupdate",
-    kind: "settingsCatalog",
-    displayName: "macOS - OIB - Device - Software Update - v1.3",
-    platform: "macos",
-    assignedGroupIds: ["grp-mac"],
-    excludedGroupIds: [],
-    assignmentFilters: [],
-    settings: [
-      s("mac.update.automaticcheck", "Software Update", "Automatically check for updates", "Enabled"),
-      s("mac.update.autoinstallos", "Software Update", "Automatically install macOS updates", "Enabled"),
-      s("mac.update.autoinstallapp", "Software Update", "Automatically install app updates", "Enabled"),
-      s("mac.update.criticalupdates", "Software Update", "Install security responses", "Enabled"),
-      s("mac.update.deferdays", "Software Update", "Defer major OS updates (days)", "7"),
-    ],
-  },
-  {
-    id: "pol-mac-oib-compliance",
-    kind: "compliancePolicy",
-    displayName: "macOS - OIB - Compliance - Device Security - v1.3",
-    platform: "macos",
-    assignedGroupIds: ["grp-mac"],
-    excludedGroupIds: [],
-    assignmentFilters: [],
-    settings: [
-      s("mac.compliance.filevault", "Compliance", "Require FileVault", "Required"),
-      s("mac.compliance.firewall", "Compliance", "Require firewall", "Required"),
-      s("mac.compliance.sip", "Compliance", "System Integrity Protection", "Required"),
-      s("mac.compliance.gatekeeper", "Compliance", "Gatekeeper", "App Store and identified developers"),
-      s("mac.compliance.minosversion", "Compliance", "Minimum OS version", "14.0"),
-    ],
-  },
-
-  // ---- iOS / Android: a second policy each so those tabs aren't bare ----
   {
     id: "pol-ios-compliance",
     kind: "compliancePolicy",
@@ -658,10 +607,23 @@ const policies: IntunePolicy[] = [
     excludedGroupIds: [],
     assignmentFilters: [],
     settings: [
-      s("ios.compliance.passcode", "Compliance", "Require a passcode", "Required"),
-      s("ios.compliance.minosversion", "Compliance", "Minimum OS version", "17.0"),
-      s("ios.compliance.jailbroken", "Compliance", "Block jailbroken devices", "Block"),
-      s("ios.compliance.threatlevel", "Compliance", "Max mobile threat level", "Secured"),
+      s("ios.compliance.passcode", "Compliance", "Require a password to unlock mobile devices", "Require"),
+      s("ios.compliance.jailbroken", "Compliance", "Jailbroken devices", "Block"),
+      s("ios.compliance.passcodetype", "Compliance", "Required password type", "Alphanumeric"),
+    ],
+  },
+  {
+    id: "pol-android-compliance",
+    kind: "compliancePolicy",
+    displayName: "Android - Compliance Policy",
+    platform: "android",
+    assignedGroupIds: ["grp-android"],
+    excludedGroupIds: [],
+    assignmentFilters: [],
+    settings: [
+      s("android.compliance.playprotect", "Compliance", "Require the device to be at or under the Device Threat Level", "Require"),
+      s("android.compliance.rooted", "Compliance", "Rooted devices", "Block"),
+      s("android.compliance.encryption", "Compliance", "Require encryption of data storage on device", "Require"),
     ],
   },
   {
@@ -673,10 +635,8 @@ const policies: IntunePolicy[] = [
     excludedGroupIds: [],
     assignmentFilters: [],
     settings: [
-      s("android.restrict.screencapture", "Work Profile", "Block screen capture", "Blocked"),
-      s("android.restrict.crossprofilecopy", "Work Profile", "Block copy/paste to personal", "Blocked"),
-      s("android.restrict.minpasswordlength", "Work Profile", "Minimum password length", "6"),
-      s("android.restrict.playprotect", "Work Profile", "Require Google Play Protect", "Required"),
+      s("android.restrict.screencapture", "Work Profile", "Screen capture", "Block"),
+      s("android.restrict.crossprofilecopy", "Work Profile", "Copy and paste between work and personal profiles", "Block"),
     ],
   },
 ];

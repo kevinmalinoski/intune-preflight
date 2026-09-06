@@ -8,6 +8,26 @@ body,
   height: 100%;
 }
 
+/* Gentle fade-in used to draw the eye to a Group Tag match as it appears. */
+@keyframes fadeInFocus {
+  from {
+    opacity: 0;
+    transform: translateY(-1px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-fade-in {
+  animation: fadeInFocus 220ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in {
+    animation: none;
+  }
+}
+
 body {
   @apply bg-ink-950 text-slate-200;
 }

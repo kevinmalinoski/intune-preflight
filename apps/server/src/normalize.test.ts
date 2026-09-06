@@ -3,6 +3,9 @@ import {
   flattenIntentSettings,
   flattenSettingsCatalogEntries,
   flattenToCspSettings,
+  indexIntentSettingDefinitions,
+  isLegacyTemplateType,
+  isSecurityIntentTemplate,
   parseAssignmentTarget,
   platformFromIntentTemplate,
   platformFromOdataType,
@@ -96,6 +99,56 @@ describe("flattenIntentSettings (legacy Endpoint Security intents)", () => {
     expect(setting.value).toBe("true");
   });
 
+  it("uses the template's real Intune display name when a definitions map is supplied", () => {
+    const defs = new Map([[defId, { displayName: "BitLocker – Encrypt devices" }]]);
+    const [setting] = flattenIntentSettings([{ definitionId: defId, value: true }], "BitLocker", defs);
+    expect(setting.displayName).toBe("BitLocker – Encrypt devices");
+  });
+
+  it("resolves an enum value to its human label (e.g. xtsAes256 -> AES 256bit XTS)", () => {
+    const encId = "deviceConfiguration--bitLockerSystemDrivePolicy_encryptionMethod";
+    const defs = new Map([
+      [encId, { displayName: "Configure encryption method", valueLabels: new Map([["xtsAes256", "AES 256bit XTS"]]) }],
+    ]);
+    const [setting] = flattenIntentSettings([{ definitionId: encId, value: "xtsAes256" }], "BitLocker", defs);
+    expect(setting.displayName).toBe("Configure encryption method");
+    expect(setting.value).toBe("AES 256bit XTS");
+  });
+
+  it("falls back to the definitionId heuristic and raw value when definitions are missing", () => {
+    // Empty map models a failed/partial settingDefinitions fetch -- must not drop data.
+    const [setting] = flattenIntentSettings([{ definitionId: defId, value: "xtsAes256" }], "BitLocker", new Map());
+    expect(setting.displayName).toBe("Bit Locker Encrypt Device");
+    expect(setting.value).toBe("xtsAes256");
+  });
+
+  it("indexes real settingDefinitions (names, docs URL, enum labels) by definitionId", () => {
+    // Shape taken verbatim from the live BitLocker template settingDefinitions.
+    const index = indexIntentSettingDefinitions([
+      {
+        id: "deviceConfiguration--bitLockerSystemDrivePolicy_encryptionMethod",
+        displayName: "Configure encryption method for Operating System drives",
+        documentationUrl: "https://go.microsoft.com/fwlink/?linkid=872526",
+        constraints: [
+          {
+            "@odata.type": "#microsoft.graph.deviceManagementEnumConstraint",
+            values: [
+              { value: null, displayName: "Not configured" },
+              { value: "xtsAes256", displayName: "AES 256bit XTS" },
+              { value: "aesCbc128", displayName: "AES 128bit CBC" },
+            ],
+          },
+        ],
+      },
+    ]);
+    const def = index.get("deviceConfiguration--bitLockerSystemDrivePolicy_encryptionMethod");
+    expect(def?.displayName).toBe("Configure encryption method for Operating System drives");
+    expect(def?.documentationUrl).toBe("https://go.microsoft.com/fwlink/?linkid=872526");
+    expect(def?.valueLabels?.get("xtsAes256")).toBe("AES 256bit XTS");
+    // The null placeholder row is skipped.
+    expect(def?.valueLabels?.has("")).toBe(false);
+  });
+
   it("falls back to valueJson when there is no typed `value`", () => {
     const [setting] = flattenIntentSettings(
       [{ definitionId: "x_encryptionMethodWithXtsOsDrive", valueJson: "7" }],
@@ -131,6 +184,51 @@ describe("flattenIntentSettings (legacy Endpoint Security intents)", () => {
     expect(platformFromIntentTemplate("windows10AndLater")).toBe("windows");
     expect(platformFromIntentTemplate("macOS")).toBe("macos");
     expect(platformFromIntentTemplate(undefined)).toBe("windows");
+  });
+
+  it("only labels security/baseline templates as Endpoint Security (not legacy device config)", () => {
+    // Real templateType/@odata.type shapes from a live /deviceManagement/templates.
+    const security = [
+      { "@odata.type": "#microsoft.graph.securityBaselineTemplate", templateType: "securityTemplate" }, // BitLocker
+      { "@odata.type": "#microsoft.graph.securityBaselineTemplate", templateType: "advancedThreatProtectionSecurityBaseline" },
+      { "@odata.type": "#microsoft.graph.securityBaselineTemplate", templateType: "microsoftEdgeSecurityBaseline" },
+      { "@odata.type": "#microsoft.graph.securityBaselineTemplate", templateType: "cloudPC" }, // Windows 365 baseline
+      { templateType: "securityBaseline" }, // MDM Security Baseline
+    ];
+    for (const t of security) expect(isSecurityIntentTemplate(t)).toBe(true);
+    // The built-in Office 365 device-config templates (Email, Device restrictions,
+    // Compliance) are NOT security -> an intent from one must not read as legacy ES.
+    expect(isSecurityIntentTemplate({ templateType: "deviceConfigurationForOffice365" })).toBe(false);
+    expect(isSecurityIntentTemplate({})).toBe(false);
+  });
+});
+
+describe("isLegacyTemplateType (deprecated device-config templates)", () => {
+  it("flags Device restrictions/features, Endpoint protection, Extensions (all platforms)", () => {
+    for (const t of [
+      "#microsoft.graph.windows10GeneralConfiguration",
+      "#microsoft.graph.iosGeneralDeviceConfiguration",
+      "#microsoft.graph.androidWorkProfileGeneralDeviceConfiguration",
+      "#microsoft.graph.macOSDeviceFeaturesConfiguration",
+      "#microsoft.graph.windows10EndpointProtectionConfiguration",
+      "#microsoft.graph.macOSExtensionsConfiguration",
+    ]) {
+      expect(isLegacyTemplateType(t)).toBe(true);
+    }
+  });
+
+  it("does NOT flag the still-current templates or non-template types", () => {
+    // Certs/VPN/Wi-Fi/custom stay as templates; Update rings aren't templates.
+    for (const t of [
+      "#microsoft.graph.windows10CustomConfiguration",
+      "#microsoft.graph.iosVpnConfiguration",
+      "#microsoft.graph.windowsWifiConfiguration",
+      "#microsoft.graph.windows81TrustedRootCertificate",
+      "#microsoft.graph.windowsUpdateForBusinessConfiguration",
+      undefined,
+    ]) {
+      expect(isLegacyTemplateType(t)).toBe(false);
+    }
   });
 });
 
@@ -207,17 +305,42 @@ describe("flattenToCspSettings (compliance default suppression)", () => {
     expect(settings.map((s) => s.settingId.split(":").pop())).toEqual(["passwordRequired"]);
   });
 
-  it("does NOT suppress `false` on a non-compliance config profile", () => {
-    // A device-restriction profile can legitimately enforce a `false` (e.g.
-    // "camera blocked = false"), so the compliance-only suppression must not
-    // reach it.
+  it("drops unset schema defaults on legacy Device Restrictions templates", () => {
+    // A real windows10GeneralConfiguration ("Device restrictions") that blocks a
+    // couple of things -- Graph serializes the whole ~200-property schema, so only
+    // what the admin actually set must survive (the rest are `false` toggles and
+    // unset enum sentinels). Shape taken from a live tenant object.
     const restriction = {
       id: "r1",
-      "@odata.type": "#microsoft.graph.macOSGeneralDeviceConfiguration",
-      cameraBlocked: false,
+      "@odata.type": "#microsoft.graph.windows10GeneralConfiguration",
+      settingsBlockGamingPage: true, // configured
+      windowsSpotlightBlocked: true, // configured
+      cameraBlocked: false, // default (unchecked toggle)
+      cortanaBlocked: false, // default
+      edgeCookiePolicy: "userDefined", // enum default
+      passwordRequiredType: "deviceDefault", // enum default
+      microsoftAccountSignInAssistantSettings: "notConfigured", // enum default
+      cellularData: "allowed", // a real enum value -> kept
+      startMenuLayoutXml: null, // unset -> dropped by stringify
+      bluetoothAllowedServices: [], // empty -> dropped by stringify
     };
-    const settings = flattenToCspSettings(restriction);
-    expect(settings.map((s) => s.value)).toContain("false");
+    const byId = Object.fromEntries(flattenToCspSettings(restriction).map((s) => [s.settingId.split(":").pop(), s.value]));
+    expect(byId).toEqual({
+      settingsBlockGamingPage: "true",
+      windowsSpotlightBlocked: "true",
+      cellularData: "allowed",
+    });
+  });
+
+  it("does NOT drop `false` on non-template types (e.g. Update rings) where it's meaningful", () => {
+    // allowWindows11Upgrade=false genuinely blocks the upgrade -- not an unchecked
+    // restriction -- so an Update ring's booleans must survive.
+    const updateRing = {
+      id: "u1",
+      "@odata.type": "#microsoft.graph.windowsUpdateForBusinessConfiguration",
+      allowWindows11Upgrade: false,
+    };
+    expect(flattenToCspSettings(updateRing).map((s) => s.value)).toContain("false");
   });
 });
 
