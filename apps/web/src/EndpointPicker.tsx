@@ -1,5 +1,11 @@
 import { useMemo, useState } from "react";
-import { classifyGroupTagMatch, groupTagScope, isGroupTagRule, isAutopilotJoinedRule } from "@intune-preflight/shared";
+import {
+  classifyAutopilotMatch,
+  classifyGroupTagMatch,
+  groupTagScope,
+  isGroupTagRule,
+  isAutopilotJoinedRule,
+} from "@intune-preflight/shared";
 import type { AssignmentFilter, GroupSummary, Platform } from "@intune-preflight/shared";
 
 const PLATFORM_OPTIONS: { value: Platform; label: string }[] = [
@@ -56,19 +62,23 @@ export function EndpointPicker({
 
   const trimmedGroupTag = groupTag.trim();
 
-  // Float the relevant groups up: selected first, then confident Group Tag
-  // matches, then conditional references, then the rest alphabetically. Re-sorts
-  // as you select or type a tag, so what matters rises to the top.
+  // Float the relevant groups up: selected first, then confident matches (Group
+  // Tag or Autopilot), then conditional references, then the rest alphabetically.
+  // Re-sorts as you select, type a tag, or toggle Autopilot, so what matters rises.
+  const autopilotOn = isAutopilotDevice && platform === "windows";
   const sortedGroups = useMemo(() => {
     const rankOf = (g: GroupSummary): number => {
       if (selectedGroupIds.includes(g.id)) return 0;
-      const state = trimmedGroupTag ? classifyGroupTagMatch(g.membershipRule, trimmedGroupTag).state : "none";
-      return state === "match" ? 1 : state === "conditional" ? 2 : 3;
+      const tagState = trimmedGroupTag ? classifyGroupTagMatch(g.membershipRule, trimmedGroupTag).state : "none";
+      const apState = autopilotOn ? classifyAutopilotMatch(g.membershipRule).state : "none";
+      if (tagState === "match" || apState === "match") return 1;
+      if (tagState === "conditional" || apState === "conditional") return 2;
+      return 3;
     };
     return [...filteredGroups].sort(
       (a, b) => rankOf(a) - rankOf(b) || a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" })
     );
-  }, [filteredGroups, selectedGroupIds, trimmedGroupTag]);
+  }, [filteredGroups, selectedGroupIds, trimmedGroupTag, autopilotOn]);
 
   const platformFilters = useMemo(() => filters.filter((f) => f.platform === platform), [filters, platform]);
 
@@ -226,11 +236,18 @@ export function EndpointPicker({
               const isMatch = tm.state === "match";
               const isConditional = tm.state === "conditional";
               const tagScope = groupTagScope(g.membershipRule);
-              const tagActive = isMatch || isConditional;
-              // Show the rule when we couldn't fully decide it from the Group Tag
-              // (conditional, or a match that also hinges on other properties).
-              const showRule = isConditional || (isMatch && !tm.fullyEvaluated);
               const isAutopilotJoined = isAutopilotJoinedRule(g.membershipRule);
+              // A group that keys on Autopilot ([ZTDId]) but ANDs it with a device
+              // condition we can't evaluate -- surface it for opt-in (not auto-select)
+              // when simulating an Autopilot device, the way Group Tag "+ conditions" is.
+              const isAutopilotConditional =
+                autopilotOn && classifyAutopilotMatch(g.membershipRule).state === "conditional";
+              const tagActive = isMatch || isConditional;
+              const highlight = tagActive || isAutopilotConditional;
+              // Show the rule when we couldn't fully decide it (Group Tag conditional,
+              // a tag match that also hinges on other properties, or an Autopilot
+              // "+ conditions" group whose extra condition we can't check).
+              const showRule = isConditional || (isMatch && !tm.fullyEvaluated) || isAutopilotConditional;
               const title = isGroupTagRule(g.membershipRule)
                 ? `Autopilot Group Tag group — rule: ${g.membershipRule}`
                 : isAutopilotJoined
@@ -245,7 +262,7 @@ export function EndpointPicker({
                 <label
                   key={g.id}
                   className={`flex items-start gap-2.5 border-b border-l-2 border-ink-800 px-2.5 py-2 text-xs last:border-b-0 transition-colors ${
-                    tagActive ? "border-l-amber-400/60 bg-amber-500/[0.06]" : "border-l-transparent"
+                    highlight ? "border-l-amber-400/60 bg-amber-500/[0.06]" : "border-l-transparent"
                   } ${locked ? "cursor-default" : "cursor-pointer"} hover:bg-ink-800`}
                   title={
                     locked
@@ -303,6 +320,14 @@ export function EndpointPicker({
                           title="Auto-included by the Autopilot device checkbox."
                         >
                           🔒 autopilot
+                        </span>
+                      )}
+                      {isAutopilotConditional && (
+                        <span
+                          className="animate-fade-in inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[9px] font-medium leading-none text-amber-300/90 ring-1 ring-inset ring-amber-400/40"
+                          title="An Autopilot ([ZTDId]) group whose rule also depends on a device condition that can't be evaluated here (e.g. excluding Cloud PCs). Review the rule and include it if it applies to this device."
+                        >
+                          autopilot · + conditions
                         </span>
                       )}
                       {g.isDynamic && (

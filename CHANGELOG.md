@@ -6,6 +6,26 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [2.0.1] — 2026-09-06
+
+### Added
+- **Autopilot "+ conditions" surfacing in the group picker.** A dynamic group whose
+  rule keys on Autopilot (a bare `[ZTDId]` clause) but ANDs it with a device
+  condition the flat evaluator can't check — e.g. the common
+  `… and (device.deviceModel -not -startsWith "Cloud PC")` (all Autopilot devices
+  except Cloud PCs) — is no longer silently missed. When the **Autopilot device**
+  toggle is on, it's surfaced with an `autopilot · + conditions` badge, its rule
+  shown inline, and sorted to the top for one-click opt-in (not auto-selected, to
+  avoid over-matching a condition that can't be evaluated). Cleanly-scoped `[ZTDId]`
+  groups still auto-select as before. Mirrors the Group Tag "+ conditions" behavior.
+
+### Fixed
+- **Diagram: exact spacing for the device + enrollment stack.** The Autopilot
+  enrollment cards under the "Configured Endpoint" node are now positioned from
+  their real measured heights (via a ResizeObserver), so the gaps are always even
+  regardless of how the device's group list wraps — fixing an overlap that could
+  appear on some selections.
+
 ## [2.0.0] — 2026-09-03
 
 A major release centered on **legacy policy handling**, **cross-model conflict

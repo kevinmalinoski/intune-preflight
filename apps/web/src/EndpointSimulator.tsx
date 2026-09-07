@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { groupTagMatchesRule, isGroupTagRule, isAutopilotJoinedRule } from "@intune-preflight/shared";
 import type {
   AssignmentFilter,
@@ -210,9 +210,16 @@ export function EndpointSimulator({
     }
   };
 
-  const deviceFilterNames = deviceFilterIds
-    .map((id) => filters.find((f) => f.id === id)?.displayName)
-    .filter((name): name is string => Boolean(name));
+  // Memoized so its identity is stable across renders -- the diagram keys a
+  // layout memo on it, and a fresh array each render would thrash that memo (and
+  // the diagram's node-measurement pass) every render.
+  const deviceFilterNames = useMemo(
+    () =>
+      deviceFilterIds
+        .map((id) => filters.find((f) => f.id === id)?.displayName)
+        .filter((name): name is string => Boolean(name)),
+    [deviceFilterIds, filters]
+  );
 
   return (
     <div className="flex h-full flex-col">

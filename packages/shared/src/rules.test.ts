@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  classifyAutopilotMatch,
   classifyGroupTagMatch,
   filterExclusionReason,
   groupTagMatchesRule,
@@ -183,5 +184,38 @@ describe("isAutopilotJoinedRule", () => {
     ).toBe(false);
     expect(isAutopilotJoinedRule(orderIdStartsWith("SALES"))).toBe(false);
     expect(isAutopilotJoinedRule(undefined)).toBe(false);
+  });
+});
+
+describe("classifyAutopilotMatch (Autopilot in the picker)", () => {
+  it("reports a clean bare [ZTDId] rule as a confident match (auto-selected)", () => {
+    expect(classifyAutopilotMatch(ztdId).state).toBe("match");
+    expect(
+      classifyAutopilotMatch('(device.devicePhysicalIds -any (_ -contains "[ZTDId]"))').state
+    ).toBe("match");
+    // [ZTDId] as one branch of an `or` still grants membership on its own.
+    expect(classifyAutopilotMatch(`${ztdId} or ${orderIdStartsWith("SALES")}`).state).toBe("match");
+  });
+
+  it("reports [ZTDId] ANDed with a device condition as conditional (surface, opt-in)", () => {
+    // The real tenant rule that motivated this: Autopilot devices excluding Cloud PCs.
+    expect(
+      classifyAutopilotMatch(
+        '(device.devicePhysicalIDs -any (_ -contains "[ZTDId]")) and (device.deviceModel -not -startsWith "Cloud PC")'
+      ).state
+    ).toBe("conditional");
+    expect(classifyAutopilotMatch(`${ztdId} and (device.deviceOSType -eq "Windows")`).state).toBe(
+      "conditional"
+    );
+  });
+
+  it("reports no [ZTDId] marker as none", () => {
+    expect(classifyAutopilotMatch(orderIdStartsWith("SALES")).state).toBe("none");
+    expect(classifyAutopilotMatch('(device.deviceOSType -eq "Windows")').state).toBe("none");
+    // A [ZTDId] pinned to one specific device is not the "any Autopilot device" marker.
+    expect(
+      classifyAutopilotMatch('(device.devicePhysicalIds -any (_ -eq "[ZTDId]:1234-5678"))').state
+    ).toBe("none");
+    expect(classifyAutopilotMatch(undefined).state).toBe("none");
   });
 });

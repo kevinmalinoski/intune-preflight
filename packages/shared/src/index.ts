@@ -571,3 +571,31 @@ export function isAutopilotJoinedRule(membershipRule: string | undefined): boole
     return !/\s+-?and\s+/i.test(branch.replace(/"[^"]*"/g, '""'));
   });
 }
+
+/** How a dynamic group's rule relates to a simulated Autopilot device (for the picker). */
+export interface AutopilotMatch {
+  /**
+   * "match": a bare `[ZTDId]` clause grants membership on its own -- every
+   * Autopilot device qualifies (auto-selected; identical to isAutopilotJoinedRule).
+   * "conditional": the rule DOES key on Autopilot (a bare `[ZTDId]` clause) but ANDs
+   * it with a device condition the flat evaluator can't check -- e.g.
+   * `... and (device.deviceModel -not -startsWith "Cloud PC")` -- so surface it and
+   * show the rule, don't auto-select. "none": no bare `[ZTDId]` Autopilot marker.
+   */
+  state: "match" | "conditional" | "none";
+}
+
+/**
+ * Classify a dynamic group's membership rule against a simulated Autopilot device.
+ * Mirrors classifyGroupTagMatch: the `[ZTDId]` Autopilot marker is recognized, but
+ * ANDed device conditions are NOT guessed -- an `and` next to the `[ZTDId]` clause
+ * downgrades a clean "match" to "conditional" so the picker can surface the group
+ * (with its rule) for a human to opt into, rather than over-matching on a condition
+ * it can't evaluate. A single-device `"[ZTDId]:<guid>"` rule is not a marker (see
+ * BARE_ZTDID_CLAUSE) and stays "none".
+ */
+export function classifyAutopilotMatch(membershipRule: string | undefined): AutopilotMatch {
+  if (!membershipRule) return { state: "none" };
+  if (isAutopilotJoinedRule(membershipRule)) return { state: "match" };
+  return { state: BARE_ZTDID_CLAUSE.test(membershipRule) ? "conditional" : "none" };
+}

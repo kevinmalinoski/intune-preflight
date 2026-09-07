@@ -1,8 +1,10 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
   Controls,
+  useNodesState,
+  useEdgesState,
   type Node,
   type Edge,
   type NodeMouseHandler,
@@ -671,7 +673,57 @@ function buildGraph(
     });
   }
 
-  return { nodes, edges };
+  return { nodes, edges, centerline };
+}
+
+// Re-place the device + its enrollment cards using their REAL rendered heights
+// (read straight from the DOM) rather than the character-count estimate buildGraph
+// laid them out with. The device node's height depends on how far its group list
+// wraps, which no char-count estimate nails exactly -- an underestimate overlaps
+// the first card, an overestimate leaves an uneven gap. (React Flow's own
+// `measured` lags a tick behind content changes, so we read the layout height
+// directly.) With real heights the device -> profile and profile -> profile gaps
+// are always exactly STACK_GAP. offsetHeight is unaffected by the viewport's zoom
+// transform, so it's already in flow units.
+function domHeight(id: string): number {
+  const el = document.querySelector<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(id)}"]`);
+  return el?.offsetHeight ?? 0;
+}
+
+function reStackLeftColumn(prev: Node[], centerline: number): Node[] {
+  const dev = prev.find((n) => n.id === "device");
+  const dh = dev && domHeight("device");
+  if (!dev || !dh) return prev;
+  const aps = prev
+    .filter((n) => n.type === "autopilot")
+    .sort((a, b) => a.position.y - b.position.y);
+  const targetY = new Map<string, number>();
+  if (aps.length === 0) {
+    targetY.set("device", centerline - dh / 2);
+  } else {
+    const ahs = aps.map((a) => domHeight(a.id));
+    if (ahs.some((h) => !h)) return prev; // wait until every card has rendered
+    const total = dh + STACK_GAP + ahs.reduce((s, h) => s + h, 0) + STACK_GAP * (aps.length - 1);
+    const top = centerline - total / 2;
+    targetY.set("device", top);
+    let y = top + dh + STACK_GAP;
+    aps.forEach((a, i) => {
+      targetY.set(a.id, y);
+      y += ahs[i] + STACK_GAP;
+    });
+  }
+  let changed = false;
+  const next = prev.map((n) => {
+    const ty = targetY.get(n.id);
+    if (ty !== undefined && Math.abs(n.position.y - ty) > 0.5) {
+      changed = true;
+      return { ...n, position: { ...n.position, y: ty } };
+    }
+    return n;
+  });
+  // Returning the SAME reference when nothing moved lets the layout effect that
+  // calls this settle (setNodes with an unchanged array is a no-op re-render).
+  return changed ? next : prev;
 }
 
 function Legend() {
@@ -750,7 +802,7 @@ export function SimulationDiagram({
     });
   }, []);
 
-  const { nodes, edges } = useMemo(
+  const graph = useMemo(
     () =>
       buildGraph(
         simulation,
@@ -778,6 +830,39 @@ export function SimulationDiagram({
     ]
   );
 
+  // Controlled nodes so we can re-place the device stack after it renders.
+  const [nodes, setNodes, onNodesChange] = useNodesState(graph.nodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(graph.edges);
+  const centerlineRef = useRef(graph.centerline);
+  centerlineRef.current = graph.centerline;
+
+  // Rebuild -> reset to the freshly estimated layout (the observer below corrects it).
+  useEffect(() => {
+    setNodes(graph.nodes);
+    setEdges(graph.edges);
+  }, [graph, setNodes, setEdges]);
+
+  // Snap the device + enrollment stack to their REAL rendered heights so the
+  // device->profile and profile->profile gaps are always exactly STACK_GAP, no
+  // matter how the device's group list wraps or whether a card is expanded. A
+  // ResizeObserver on the actual DOM nodes is authoritative about their size and
+  // fires on every change (including the extra line the device gains a beat after
+  // a group is added), sidestepping React Flow's own measurement timing.
+  // reStackLeftColumn returns the same array reference when nothing moved, so this
+  // settles without looping.
+  useEffect(() => {
+    const ids = ["device", ...nodes.filter((n) => n.type === "autopilot").map((n) => n.id)];
+    const els = ids
+      .map((id) => document.querySelector<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(id)}"]`))
+      .filter((el): el is HTMLElement => el !== null);
+    if (els.length === 0) return;
+    const snap = () => setNodes((prev) => reStackLeftColumn(prev, centerlineRef.current));
+    snap();
+    const ro = new ResizeObserver(snap);
+    els.forEach((el) => ro.observe(el));
+    return () => ro.disconnect();
+  }, [nodes, setNodes]);
+
   const onNodeClick: NodeMouseHandler = useCallback((_evt, node) => {
     if (node.type !== "entraGroup") return;
     const gid = node.id.replace("group:", "");
@@ -793,6 +878,8 @@ export function SimulationDiagram({
       <ReactFlow
         nodes={nodes}
         edges={edges}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
         nodeTypes={nodeTypes}
         onNodeClick={onNodeClick}
         fitView

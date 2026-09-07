@@ -56,6 +56,18 @@ const groups: IntuneGroup[] = [
     membershipRule: '(device.devicePhysicalIDs -any (_ -startsWith "[ZTDId]"))',
   },
   {
+    // A real-tenant Autopilot pattern: every Autopilot device EXCEPT Windows 365
+    // Cloud PCs. The [ZTDId] marker is evaluable, but the ANDed deviceModel
+    // condition is not -- so simulating an Autopilot device surfaces this as an
+    // Autopilot "+ conditions" opt-in (with the rule shown) rather than
+    // auto-selecting it, the way a Group Tag "+ conditions" match works.
+    id: "grp-autopilot-nocpc",
+    displayName: "Windows - Autopilot Devices (excl. Cloud PC)",
+    isDynamic: true,
+    membershipRule:
+      '(device.devicePhysicalIDs -any (_ -contains "[ZTDId]")) and (device.deviceModel -not -startsWith "Cloud PC")',
+  },
+  {
     // Combined rule: the Group Tag clause is evaluable, but the extra
     // deviceOSType condition is not -- so a tag match here is flagged
     // "+ conditions" (verify) rather than claimed outright.
@@ -444,6 +456,22 @@ const policies: IntunePolicy[] = [
     settings: [
       s("sharedpc.enablesharedpcmode", "Shared PC", "Enable Shared PC Mode", "True"),
       s("sharedpc.accountmanagement", "Shared PC", "Enable Account Management", "True"),
+    ],
+  },
+  {
+    // Targets the "excl. Cloud PC" Autopilot group so it carries a policy and thus
+    // appears in the picker -- letting the demo show the Autopilot "+ conditions"
+    // surfacing when the Autopilot device toggle is on.
+    id: "pol-corp-autopilot-hardening",
+    kind: "settingsCatalog",
+    displayName: "CORP - Autopilot Device Hardening",
+    platform: "windows",
+    assignedGroupIds: ["grp-autopilot-nocpc"],
+    excludedGroupIds: [],
+    assignmentFilters: [],
+    settings: [
+      s("dmaguard.deviceenumerationpolicy", "Endpoint Security", "DMA guard — device enumeration", "Block all"),
+      s("localsecurityauthority.configurelsaprotectedmode", "Endpoint Security", "LSA protected mode", "Enabled with UEFI lock"),
     ],
   },
   {
