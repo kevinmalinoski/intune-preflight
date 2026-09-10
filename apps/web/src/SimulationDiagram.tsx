@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
@@ -8,6 +8,7 @@ import {
   type Node,
   type Edge,
   type NodeMouseHandler,
+  type ReactFlowInstance,
   Handle,
   Position,
 } from "@xyflow/react";
@@ -45,16 +46,18 @@ const SOURCE_STYLE: Record<SimulationGroup["source"], { border: string; bg: stri
 const UNASSIGNED_EDGE = "#fb923c";
 const AUTOPILOT_COLOR = "#818cf8";
 
-// Autopilot-card geometry. The cards stack UNDERNEATH the device as part of the
-// same "configured endpoint" unit (the device is what enrolls), so they share
-// the left column rather than forming one of their own.
-// Collapsed by default (header + a name/status row); expand to reveal settings.
-const AP_NODE_WIDTH = 320;
-const AP_HEADER_HEIGHT = 40;
-const AP_SUMMARY_BASE = 35; // the collapsed name + status row (measured ~75 w/ header)
-const AP_ROW_HEIGHT = 19; // one setting row when expanded (measured ~18.3)
+// The device and its Autopilot enrollment cards are ONE React Flow node -- the
+// device is what enrolls, so they read (and move) as a single "configured
+// endpoint" unit. Keeping them in one node means the BROWSER stacks the cards:
+// there is no per-card geometry to estimate, no post-render re-measure pass, and
+// the gaps are exactly STACK_GAP no matter how names wrap or which cards are
+// expanded. Each card carries its own source handle, so an Autopilot profile
+// still draws its own line to the groups it targets.
+const STACK_WIDTH = 320;
+// Even vertical rhythm inside the stack: device -> first profile and
+// profile -> profile use the same gap so the unit reads as one deliberate group.
+const STACK_GAP = 16;
 
-const DEVICE_NODE_WIDTH = 320; // matches DeviceNode's w-80 (== AP_NODE_WIDTH so the stack aligns)
 const GROUP_NODE_WIDTH = 250;
 const POLICY_NODE_WIDTH = 230;
 const TYPE_NODE_WIDTH = 400;
@@ -94,10 +97,12 @@ function estimateRowHeight(label: string): number {
   return BASE_ROW_HEIGHT + (lines - 1) * LINE_HEIGHT + ROW_GAP;
 }
 
-function DeviceNode({ data }: { data: { groupNames: string[]; filterNames: string[] } }) {
+/** The device card itself -- the top of the "configured endpoint" stack. */
+function DeviceCard({ groupNames, filterNames }: { groupNames: string[]; filterNames: string[] }) {
   return (
-    <div className="flex w-80 flex-col items-center gap-2 rounded-2xl border-2 border-emerald-400 bg-ink-900 px-5 py-4 text-emerald-100 shadow-[0_8px_30px_rgba(16,185,129,0.25)]">
-      <Handle type="source" position={Position.Right} className="opacity-0" />
+    <div className="relative flex flex-col items-center gap-2 rounded-2xl border-2 border-emerald-400 bg-ink-900 px-5 py-4 text-emerald-100 shadow-[0_8px_30px_rgba(16,185,129,0.25)]">
+      {/* Groups no Autopilot profile targets hang off this handle. */}
+      <Handle type="source" id="device" position={Position.Right} className="opacity-0" />
       <span className="text-3xl" aria-hidden>
         🖥️
       </span>
@@ -106,14 +111,12 @@ function DeviceNode({ data }: { data: { groupNames: string[]; filterNames: strin
         <div>
           <span className="font-medium uppercase tracking-wide text-emerald-300/80">Entra Groups:</span>{" "}
           <span className="text-emerald-100/90">
-            {data.groupNames.length > 0 ? data.groupNames.join(", ") : "None selected"}
+            {groupNames.length > 0 ? groupNames.join(", ") : "None selected"}
           </span>
         </div>
         <div>
           <span className="font-medium uppercase tracking-wide text-emerald-300/80">Device Filters:</span>{" "}
-          <span className="text-emerald-100/90">
-            {data.filterNames.length > 0 ? data.filterNames.join(", ") : "None"}
-          </span>
+          <span className="text-emerald-100/90">{filterNames.length > 0 ? filterNames.join(", ") : "None"}</span>
         </div>
       </div>
     </div>
@@ -303,6 +306,9 @@ function PolicyTypeNode({
   );
 }
 
+/** One Autopilot profile as it appears in the endpoint's enrollment stack. */
+type StackProfile = SimulationAutopilotProfile & { excludedNames: string[] };
+
 /**
  * The Autopilot enrollment card: which v1 deployment profile / v2 device-
  * preparation policy this endpoint's groups target, with its high-level
@@ -310,20 +316,25 @@ function PolicyTypeNode({
  * "would not deploy" note -- targeting that LOOKS right but is carved out is
  * exactly the preflight catch.
  */
-function AutopilotNode({
-  data,
+function AutopilotCard({
+  profile,
+  expanded,
+  onToggle,
 }: {
-  data: SimulationAutopilotProfile & { excludedNames: string[]; expanded: boolean; onToggle?: () => void };
+  profile: StackProfile;
+  expanded: boolean;
+  onToggle: () => void;
 }) {
-  const excluded = data.status === "excluded";
+  const excluded = profile.status === "excluded";
   const color = excluded ? "#fb7185" : AUTOPILOT_COLOR;
   return (
+    // `relative` anchors the handle below to THIS card rather than to the node
+    // wrapper, so each profile's line leaves from its own card.
     <div
-      className="rounded-lg border bg-ink-900 text-xs shadow-[0_4px_16px_rgba(0,0,0,0.35)]"
-      style={{ borderColor: color, borderStyle: excluded ? "dashed" : "solid", width: AP_NODE_WIDTH }}
+      className="relative rounded-lg border bg-ink-900 text-xs shadow-[0_4px_16px_rgba(0,0,0,0.35)]"
+      style={{ borderColor: color, borderStyle: excluded ? "dashed" : "solid" }}
     >
-      <Handle type="target" position={Position.Left} className="opacity-0" />
-      <Handle type="source" position={Position.Right} className="opacity-0" />
+      <Handle type="source" id={`ap:${profile.id}`} position={Position.Right} className="opacity-0" />
       <div className="flex items-center justify-between gap-2 border-b border-ink-800 px-3 py-2">
         <span className="font-semibold" style={{ color }}>
           ✈ Autopilot enrollment
@@ -332,17 +343,19 @@ function AutopilotNode({
           className="rounded px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide"
           style={{ color, backgroundColor: `${color}22` }}
         >
-          {data.generation === "v1" ? "V1 · Deployment profile" : "V2 · Device preparation"}
+          {profile.generation === "v1" ? "V1 · Deployment profile" : "V2 · Device preparation"}
         </span>
       </div>
       {/* Collapsed by default: name + targeted/excluded status. Click to expand. */}
       <button
-        onClick={data.onToggle}
-        title={data.expanded ? "Hide deployment details" : "Show deployment details"}
+        onClick={onToggle}
+        title={expanded ? "Hide deployment details" : "Show deployment details"}
         className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-ink-800/40"
       >
-        <span className="shrink-0 text-slate-500">{data.expanded ? "▾" : "▸"}</span>
-        <span className="min-w-0 flex-1 break-words font-medium leading-snug text-slate-100">{data.displayName}</span>
+        <span className="shrink-0 text-slate-500">{expanded ? "▾" : "▸"}</span>
+        <span className="min-w-0 flex-1 break-words font-medium leading-snug text-slate-100">
+          {profile.displayName}
+        </span>
         <span
           className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium uppercase"
           style={{ color, backgroundColor: `${color}22` }}
@@ -350,9 +363,9 @@ function AutopilotNode({
           {excluded ? "Excluded" : "Targeted"}
         </span>
       </button>
-      {data.expanded && (
+      {expanded && (
         <div className="flex flex-col gap-0.5 border-t border-ink-800/60 px-3 pb-2 pt-1.5">
-          {data.settings.map((s, i) => (
+          {profile.settings.map((s, i) => (
             <div key={i} className="flex items-baseline justify-between gap-3 leading-snug">
               <span className="shrink-0 text-slate-500">{s.label}</span>
               <span className="min-w-0 truncate text-right text-slate-300" title={s.value}>
@@ -362,7 +375,7 @@ function AutopilotNode({
           ))}
           {excluded && (
             <div className="mt-1 leading-snug text-rose-300/90">
-              🚫 Would not deploy — excluded via {data.excludedNames.join(", ")}
+              🚫 Would not deploy — excluded via {profile.excludedNames.join(", ")}
             </div>
           )}
         </div>
@@ -371,21 +384,86 @@ function AutopilotNode({
   );
 }
 
+/**
+ * The device and every Autopilot profile it enrolls through, as ONE node: the
+ * device is what enrolls (v1 via its assigned device groups, v2 via the
+ * policy's just-in-time device group), so the stack reads as one thing that
+ * then branches out to the groups. Because it is a single node the browser
+ * lays the cards out -- gaps stay exactly STACK_GAP however names wrap or
+ * whichever cards are expanded, with no geometry for us to estimate and
+ * nothing to re-measure after the fact.
+ */
+function EndpointStackNode({
+  data,
+}: {
+  data: {
+    groupNames: string[];
+    filterNames: string[];
+    profiles: StackProfile[];
+    expandedAps: Set<string>;
+    onToggleAp: (id: string) => void;
+    onHeight: (height: number) => void;
+  };
+}) {
+  // The stack owns its height -- it depends on how far the group list wraps and
+  // which profile cards are expanded, so it is measured, never estimated. The
+  // node reports it upward because only the layout above knows the centerline to
+  // center it on. Measuring from inside the node (rather than hunting for it in
+  // the DOM from outside) keeps us on the live element: React Flow replaces the
+  // node's element on some rebuilds, and an observer pinned to the old one goes
+  // quietly stale, reporting a height the stack no longer has.
+  const ref = useRef<HTMLDivElement | null>(null);
+  const observer = useRef<ResizeObserver | null>(null);
+  const { onHeight } = data;
+
+  // A callback ref, so the observer follows the element React actually mounted.
+  const attach = useCallback(
+    (el: HTMLDivElement | null) => {
+      observer.current?.disconnect();
+      observer.current = null;
+      ref.current = el;
+      if (!el) return;
+      const report = () => onHeight(el.offsetHeight);
+      report();
+      observer.current = new ResizeObserver(report);
+      observer.current.observe(el);
+    },
+    [onHeight]
+  );
+
+  // The ResizeObserver covers reflows nothing here renders (a window resize
+  // rewrapping the group list); this covers the content changes themselves,
+  // before the browser paints them. Reporting an unchanged height is a no-op.
+  useLayoutEffect(() => {
+    if (ref.current) onHeight(ref.current.offsetHeight);
+  });
+
+  return (
+    <div ref={attach} className="flex flex-col" style={{ width: STACK_WIDTH, gap: STACK_GAP }}>
+      <DeviceCard groupNames={data.groupNames} filterNames={data.filterNames} />
+      {data.profiles.map((profile) => (
+        <AutopilotCard
+          key={profile.id}
+          profile={profile}
+          expanded={data.expandedAps.has(profile.id)}
+          onToggle={() => data.onToggleAp(profile.id)}
+        />
+      ))}
+    </div>
+  );
+}
+
 // NB: the node type must not be "group" -- React Flow reserves that name for a
 // built-in grouping node whose default CSS paints a translucent light-gray box
 // behind the node (most visible on the plain All Devices / All Users cards).
 const nodeTypes = {
-  device: DeviceNode,
+  endpoint: EndpointStackNode,
   entraGroup: GroupNode,
   policy: PolicyNode,
   policyType: PolicyTypeNode,
-  autopilot: AutopilotNode,
 };
 
 const COLUMN_GAP = 140;
-// Even vertical rhythm inside the device stack: device -> first profile and
-// profile -> profile use the same gap so the unit reads as one deliberate group.
-const STACK_GAP = 16;
 
 // Build the graph for the current visibility state. Hidden groups stay in the
 // group column as dimmed toggles (so they can be clicked back on), but the
@@ -401,27 +479,35 @@ function buildGraph(
   onToggleKind: (kind: string) => void,
   expandedAps: Set<string>,
   onToggleAp: (id: string) => void,
+  /** The endpoint stack's measured height, so it can be centered exactly. */
+  stackHeight: number,
+  onHeight: (height: number) => void,
   onOpen?: (scope: BaselineScope) => void
 ) {
   const groupNames = simulation.groups.filter((g) => g.source === "selected").map((g) => g.displayName);
   const nodes: Node[] = [];
   const edges: Edge[] = [];
 
-  // Autopilot enrollment cards stack UNDERNEATH the device as one "configured
-  // endpoint" unit (device on top, its profiles below) rather than occupying a
-  // column of their own -- the device is what enrolls (v1 via its assigned
-  // device groups, v2 via its configured just-in-time device group), so it reads
-  // as one thing that then branches out to the groups. The left column is as
-  // wide as the widest card in the stack; when no profiles are visible it's just
-  // the device.
-  const visibleAps = (simulation.autopilotProfiles ?? []).filter((ap) => {
-    const sources = [...ap.viaGroupIds, ...ap.excludedViaGroupIds];
-    return sources.length === 0 || sources.some((id) => !hiddenGroupIds.has(id));
-  });
-  const hasAps = visibleAps.length > 0;
-  const leftColWidth = hasAps ? AP_NODE_WIDTH : DEVICE_NODE_WIDTH;
-  const apX = 0;
-  const deviceX = hasAps ? (AP_NODE_WIDTH - DEVICE_NODE_WIDTH) / 2 : 0;
+  // --- Autopilot enrollment: the profiles this endpoint's VISIBLE groups reach ---
+  // A profile belongs in the stack while at least one group that TARGETS it is
+  // still shown; hiding that group takes the profile with it, the same way it
+  // takes the policies it brings in. Exclusion is re-evaluated against the
+  // visible groups too, so hiding the group that carves the device out flips the
+  // card back to "Targeted" instead of leaving a stale exclusion notice behind.
+  const visibleAps: StackProfile[] = (simulation.autopilotProfiles ?? [])
+    .filter((ap) => ap.viaGroupIds.some((id) => !hiddenGroupIds.has(id)))
+    .map((ap) => {
+      const excludedViaGroupIds = ap.excludedViaGroupIds.filter((id) => !hiddenGroupIds.has(id));
+      return {
+        ...ap,
+        status: excludedViaGroupIds.length > 0 ? ("excluded" as const) : ("targeted" as const),
+        viaGroupIds: ap.viaGroupIds.filter((id) => !hiddenGroupIds.has(id)),
+        excludedViaGroupIds,
+        excludedNames: excludedViaGroupIds.map(
+          (id) => simulation.groups.find((g) => g.id === id)?.displayName ?? id
+        ),
+      };
+    });
 
   // --- Group column (all groups; hidden ones dimmed) ---
   // The always-applies buckets (All Devices, then All Users) sit at the top;
@@ -431,7 +517,7 @@ function buildGraph(
     g.source === "all-devices" ? 0 : g.source === "all-users" ? 1 : g.source === "unassigned" ? 3 : 2;
   const orderedGroups = [...simulation.groups].sort((a, b) => groupRank(a) - groupRank(b));
 
-  const groupX = leftColWidth + COLUMN_GAP;
+  const groupX = STACK_WIDTH + COLUMN_GAP;
   let groupY = 0;
   for (const g of orderedGroups) {
     const off = hiddenGroupIds.has(g.id);
@@ -480,45 +566,26 @@ function buildGraph(
     });
   }
 
-  // --- Autopilot stack: profiles sit under the device, each drawing a line to
-  // the groups it targets --- The device and its profiles read as one unit
-  // (stacked, no edge between them), so enrollment adds only profile -> target
-  // group lines. Those groups carry ONWARD to their policies, so we drop the
-  // direct device -> group edge for them (below) to avoid a duplicate line.
+  // --- Enrollment edges: one line per (profile, targeted group) ---
+  // The device and its profiles are a single node, so enrollment adds no edge of
+  // its own -- only profile -> target group lines, leaving from that profile's
+  // own card. Those groups carry ONWARD to their policies, so the direct
+  // device -> group edge is dropped for them (below) to avoid a duplicate line.
   // Exclusions are shown on the card text, not as extra edges.
   const apTargetedGroupIds = new Set<string>();
-  let apY = 0;
   for (const ap of visibleAps) {
-    const excluded = ap.status === "excluded";
-    const expanded = expandedAps.has(ap.id);
-    const excludedNames = ap.excludedViaGroupIds.map(
-      (id) => simulation.groups.find((g) => g.id === id)?.displayName ?? id
-    );
-    nodes.push({
-      id: `autopilot:${ap.id}`,
-      type: "autopilot",
-      position: { x: apX, y: apY },
-      data: { ...ap, excludedNames, expanded, onToggle: () => onToggleAp(ap.id) },
-    });
-    const nameLines = Math.max(1, Math.ceil(ap.displayName.length / 30));
-    let h = AP_HEADER_HEIGHT + AP_SUMMARY_BASE + (nameLines - 1) * 18;
-    // + the expanded section's border/padding (measured ~15px).
-    if (expanded) h += ap.settings.length * AP_ROW_HEIGHT + (excluded ? 22 : 0) + 16;
-    apY += h + STACK_GAP;
-
-    // Profile -> target group edges (include only; the group carries on to policies).
-    for (const gid of ap.viaGroupIds.filter((id) => !hiddenGroupIds.has(id))) {
+    for (const gid of ap.viaGroupIds) {
       apTargetedGroupIds.add(gid);
       edges.push({
         id: `ap-${ap.id}->${gid}`,
-        source: `autopilot:${ap.id}`,
+        source: "endpoint",
+        sourceHandle: `ap:${ap.id}`,
         target: `group:${gid}`,
         type: "default",
         style: { stroke: AUTOPILOT_COLOR, opacity: 0.55, strokeWidth: 1.5 },
       });
     }
   }
-  const apSpan = Math.max(apY - STACK_GAP, 0);
 
   // --- Policy column: one bubble per type (grouped) or one node per policy ---
   let policySpan = 0;
@@ -627,28 +694,16 @@ function buildGraph(
       n.position = { ...n.position, y: n.position.y + policyOffset };
   }
 
-  // The device + its enrollment cards share the left column as one stacked unit
-  // (device on top, profiles below), centered together on the group centerline.
-  // The device's height varies with how many group/filter names it lists, so
-  // estimate it from the content -- a flat offset left it visibly low.
-  // ~40 chars/line at the w-80 (320px) node width -- keep this in step with the
-  // node width so the estimated height matches what actually renders (an
-  // overestimate here shows up as an uneven gap above the first profile card).
-  const deviceLines =
-    Math.max(1, Math.ceil((groupNames.join(", ").length || 4) / 40)) +
-    Math.max(1, Math.ceil((deviceFilterNames.join(", ").length || 4) / 40));
-  const deviceHeight = 124 + deviceLines * LINE_HEIGHT;
-  const leftStackHeight = deviceHeight + (hasAps ? STACK_GAP + apSpan : 0);
-  const leftStackTop = centerline - leftStackHeight / 2;
-  const apOffset = leftStackTop + deviceHeight + STACK_GAP;
-  for (const n of nodes) {
-    if (n.type === "autopilot") n.position = { ...n.position, y: n.position.y + apOffset };
-  }
+  // The device + its enrollment cards are one node in the left column, centered
+  // on the group centerline. Its height is whatever the browser makes it, so the
+  // node measures itself and reports back (`onHeight`) and we position it from
+  // that. On a rebuild that doesn't change the stack's size -- most of them --
+  // the height we already have is exact, so nothing moves.
   nodes.unshift({
-    id: "device",
-    type: "device",
-    position: { x: deviceX, y: leftStackTop },
-    data: { groupNames, filterNames: deviceFilterNames },
+    id: "endpoint",
+    type: "endpoint",
+    position: { x: 0, y: centerline - stackHeight / 2 },
+    data: { groupNames, filterNames: deviceFilterNames, profiles: visibleAps, expandedAps, onToggleAp, onHeight },
   });
   for (const g of simulation.groups) {
     // Groups an Autopilot profile targets get their line FROM the profile card
@@ -661,7 +716,8 @@ function buildGraph(
     const unassigned = g.source === "unassigned";
     edges.push({
       id: `device->${g.id}`,
-      source: "device",
+      source: "endpoint",
+      sourceHandle: "device",
       target: `group:${g.id}`,
       type: "default",
       style: {
@@ -674,56 +730,6 @@ function buildGraph(
   }
 
   return { nodes, edges, centerline };
-}
-
-// Re-place the device + its enrollment cards using their REAL rendered heights
-// (read straight from the DOM) rather than the character-count estimate buildGraph
-// laid them out with. The device node's height depends on how far its group list
-// wraps, which no char-count estimate nails exactly -- an underestimate overlaps
-// the first card, an overestimate leaves an uneven gap. (React Flow's own
-// `measured` lags a tick behind content changes, so we read the layout height
-// directly.) With real heights the device -> profile and profile -> profile gaps
-// are always exactly STACK_GAP. offsetHeight is unaffected by the viewport's zoom
-// transform, so it's already in flow units.
-function domHeight(id: string): number {
-  const el = document.querySelector<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(id)}"]`);
-  return el?.offsetHeight ?? 0;
-}
-
-function reStackLeftColumn(prev: Node[], centerline: number): Node[] {
-  const dev = prev.find((n) => n.id === "device");
-  const dh = dev && domHeight("device");
-  if (!dev || !dh) return prev;
-  const aps = prev
-    .filter((n) => n.type === "autopilot")
-    .sort((a, b) => a.position.y - b.position.y);
-  const targetY = new Map<string, number>();
-  if (aps.length === 0) {
-    targetY.set("device", centerline - dh / 2);
-  } else {
-    const ahs = aps.map((a) => domHeight(a.id));
-    if (ahs.some((h) => !h)) return prev; // wait until every card has rendered
-    const total = dh + STACK_GAP + ahs.reduce((s, h) => s + h, 0) + STACK_GAP * (aps.length - 1);
-    const top = centerline - total / 2;
-    targetY.set("device", top);
-    let y = top + dh + STACK_GAP;
-    aps.forEach((a, i) => {
-      targetY.set(a.id, y);
-      y += ahs[i] + STACK_GAP;
-    });
-  }
-  let changed = false;
-  const next = prev.map((n) => {
-    const ty = targetY.get(n.id);
-    if (ty !== undefined && Math.abs(n.position.y - ty) > 0.5) {
-      changed = true;
-      return { ...n, position: { ...n.position, y: ty } };
-    }
-    return n;
-  });
-  // Returning the SAME reference when nothing moved lets the layout effect that
-  // calls this settle (setNodes with an unchanged array is a no-op re-render).
-  return changed ? next : prev;
 }
 
 function Legend() {
@@ -769,6 +775,21 @@ export function SimulationDiagram({
   // group stay). Works on the All Devices / All Users buckets too.
   const [hiddenGroupIds, setHiddenGroupIds] = useState<Set<string>>(new Set());
 
+  // Hiding a group is a lens over THIS endpoint's groups, so a group that leaves
+  // the simulation must not keep its hidden flag. Without this, re-selecting the
+  // group (or re-checking "Autopilot device", which selects the Autopilot-joined
+  // groups for you) brought it back still hidden -- silently swallowing the
+  // Autopilot enrollment cards and policies it carries, with nothing on screen to
+  // explain where they went.
+  useEffect(() => {
+    setHiddenGroupIds((prev) => {
+      if (prev.size === 0) return prev;
+      const live = new Set(simulation.groups.map((g) => g.id));
+      const next = new Set([...prev].filter((id) => live.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [simulation.groups]);
+
   // The grouped-by-type summary is always the default view; the per-policy
   // detail view is the opt-in zoom.
   const [grouped, setGrouped] = useState(true);
@@ -802,6 +823,13 @@ export function SimulationDiagram({
     });
   }, []);
 
+  // The endpoint stack's measured height, reported by the node itself. It feeds
+  // straight back into the layout, so the stack is centered on the group
+  // centerline by the same pass that positions everything else -- there is no
+  // second, after-the-fact correction to flash through.
+  const [stackHeight, setStackHeight] = useState(0);
+  const onHeight = useCallback((height: number) => setStackHeight(height), []);
+
   const graph = useMemo(
     () =>
       buildGraph(
@@ -814,6 +842,8 @@ export function SimulationDiagram({
         toggleKind,
         expandedAps,
         toggleAp,
+        stackHeight,
+        onHeight,
         onOpenBaseline
       ),
     [
@@ -826,42 +856,49 @@ export function SimulationDiagram({
       toggleKind,
       expandedAps,
       toggleAp,
+      stackHeight,
+      onHeight,
       onOpenBaseline,
     ]
   );
 
-  // Controlled nodes so we can re-place the device stack after it renders.
+  // Controlled nodes so React Flow can track drags and its own measurements.
   const [nodes, setNodes, onNodesChange] = useNodesState(graph.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(graph.edges);
-  const centerlineRef = useRef(graph.centerline);
-  centerlineRef.current = graph.centerline;
 
-  // Rebuild -> reset to the freshly estimated layout (the observer below corrects it).
   useEffect(() => {
     setNodes(graph.nodes);
     setEdges(graph.edges);
   }, [graph, setNodes, setEdges]);
 
-  // Snap the device + enrollment stack to their REAL rendered heights so the
-  // device->profile and profile->profile gaps are always exactly STACK_GAP, no
-  // matter how the device's group list wraps or whether a card is expanded. A
-  // ResizeObserver on the actual DOM nodes is authoritative about their size and
-  // fires on every change (including the extra line the device gains a beat after
-  // a group is added), sidestepping React Flow's own measurement timing.
-  // reStackLeftColumn returns the same array reference when nothing moved, so this
-  // settles without looping.
+  // Adding a group (or an Autopilot profile, or a policy type) changes how tall
+  // and wide the graph is, and the endpoint stack is centered on the group
+  // column -- so without a refit the thing you just added lands off-screen and
+  // everything else slides out from under you. Refit only when the SET of nodes
+  // changes, never on a height-only change (expanding a profile card, a name
+  // wrapping to another line), so the viewport doesn't lurch while you read.
+  const [rf, setRf] = useState<ReactFlowInstance | null>(null);
+  const nodeSignature = useMemo(() => graph.nodes.map((n) => n.id).join("|"), [graph.nodes]);
+  const firstFit = useRef(true);
   useEffect(() => {
-    const ids = ["device", ...nodes.filter((n) => n.type === "autopilot").map((n) => n.id)];
-    const els = ids
-      .map((id) => document.querySelector<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(id)}"]`))
-      .filter((el): el is HTMLElement => el !== null);
-    if (els.length === 0) return;
-    const snap = () => setNodes((prev) => reStackLeftColumn(prev, centerlineRef.current));
-    snap();
-    const ro = new ResizeObserver(snap);
-    els.forEach((el) => ro.observe(el));
-    return () => ro.disconnect();
-  }, [nodes, setNodes]);
+    if (!rf) return;
+    // `fitView` fits the last MEASURED sizes, and React Flow measures a changed
+    // node a frame after it renders -- so wait two frames or the fit is computed
+    // from the previous layout. The initial fit is React Flow's own `fitView`
+    // prop; skipping it here avoids fighting that with a redundant animation.
+    if (firstFit.current) {
+      firstFit.current = false;
+      return;
+    }
+    let second = 0;
+    const first = requestAnimationFrame(() => {
+      second = requestAnimationFrame(() => void rf.fitView({ padding: 0.15, duration: 260 }));
+    });
+    return () => {
+      cancelAnimationFrame(first);
+      cancelAnimationFrame(second);
+    };
+  }, [rf, nodeSignature]);
 
   const onNodeClick: NodeMouseHandler = useCallback((_evt, node) => {
     if (node.type !== "entraGroup") return;
@@ -882,6 +919,7 @@ export function SimulationDiagram({
         onEdgesChange={onEdgesChange}
         nodeTypes={nodeTypes}
         onNodeClick={onNodeClick}
+        onInit={setRf}
         fitView
         fitViewOptions={{ padding: 0.15 }}
         proOptions={{ hideAttribution: true }}

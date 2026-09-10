@@ -6,6 +6,34 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [2.0.2] — 2026-09-09
+
+### Fixed
+- **Diagram: the Autopilot enrollment cards no longer go wrong as you change the
+  endpoint.** Toggling **Autopilot device**, entering a Group Tag, or selecting and
+  deselecting groups could leave the enrollment stack visibly broken. Three causes,
+  all fixed:
+  - **Cards vanishing.** Clicking a group on the diagram to hide it set a flag that
+    was never cleared when that group left the simulation. Hide a group, uncheck
+    **Autopilot device**, check it again, and the group came back *still hidden* —
+    silently swallowing both enrollment cards, with only the small "Show all groups"
+    chip to explain where they went.
+  - **The stack hopping on every toggle.** Card heights were estimated from character
+    counts (~40 chars/line for the device card, a fixed row height per setting) and
+    corrected after render by reading the DOM, so every rebuild painted the stack at
+    the estimate and snapped back a frame later — around 13px of visible jump per
+    click at real-tenant group-name lengths.
+  - **Stale exclusion text.** Hiding the group that excluded a profile left the card
+    still reading "Would not deploy — excluded via \<hidden group\>".
+
+  The device card and its profile cards are now a single node laid out by the
+  browser, each card carrying its own connection point so profiles still draw their
+  own lines to the groups they target. Spacing is exact by construction rather than
+  estimated and patched, exclusion is re-evaluated against the groups still shown
+  (so hiding a group is a consistent "what if this group weren't here" lens), and
+  the view refits when the set of nodes changes so newly added groups no longer
+  land off-screen.
+
 ## [2.0.1] — 2026-09-06
 
 ### Added
