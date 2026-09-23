@@ -169,6 +169,22 @@ export interface BaselineSetting extends CspSetting {
   sourceKind: PolicyKind;
   /** True when the source policy is a deprecated device-config template. */
   sourceLegacyTemplate?: boolean;
+  /**
+   * True when two or more applied policies set this setting to DIFFERENT values.
+   *
+   * Read this before trusting `value`: the merged baseline carries ONE row per
+   * setting, so for a conflicted setting `value` (and `sourcePolicyId` /
+   * `sourcePolicyName` / `sourceKind` with it) is just the first contributing
+   * policy the tenant load happened to reach -- NOT a computed winner. The tool
+   * deliberately doesn't claim to know which value wins on the device; the full
+   * disagreement is in `SimulationResult.conflicts`, keyed by the same
+   * `settingId`.
+   *
+   * The UI and the CSV export already expand conflicts to one row per value.
+   * This flag is for consumers of the JSON export and `GET /api/simulate`, where
+   * a single `value` would otherwise read as the effective one.
+   */
+  conflicted?: boolean;
 }
 
 /**
@@ -383,7 +399,11 @@ function parsePhysicalIdClauses(rule: string): PhysicalIdClause[] {
   const clauses: PhysicalIdClause[] = [];
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(rule))) {
-    clauses.push({ tag: match[2].toLowerCase(), op: match[1].toLowerCase() as "eq" | "startswith", value: match[3] ?? "" });
+    clauses.push({
+      tag: match[2].toLowerCase(),
+      op: match[1].toLowerCase() as "eq" | "startswith",
+      value: match[3] ?? "",
+    });
   }
   return clauses;
 }
@@ -500,8 +520,7 @@ export function classifyGroupTagMatch(membershipRule: string | undefined, groupT
  * and the `-contains` / `-eq` variants. Requires the quote immediately after
  * `]`, so `"[ZTDId]:<guid>"` (a single-device rule) deliberately does not match.
  */
-const BARE_ZTDID_CLAUSE =
-  /device\.devicePhysicalIDs?\s+-any\s*\(?\s*_\s*-(?:startsWith|contains|eq)\s+"\[ZTDId\]"/i;
+const BARE_ZTDID_CLAUSE = /device\.devicePhysicalIDs?\s+-any\s*\(?\s*_\s*-(?:startsWith|contains|eq)\s+"\[ZTDId\]"/i;
 
 /**
  * Splits a membership rule into its top-level `or` branches.

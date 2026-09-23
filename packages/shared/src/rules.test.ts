@@ -72,10 +72,8 @@ describe("filterExclusionReason (include vs exclude are opposites)", () => {
   });
 });
 
-const orderIdEq = (tag: string) =>
-  `(device.devicePhysicalIds -any (_ -eq "[OrderID]:${tag}"))`;
-const orderIdStartsWith = (prefix: string) =>
-  `(device.devicePhysicalIds -any (_ -startsWith "[OrderID]:${prefix}"))`;
+const orderIdEq = (tag: string) => `(device.devicePhysicalIds -any (_ -eq "[OrderID]:${tag}"))`;
+const orderIdStartsWith = (prefix: string) => `(device.devicePhysicalIds -any (_ -startsWith "[OrderID]:${prefix}"))`;
 const ztdId = `(device.devicePhysicalIDs -any (_ -startsWith "[ZTDId]"))`;
 
 describe("isGroupTagRule", () => {
@@ -133,9 +131,7 @@ describe("isAutopilotJoinedRule", () => {
     expect(isAutopilotJoinedRule(`${orderIdStartsWith("SALES")} or ${ztdId}`)).toBe(true);
     expect(isAutopilotJoinedRule(`${ztdId} or (device.deviceOSType -eq "Windows")`)).toBe(true);
     // three-way or, ZTDId in the middle
-    expect(
-      isAutopilotJoinedRule(`${orderIdEq("A")} or ${ztdId} or ${orderIdStartsWith("B")}`)
-    ).toBe(true);
+    expect(isAutopilotJoinedRule(`${orderIdEq("A")} or ${ztdId} or ${orderIdStartsWith("B")}`)).toBe(true);
   });
 
   it("accepts the paren-less and -contains clause shapes tenants write", () => {
@@ -179,9 +175,7 @@ describe("isAutopilotJoinedRule", () => {
   });
 
   it("rejects a [ZTDId] pinned to one specific device, and non-Autopilot rules", () => {
-    expect(
-      isAutopilotJoinedRule('(device.devicePhysicalIds -any (_ -eq "[ZTDId]:1234-5678"))')
-    ).toBe(false);
+    expect(isAutopilotJoinedRule('(device.devicePhysicalIds -any (_ -eq "[ZTDId]:1234-5678"))')).toBe(false);
     expect(isAutopilotJoinedRule(orderIdStartsWith("SALES"))).toBe(false);
     expect(isAutopilotJoinedRule(undefined)).toBe(false);
   });
@@ -190,9 +184,7 @@ describe("isAutopilotJoinedRule", () => {
 describe("classifyAutopilotMatch (Autopilot in the picker)", () => {
   it("reports a clean bare [ZTDId] rule as a confident match (auto-selected)", () => {
     expect(classifyAutopilotMatch(ztdId).state).toBe("match");
-    expect(
-      classifyAutopilotMatch('(device.devicePhysicalIds -any (_ -contains "[ZTDId]"))').state
-    ).toBe("match");
+    expect(classifyAutopilotMatch('(device.devicePhysicalIds -any (_ -contains "[ZTDId]"))').state).toBe("match");
     // [ZTDId] as one branch of an `or` still grants membership on its own.
     expect(classifyAutopilotMatch(`${ztdId} or ${orderIdStartsWith("SALES")}`).state).toBe("match");
   });
@@ -204,18 +196,14 @@ describe("classifyAutopilotMatch (Autopilot in the picker)", () => {
         '(device.devicePhysicalIDs -any (_ -contains "[ZTDId]")) and (device.deviceModel -not -startsWith "Cloud PC")'
       ).state
     ).toBe("conditional");
-    expect(classifyAutopilotMatch(`${ztdId} and (device.deviceOSType -eq "Windows")`).state).toBe(
-      "conditional"
-    );
+    expect(classifyAutopilotMatch(`${ztdId} and (device.deviceOSType -eq "Windows")`).state).toBe("conditional");
   });
 
   it("reports no [ZTDId] marker as none", () => {
     expect(classifyAutopilotMatch(orderIdStartsWith("SALES")).state).toBe("none");
     expect(classifyAutopilotMatch('(device.deviceOSType -eq "Windows")').state).toBe("none");
     // A [ZTDId] pinned to one specific device is not the "any Autopilot device" marker.
-    expect(
-      classifyAutopilotMatch('(device.devicePhysicalIds -any (_ -eq "[ZTDId]:1234-5678"))').state
-    ).toBe("none");
+    expect(classifyAutopilotMatch('(device.devicePhysicalIds -any (_ -eq "[ZTDId]:1234-5678"))').state).toBe("none");
     expect(classifyAutopilotMatch(undefined).state).toBe("none");
   });
 });

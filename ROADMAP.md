@@ -1,6 +1,6 @@
 # Roadmap
 
-Intune Preflight is at **v2.0**. The core is complete: endpoint simulation,
+Intune Preflight is at **v2.1**. The core is complete: endpoint simulation,
 assignment resolution (include/exclude, filters, inherited All Devices / All
 Users), the Autopilot V1/V2 enrollment layer, the Windows merged CSP baseline
 with human-readable Settings Catalog **and legacy Endpoint Security** names and
@@ -13,6 +13,14 @@ This page tracks the **honest edges that remain** and the work planned to close
 them. None of the known limitations block the core use — they're documented so you
 know exactly where to double-check against Entra and the Intune admin center. See
 [CHANGELOG.md](CHANGELOG.md) for what shipped when.
+
+**Where v2 stands.** v2 is feature-complete and intended to stay that way. What
+remains for the 2.x line is **maintenance** — accuracy, correctness and polish
+within the capabilities already shipped, which is what [v2 maintenance](#v2-maintenance)
+lists. The bigger swings that would change what the tool *is* are collected under
+[v3 bets](#v3-bets); they are deliberately not 2.x work, and none of them is a
+prerequisite for trusting what v2 already does. If you rely on this tool, 2.x
+should feel boring.
 
 ## Known limitations
 
@@ -106,27 +114,55 @@ user belongs to a group, so nothing is inferred from a sign-in. Autopilot V2 (a
 user-driven flow) is therefore resolved by its configured just-in-time device
 group rather than its user assignment.
 
-## Next (post-2.0)
+## v2 maintenance
 
-- **Combined/nested dynamic-group rule evaluation** — the headline item. Replace
-  the current regex-based clause extraction (`parsePhysicalIdClauses`,
-  `groupTagMatchesRule`, `isAutopilotJoinedRule` in
-  `packages/shared/src/index.ts`; `ruleImplies` in `apps/server/src/normalize.ts`)
-  with a real membership-rule expression parser + evaluator (tokenize → AST →
-  evaluate against the simulated device's attributes).
-- **Expand cross-model crosswalk coverage** — cross-model detection shipped
-  (best-effort): Settings Catalog ↔ OMA-URI by canonical CSP path, plus a curated
-  template→CSP crosswalk. v2 grows the crosswalk (more template properties, from
-  Microsoft's migration-mapping docs) and adds legacy Endpoint Security intents
-  (which carry no CSP path today), toward broader coverage. (Legacy intent
-  names/values, the "Legacy template" flag, and the initial cross-model pass all
-  already shipped.)
+Work that makes what v2 already claims more accurate or more pleasant, without
+adding a capability. This is the whole intended scope of the 2.x line.
+
+- **Expand the cross-model crosswalk** — the best-shaped maintenance item there
+  is: purely additive data, each entry independently testable, no architectural
+  risk. Cross-model detection shipped best-effort (Settings Catalog ↔ OMA-URI by
+  canonical CSP path, plus a curated template→CSP crosswalk in
+  `packages/engine/src/crosswalk.ts`); growing it from Microsoft's
+  migration-mapping docs directly widens coverage. Legacy Endpoint Security
+  intents remain the harder half — their definitions carry no CSP path, so they
+  need a mapping of their own.
 - **Cross-platform conflict & overlap accuracy** — per-platform handling so
   macOS/iOS/Android conflicts and overlaps are accurate rather than suppressed
-  (including framework-aware compliance handling, e.g. one-concern-per-policy).
-- **Effective-value resolution** — show which value "wins" for a conflicted setting.
-- **Richer user / user-group modelling** — today, assignments to Entra *user*
-  groups resolve normally (user groups are selectable, and All Users always
+  (including framework-aware compliance handling, e.g. the
+  one-concern-per-macOS-compliance-policy pattern). Today the merged baseline is
+  shown on every platform and only the flags are Windows-scoped; this narrows
+  that gap without changing what the tool does.
+- **Per-property template defaults** — the last of the legacy default-noise
+  edge: a real enum default (`cellularData = allowed`) still can't be told from a
+  deliberate choice without a per-property default map.
+- **Autopilot groups by `enrollmentProfileName`** — a real-tenant targeting shape
+  the flat evaluator doesn't recognise yet, alongside `[ZTDId]` / `[OrderID]`.
+- **Accessibility pass on the diagram and the baseline grid** — the panel and the
+  dialogs are keyboard-navigable; the React Flow canvas and the resizable data
+  grid are the parts that still assume a mouse.
+
+## v3 bets
+
+Bigger swings. Each would change what the tool is capable of, carries real design
+risk, and is **deliberately not 2.x work** — v2's honesty about its edges is what
+makes them upgrades rather than corrections.
+
+- **Combined/nested dynamic-group rule evaluation** — the headline bet. Replace
+  the regex-based clause extraction (`parsePhysicalIdClauses`,
+  `groupTagMatchesRule`, `isAutopilotJoinedRule` in
+  `packages/shared/src/index.ts`; `ruleImplies` in
+  `packages/engine/src/normalize.ts`) with a real membership-rule expression
+  parser and evaluator (tokenize → AST → evaluate against the simulated device's
+  attributes). It is the single largest piece of new engine surface on this page.
+  Explicitly **deferred**, and it's the "surfaced, not guessed" work that earned
+  the right to defer it: because the picker now classifies each dynamic group
+  against the entered tag (**match** / **+ conditions** / **conditional**, with
+  the rule shown), the flat evaluator's limits are *visible per group* rather
+  than silently wrong. A real engine is therefore an accuracy upgrade, not a
+  correctness prerequisite.
+- **Richer user / user-group modelling** — assignments to Entra *user* groups
+  resolve normally today (user groups are selectable, and All Users always
   applies), but there is no notion of a **specific user**: the tool never
   evaluates whether a named user belongs to a group. Modelling a signed-in user
   would let user-driven flows — Autopilot V2 in particular, which currently
@@ -137,18 +173,38 @@ group rather than its user assignment.
   token is scoped to the signed-in admin's RBAC (scope tags / admin units), so it
   shows only *that admin's slice* — which narrows the tool's "full, unfiltered
   preflight" value. App-only stays the default and recommended mode.
-
-### Under consideration
-
 - **Tenant-wide policy ↔ group map** — a connective "nebula" of which policies
   bridge which groups across the whole tenant. The per-group seating chart (v1.2)
   is its single-group view; this is the zoomed-out whole-tenant version.
+
+### Considered and parked
+
+Written down so the reasoning isn't relitigated, not as a queue.
+
+- **Effective-value resolution** ("which value wins for a conflicted setting").
+  Parked on **honesty grounds**, not effort. Intune's real resolution across
+  policy models is genuinely underdefined, so a computed "winner" would be a
+  guess wearing a confident face — the one thing this tool tries never to do. The
+  honest version of the feature shipped instead in v2.1: a conflicted merged
+  row is flagged `conflicted` and points at the full disagreement rather than
+  implying its own value won (see
+  [docs/SETUP.md](docs/SETUP.md#reading-a-conflicted-setting-from-the-api)).
+  Revisit only if Microsoft documents the resolution order.
 - **Group-collision analysis** — surfacing the group *pairs* whose union produces
-  conflicting settings (a device in both A and B). Parked deliberately: it leans on
-  co-membership reasoning the tool avoids, and Intune already flags device-level
-  conflicts — revisit only if the descriptive views prove it's wanted.
+  conflicting settings (a device in both A and B). It leans on co-membership
+  reasoning the tool avoids, and Intune already flags device-level conflicts —
+  revisit only if the descriptive views prove it's wanted.
 
 ## Shipped since v1.0
+
+**v2.1** — hardening, not features. The engine became its own package with its
+I/O-free boundary enforced three ways; the simulator's state became one tested
+reducer; a conflicted setting is now flagged rather than reading as an effective
+value; and a quality pass fixed a blocked-`localStorage` crash, a Graph body read
+that escaped its timeout, a mislabelled group in the Manifest and a request-size
+ceiling. Real linting, an error boundary, reproducible Docker images, an
+automated demo deploy, and 114 → 178 tests. See
+[CHANGELOG.md](CHANGELOG.md#210--2026-09-23).
 
 **v2.0**
 - **Cross-model "legacy policy collision" detection** — the same CSP configured

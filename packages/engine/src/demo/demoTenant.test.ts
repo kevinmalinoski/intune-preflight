@@ -45,9 +45,13 @@ describe("demo tenant", () => {
     const sim = computeSimulation(data, { selectedGroupIds: ["grp-corp-win"], platform: "windows" });
     // The org-wide legacy BitLocker intent contributes to the merged baseline,
     // proving legacy intents join the Windows comparison alongside Settings Catalog.
-    expect(sim.settings.some((setting) => setting.settingId === "endpointSecurity:bitlocker_requireEncryption")).toBe(true);
+    expect(sim.settings.some((setting) => setting.settingId === "endpointSecurity:bitlocker_requireEncryption")).toBe(
+      true
+    );
     // A legacy Defender Antivirus intent on corporate devices also contributes.
-    expect(sim.settings.some((setting) => setting.settingId === "endpointSecurity:defenderav_cloudBlockLevel")).toBe(true);
+    expect(sim.settings.some((setting) => setting.settingId === "endpointSecurity:defenderav_cloudBlockLevel")).toBe(
+      true
+    );
   });
 
   it("has an implied membership in the manifest (kiosk-multi implies kiosk)", () => {
@@ -75,7 +79,9 @@ describe("demo tenant", () => {
 
   it("flags a legacy device-config template for the Settings Catalog migration nudge", () => {
     const report = buildAssignmentReport(data, "windows");
-    expect(report.rows.some((r) => r.policyId === "pol-win-device-restrictions-template" && r.legacyTemplate)).toBe(true);
+    expect(report.rows.some((r) => r.policyId === "pol-win-device-restrictions-template" && r.legacyTemplate)).toBe(
+      true
+    );
   });
 
   it("surfaces a cross-model overlap (legacy template MS-account block vs the Settings Catalog equivalent)", () => {

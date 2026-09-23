@@ -1,50 +1,38 @@
 import { useId, type KeyboardEvent } from "react";
+import { containment, policyColor, UNIVERSAL_COLOR, type ClusterPolicy } from "./policyHeat.ts";
 
 // A group's policies as a small "seating chart": each bubble is a policy, colored
 // by how many groups carry it -- cool = this group's own, hot = shared widely,
 // and a distinct colour for policies scoped to All Devices / All Users (universal,
 // applies to every device). Clicking opens the full named chip list (onOpen).
 // Reads only what the Assignment Manifest already loaded (no new call).
-
-export type ClusterPolicy = {
-  id: string;
-  name: string;
-  shared: number; // # real groups directly carrying it (virtual scopes excluded)
-  sharedWith: string[]; // other real groups that carry it
-  universal: string[]; // "All Devices" / "All Users" scopes it's on, if any
-};
-
-const UNIVERSAL_COLOR = "#818cf8"; // indigo -- "applies to everyone", not a per-group choice
-
-// Heat by sharedness. Thresholds kept in step with the diagram/legend palette.
-export function policyHeat(shared: number): string {
-  return shared <= 1 ? "#34d399" : shared === 2 ? "#38bdf8" : shared <= 4 ? "#f59e0b" : "#fb7185";
-}
-// A universal (All Devices/Users) policy is called out regardless of its real-group count.
-export function policyColor(p: ClusterPolicy): string {
-  return p.universal.length ? UNIVERSAL_COLOR : policyHeat(p.shared);
-}
-
-export function containment(pols: ClusterPolicy[]) {
-  const universalN = pols.filter((p) => p.universal.length > 0).length;
-  const ownN = pols.filter((p) => p.universal.length === 0 && p.shared === 1).length;
-  const sharedN = pols.length - universalN - ownN;
-  const total = pols.length || 1;
-  return { total: pols.length, ownN, sharedN, universalN, ownPct: Math.round((ownN / total) * 100) };
-}
+// The heat scale itself lives in policyHeat.ts -- three views share it.
 
 function mix(a: string, b: string, t: number): string {
   const p = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
-  const [ar, ag, ab] = p(a), [br, bg, bb] = p(b);
+  const [ar, ag, ab] = p(a),
+    [br, bg, bb] = p(b);
   const c = (x: number, y: number) => Math.round(x + (y - x) * t);
   return `rgb(${c(ar, br)},${c(ag, bg)},${c(ab, bb)})`;
 }
 
-export function GroupHeatCluster({ name, policies, onOpen }: { name: string; policies: ClusterPolicy[]; onOpen?: () => void }) {
+export function GroupHeatCluster({
+  name,
+  policies,
+  onOpen,
+}: {
+  name: string;
+  policies: ClusterPolicy[];
+  onOpen?: () => void;
+}) {
   const gid = useId();
   const { total, ownN, sharedN, universalN, ownPct } = containment(policies);
 
-  const W = 178, H = 92, cx = W / 2, cy = 50, R = 38;
+  const W = 178,
+    H = 92,
+    cx = W / 2,
+    cy = 50,
+    R = 38;
   const spacing = R / Math.sqrt(Math.max(total, 1));
   const rb = Math.max(3.5, Math.min(spacing * 0.52, 12));
   // Unique policies toward the centre so a "contained" group reads as a solid core.
@@ -58,7 +46,10 @@ export function GroupHeatCluster({ name, policies, onOpen }: { name: string; pol
   const pct = (n: number) => (total ? (n / total) * 100 : 0);
 
   const onKey = (e: KeyboardEvent) => {
-    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen?.(); }
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      onOpen?.();
+    }
   };
 
   return (
@@ -74,9 +65,14 @@ export function GroupHeatCluster({ name, policies, onOpen }: { name: string; pol
         <div className="min-w-0 flex-1 truncate text-[11px] font-medium text-slate-200" title={name}>
           {name}
         </div>
-        <span className="shrink-0 text-[10px] text-slate-500" aria-hidden>↗</span>
+        <span className="shrink-0 text-[10px] text-slate-500" aria-hidden>
+          ↗
+        </span>
       </div>
-      <div className="mt-1 flex h-1.5 overflow-hidden rounded-full bg-ink-700" title={`${ownN} own · ${sharedN} shared · ${universalN} All Devices/Users`}>
+      <div
+        className="mt-1 flex h-1.5 overflow-hidden rounded-full bg-ink-700"
+        title={`${ownN} own · ${sharedN} shared · ${universalN} All Devices/Users`}
+      >
         <div className="bg-emerald-400" style={{ width: `${pct(ownN)}%` }} />
         <div className="bg-rose-400" style={{ width: `${pct(sharedN)}%` }} />
         <div style={{ width: `${pct(universalN)}%`, backgroundColor: UNIVERSAL_COLOR }} />
@@ -85,7 +81,12 @@ export function GroupHeatCluster({ name, policies, onOpen }: { name: string; pol
         {ownPct}% its own · {total} polic{total === 1 ? "y" : "ies"}
         {universalN > 0 ? ` · ${universalN} ⚠ dual-scope` : ""}
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="mt-1 w-full" role="img" aria-label={`${name}: ${ownPct}% own, ${total} policies`}>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="mt-1 w-full"
+        role="img"
+        aria-label={`${name}: ${ownPct}% own, ${total} policies`}
+      >
         <defs>
           <radialGradient id={gid}>
             <stop offset="0%" stopColor={glow} stopOpacity="0.28" />

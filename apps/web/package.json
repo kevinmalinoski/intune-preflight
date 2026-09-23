@@ -1,6 +1,6 @@
 {
   "name": "@intune-preflight/web",
-  "version": "2.0.2",
+  "version": "2.1.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,6 +11,7 @@
     "lint": "tsc -b --noEmit"
   },
   "dependencies": {
+    "@intune-preflight/engine": "*",
     "@intune-preflight/shared": "*",
     "@xyflow/react": "^12.3.5",
     "react": "^18.3.1",

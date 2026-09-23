@@ -25,7 +25,7 @@ async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   return res.json();
 }
 
-interface SimulationInputs {
+export interface SimulationInputs {
   groupIds: string[];
   platform?: Platform;
   deviceFilterIds?: string[];
@@ -86,5 +86,9 @@ const serverApi = {
  * The active API. In the static public demo it's the in-browser implementation;
  * otherwise the server-backed one. The ternary folds to a constant in each build,
  * so only the chosen implementation ships.
+ *
+ * Both sides are real TypeScript now that the engine is its own package, so the
+ * demo implementation is structurally checked against the server surface here --
+ * a drift between them is a build error rather than a runtime surprise.
  */
-export const api = STATIC_DEMO ? (demoApi as typeof serverApi) : serverApi;
+export const api: typeof serverApi = STATIC_DEMO ? demoApi : serverApi;

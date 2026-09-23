@@ -61,9 +61,9 @@ export function SmallScreenNotice() {
       </div>
       <h1 className="text-xl font-semibold text-slate-100">Built for a bigger screen</h1>
       <p className="max-w-[300px] text-sm leading-relaxed text-slate-400">
-        Intune Preflight is a dense admin console. The simulation diagram, group seating charts and merged-baseline tables
-        are designed for a <span className="text-slate-200">desktop-sized display</span> — open it on a laptop or desktop for
-        the full experience.
+        Intune Preflight is a dense admin console. The simulation diagram, group seating charts and merged-baseline
+        tables are designed for a <span className="text-slate-200">desktop-sized display</span> — open it on a laptop or
+        desktop for the full experience.
       </p>
       <div className="flex w-full max-w-[240px] flex-col items-stretch gap-2.5">
         <button

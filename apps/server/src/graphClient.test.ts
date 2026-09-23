@@ -19,7 +19,14 @@ describe("isRetryableNetworkError", () => {
     const abort = new Error("aborted");
     abort.name = "AbortError";
     expect(isRetryableNetworkError(abort)).toBe(true);
-    for (const msg of ["fetch failed", "terminated", "ECONNRESET", "ETIMEDOUT", "UND_ERR_SOCKET", "getaddrinfo ENOTFOUND graph"]) {
+    for (const msg of [
+      "fetch failed",
+      "terminated",
+      "ECONNRESET",
+      "ETIMEDOUT",
+      "UND_ERR_SOCKET",
+      "getaddrinfo ENOTFOUND graph",
+    ]) {
       expect(isRetryableNetworkError(new Error(msg))).toBe(true);
     }
   });

@@ -1,5 +1,5 @@
 import type { CspSetting, IntuneGroup, IntunePolicy } from "@intune-preflight/shared";
-import type { TenantData } from "../intuneData.js";
+import type { TenantData } from "../tenantData.js";
 import { VIRTUAL_GROUP_ALL_DEVICES, VIRTUAL_GROUP_ALL_USERS } from "../normalize.js";
 
 // Synthetic sample tenant for demo mode -- no real tenant identifiers, and no
@@ -118,8 +118,18 @@ const policies: IntunePolicy[] = [
     assignmentFilters: [],
     settings: [
       s("defender.tamperprotection", "Windows Security Experience", "Tamper Protection", "On"),
-      s("defender.hidesecuritynotifarea", "Windows Security Experience", "Hide Windows Security Notification Area Control", "Disabled"),
-      s("defender.disableenhancednotifications", "Windows Security Experience", "Disable Enhanced Notifications", "Disabled"),
+      s(
+        "defender.hidesecuritynotifarea",
+        "Windows Security Experience",
+        "Hide Windows Security Notification Area Control",
+        "Disabled"
+      ),
+      s(
+        "defender.disableenhancednotifications",
+        "Windows Security Experience",
+        "Disable Enhanced Notifications",
+        "Disabled"
+      ),
     ],
   },
   {
@@ -160,11 +170,36 @@ const policies: IntunePolicy[] = [
     assignmentFilters: [],
     settings: [
       s("bitlocker.requiredeviceencryption", "BitLocker", "Require Device Encryption", "Enabled"),
-      s("bitlocker.enforceencryptiontype", "Operating System Drives", "Enforce drive encryption type on operating system drives", "Enabled"),
-      s("bitlocker.requirestartupauth", "Operating System Drives", "Require additional authentication at startup", "Enabled"),
-      s("bitlocker.encryptionmethod", "BitLocker Drive Encryption", "Choose drive encryption method and cipher strength (Windows 10 [Version 1511] and later)", "Enabled"),
-      s("bitlocker.recoveryrotation", "BitLocker", "Configure Recovery Password Rotation", "Refresh on for Entra ID-joined devices"),
-      s("bitlocker.disallowstdpinchange", "Operating System Drives", "Disallow standard users from changing the PIN or password", "Enabled"),
+      s(
+        "bitlocker.enforceencryptiontype",
+        "Operating System Drives",
+        "Enforce drive encryption type on operating system drives",
+        "Enabled"
+      ),
+      s(
+        "bitlocker.requirestartupauth",
+        "Operating System Drives",
+        "Require additional authentication at startup",
+        "Enabled"
+      ),
+      s(
+        "bitlocker.encryptionmethod",
+        "BitLocker Drive Encryption",
+        "Choose drive encryption method and cipher strength (Windows 10 [Version 1511] and later)",
+        "Enabled"
+      ),
+      s(
+        "bitlocker.recoveryrotation",
+        "BitLocker",
+        "Configure Recovery Password Rotation",
+        "Refresh on for Entra ID-joined devices"
+      ),
+      s(
+        "bitlocker.disallowstdpinchange",
+        "Operating System Drives",
+        "Disallow standard users from changing the PIN or password",
+        "Enabled"
+      ),
     ],
   },
   {
@@ -212,7 +247,12 @@ const policies: IntunePolicy[] = [
       s("hardening.winrmservicebasicauth", "WinRM Service", "Allow Basic authentication", "Disabled"),
       s("hardening.turnoffautoplay", "AutoPlay Policies", "Turn off Autoplay", "Enabled"),
       s("hardening.smartscreenexplorer", "File Explorer", "Configure Windows Defender SmartScreen", "Enabled"),
-      s("hardening.ie11standalone", "Internet Explorer", "Disable Internet Explorer 11 as a standalone browser", "Enabled"),
+      s(
+        "hardening.ie11standalone",
+        "Internet Explorer",
+        "Disable Internet Explorer 11 as a standalone browser",
+        "Enabled"
+      ),
       s("hardening.encryptionoracle", "Credentials Delegation", "Encryption Oracle Remediation", "Enabled"),
       s("hardening.homegroup", "HomeGroup", "Prevent the computer from joining a homegroup", "Enabled"),
       s("hardening.phonepclinking", "Connectivity", "Allow Phone PC Linking", "Block"),
@@ -232,8 +272,18 @@ const policies: IntunePolicy[] = [
       s("edge.importsavedpasswords", "Microsoft Edge", "Allow importing of saved passwords", "Disabled"),
       s("edge.importpaymentinfo", "Microsoft Edge", "Allow importing of payment info", "Disabled"),
       s("edge.intrusiveads", "Microsoft Edge", "Ads setting for sites with intrusive ads", "Enabled"),
-      s("edge.personalizationads", "Microsoft Edge", "Allow personalization of ads, search and news by sending browsing history to Microsoft", "Disabled"),
-      s("edge.iemodereload", "Microsoft Edge", "Allow unconfigured sites to be reloaded in Internet Explorer mode", "Disabled"),
+      s(
+        "edge.personalizationads",
+        "Microsoft Edge",
+        "Allow personalization of ads, search and news by sending browsing history to Microsoft",
+        "Disabled"
+      ),
+      s(
+        "edge.iemodereload",
+        "Microsoft Edge",
+        "Allow unconfigured sites to be reloaded in Internet Explorer mode",
+        "Disabled"
+      ),
     ],
   },
   {
@@ -289,8 +339,18 @@ const policies: IntunePolicy[] = [
     excludedGroupIds: [],
     assignmentFilters: [],
     settings: [
-      s("do.downloadmode", "Delivery Optimization", "DO Download Mode", "HTTP blended with peering behind the same NAT"),
-      s("do.restrictpeerselection", "Delivery Optimization", "DO Restrict Peer Selection By", "Local discovery (DNS-SD)"),
+      s(
+        "do.downloadmode",
+        "Delivery Optimization",
+        "DO Download Mode",
+        "HTTP blended with peering behind the same NAT"
+      ),
+      s(
+        "do.restrictpeerselection",
+        "Delivery Optimization",
+        "DO Restrict Peer Selection By",
+        "Local discovery (DNS-SD)"
+      ),
       s("do.minbattery", "Delivery Optimization", "DO Min Battery Percentage Allowed To Upload", "40"),
       s("do.groupidsource", "Delivery Optimization", "DO Group Id Source", "Entra ID Tenant ID"),
       s("do.maxcachesize", "Delivery Optimization", "DO Max Cache Size", "20"),
@@ -309,7 +369,12 @@ const policies: IntunePolicy[] = [
     assignmentFilters: [],
     settings: [
       s("defenderupd.enginechannel", "Defender Update controls", "Engine Updates Channel", "Current Channel (Broad)"),
-      s("defenderupd.platformchannel", "Defender Update controls", "Platform Updates Channel", "Current Channel (Broad)"),
+      s(
+        "defenderupd.platformchannel",
+        "Defender Update controls",
+        "Platform Updates Channel",
+        "Current Channel (Broad)"
+      ),
       s("defenderupd.sigchannel", "Defender Update controls", "Security Intelligence Updates Channel", "Current"),
     ],
   },
@@ -323,8 +388,18 @@ const policies: IntunePolicy[] = [
     assignmentFilters: [],
     settings: [
       s("defenderupd.enginechannel", "Defender Update controls", "Engine Updates Channel", "Current Channel (Preview)"),
-      s("defenderupd.platformchannel", "Defender Update controls", "Platform Updates Channel", "Current Channel (Preview)"),
-      s("defenderupd.sigchannel", "Defender Update controls", "Security Intelligence Updates Channel", "Not configured"),
+      s(
+        "defenderupd.platformchannel",
+        "Defender Update controls",
+        "Platform Updates Channel",
+        "Current Channel (Preview)"
+      ),
+      s(
+        "defenderupd.sigchannel",
+        "Defender Update controls",
+        "Security Intelligence Updates Channel",
+        "Not configured"
+      ),
     ],
   },
 
@@ -372,7 +447,12 @@ const policies: IntunePolicy[] = [
     assignmentFilters: [],
     settings: [
       s("endpointSecurity:bitlocker_requireEncryption", "BitLocker", "Require Device Encryption", "Enabled"),
-      s("endpointSecurity:bitlocker_encryptionMethod", "BitLocker", "Encryption Method For Operating System Drives", "XTS-AES 256-bit"),
+      s(
+        "endpointSecurity:bitlocker_encryptionMethod",
+        "BitLocker",
+        "Encryption Method For Operating System Drives",
+        "XTS-AES 256-bit"
+      ),
     ],
   },
   {
@@ -384,7 +464,12 @@ const policies: IntunePolicy[] = [
     excludedGroupIds: [],
     assignmentFilters: [],
     settings: [
-      s("endpointSecurity:defenderav_allowRealtimeMonitoring", "Microsoft Defender Antivirus", "Allow Realtime Monitoring", "Enabled"),
+      s(
+        "endpointSecurity:defenderav_allowRealtimeMonitoring",
+        "Microsoft Defender Antivirus",
+        "Allow Realtime Monitoring",
+        "Enabled"
+      ),
       s("endpointSecurity:defenderav_cloudBlockLevel", "Microsoft Defender Antivirus", "Cloud Block Level", "High"),
     ],
   },
@@ -471,7 +556,12 @@ const policies: IntunePolicy[] = [
     assignmentFilters: [],
     settings: [
       s("dmaguard.deviceenumerationpolicy", "Endpoint Security", "DMA guard — device enumeration", "Block all"),
-      s("localsecurityauthority.configurelsaprotectedmode", "Endpoint Security", "LSA protected mode", "Enabled with UEFI lock"),
+      s(
+        "localsecurityauthority.configurelsaprotectedmode",
+        "Endpoint Security",
+        "LSA protected mode",
+        "Enabled with UEFI lock"
+      ),
     ],
   },
   {
@@ -498,8 +588,18 @@ const policies: IntunePolicy[] = [
         cspNode: "accounts/allowmicrosoftaccountconnection",
         cspNodeValue: "Block",
       },
-      s("windows10GeneralConfiguration:settingsBlockGamingPage", "Windows10 General Configuration", "Settings Block Gaming Page", "true"),
-      s("windows10GeneralConfiguration:windowsSpotlightBlocked", "Windows10 General Configuration", "Windows Spotlight Blocked", "true"),
+      s(
+        "windows10GeneralConfiguration:settingsBlockGamingPage",
+        "Windows10 General Configuration",
+        "Settings Block Gaming Page",
+        "true"
+      ),
+      s(
+        "windows10GeneralConfiguration:windowsSpotlightBlocked",
+        "Windows10 General Configuration",
+        "Windows Spotlight Blocked",
+        "true"
+      ),
     ],
   },
   {
@@ -549,7 +649,12 @@ const policies: IntunePolicy[] = [
     assignmentFilters: [],
     settings: [
       s("defenderupd.enginechannel", "Defender Update controls", "Engine Updates Channel", "Current Channel (Staged)"),
-      s("defenderupd.platformchannel", "Defender Update controls", "Platform Updates Channel", "Current Channel (Staged)"),
+      s(
+        "defenderupd.platformchannel",
+        "Defender Update controls",
+        "Platform Updates Channel",
+        "Current Channel (Staged)"
+      ),
       s("defenderupd.sigchannel", "Defender Update controls", "Security Intelligence Updates Channel", "Current"),
     ],
   },
@@ -580,7 +685,12 @@ const policies: IntunePolicy[] = [
     settings: [
       s("mac.firewall.enable", "Firewall", "Enable Firewall", "Enabled"),
       s("mac.firewall.stealth", "Firewall", "Enable stealth mode", "Enabled"),
-      s("mac.gatekeeper.allowedsources", "Gatekeeper", "Allowed app sources", "Mac App Store and identified developers"),
+      s(
+        "mac.gatekeeper.allowedsources",
+        "Gatekeeper",
+        "Allowed app sources",
+        "Mac App Store and identified developers"
+      ),
     ],
   },
   {
@@ -649,7 +759,12 @@ const policies: IntunePolicy[] = [
     excludedGroupIds: [],
     assignmentFilters: [],
     settings: [
-      s("android.compliance.playprotect", "Compliance", "Require the device to be at or under the Device Threat Level", "Require"),
+      s(
+        "android.compliance.playprotect",
+        "Compliance",
+        "Require the device to be at or under the Device Threat Level",
+        "Require"
+      ),
       s("android.compliance.rooted", "Compliance", "Rooted devices", "Block"),
       s("android.compliance.encryption", "Compliance", "Require encryption of data storage on device", "Require"),
     ],
@@ -664,7 +779,12 @@ const policies: IntunePolicy[] = [
     assignmentFilters: [],
     settings: [
       s("android.restrict.screencapture", "Work Profile", "Screen capture", "Block"),
-      s("android.restrict.crossprofilecopy", "Work Profile", "Copy and paste between work and personal profiles", "Block"),
+      s(
+        "android.restrict.crossprofilecopy",
+        "Work Profile",
+        "Copy and paste between work and personal profiles",
+        "Block"
+      ),
     ],
   },
 ];
@@ -712,8 +832,18 @@ const demoData: TenantData = {
     },
   ],
   assignmentFilters: [
-    { id: "flt-corp-owned", displayName: "Corporate-Owned", platform: "windows", rule: '(device.deviceOwnership -eq "Company")' },
-    { id: "flt-vpn-eligible", displayName: "VPN-Eligible Devices", platform: "windows", rule: '(device.deviceCategory -eq "VPN")' },
+    {
+      id: "flt-corp-owned",
+      displayName: "Corporate-Owned",
+      platform: "windows",
+      rule: '(device.deviceOwnership -eq "Company")',
+    },
+    {
+      id: "flt-vpn-eligible",
+      displayName: "VPN-Eligible Devices",
+      platform: "windows",
+      rule: '(device.deviceCategory -eq "VPN")',
+    },
   ],
 };
 

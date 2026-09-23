@@ -24,13 +24,25 @@ describe("normalizeCspNode", () => {
 
 describe("crosswalkTemplateSetting", () => {
   it("maps a windows10GeneralConfiguration property to its CSP node + canonical value", () => {
-    const r = crosswalkTemplateSetting("#microsoft.graph.windows10GeneralConfiguration", "microsoftAccountBlocked", "true");
+    const r = crosswalkTemplateSetting(
+      "#microsoft.graph.windows10GeneralConfiguration",
+      "microsoftAccountBlocked",
+      "true"
+    );
     expect(r?.cspNode).toBe("accounts/allowmicrosoftaccountconnection");
     expect(r?.cspNodeValue).toBe("Block"); // true -> Block, matching the Settings Catalog value space
   });
 
   it("returns undefined for properties/types not in the crosswalk", () => {
-    expect(crosswalkTemplateSetting("#microsoft.graph.windows10GeneralConfiguration", "someUnmappedProp", "true")).toBeUndefined();
-    expect(crosswalkTemplateSetting("#microsoft.graph.windowsUpdateForBusinessConfiguration", "microsoftAccountBlocked", "true")).toBeUndefined();
+    expect(
+      crosswalkTemplateSetting("#microsoft.graph.windows10GeneralConfiguration", "someUnmappedProp", "true")
+    ).toBeUndefined();
+    expect(
+      crosswalkTemplateSetting(
+        "#microsoft.graph.windowsUpdateForBusinessConfiguration",
+        "microsoftAccountBlocked",
+        "true"
+      )
+    ).toBeUndefined();
   });
 });

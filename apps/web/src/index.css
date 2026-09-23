@@ -37,7 +37,9 @@ body {
 /* Animate node reflow (e.g. when hiding a group collapses the policy column),
    but never while a node is being dragged -- that would lag the cursor. */
 .react-flow__node {
-  transition: transform 0.22s ease, opacity 0.22s ease;
+  transition:
+    transform 0.22s ease,
+    opacity 0.22s ease;
 }
 .react-flow__node.dragging {
   transition: none;

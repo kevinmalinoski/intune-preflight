@@ -158,7 +158,12 @@ describe("flattenIntentSettings (legacy Endpoint Security intents)", () => {
   });
 
   it("drops the notConfigured sentinel", () => {
-    expect(flattenIntentSettings([{ definitionId: "x_startupAuthenticationRequired", valueJson: '"notConfigured"' }], "BitLocker")).toEqual([]);
+    expect(
+      flattenIntentSettings(
+        [{ definitionId: "x_startupAuthenticationRequired", valueJson: '"notConfigured"' }],
+        "BitLocker"
+      )
+    ).toEqual([]);
   });
 
   it("walks child instances of a complex/collection setting", () => {
@@ -190,7 +195,10 @@ describe("flattenIntentSettings (legacy Endpoint Security intents)", () => {
     // Real templateType/@odata.type shapes from a live /deviceManagement/templates.
     const security = [
       { "@odata.type": "#microsoft.graph.securityBaselineTemplate", templateType: "securityTemplate" }, // BitLocker
-      { "@odata.type": "#microsoft.graph.securityBaselineTemplate", templateType: "advancedThreatProtectionSecurityBaseline" },
+      {
+        "@odata.type": "#microsoft.graph.securityBaselineTemplate",
+        templateType: "advancedThreatProtectionSecurityBaseline",
+      },
       { "@odata.type": "#microsoft.graph.securityBaselineTemplate", templateType: "microsoftEdgeSecurityBaseline" },
       { "@odata.type": "#microsoft.graph.securityBaselineTemplate", templateType: "cloudPC" }, // Windows 365 baseline
       { templateType: "securityBaseline" }, // MDM Security Baseline
@@ -324,7 +332,9 @@ describe("flattenToCspSettings (compliance default suppression)", () => {
       startMenuLayoutXml: null, // unset -> dropped by stringify
       bluetoothAllowedServices: [], // empty -> dropped by stringify
     };
-    const byId = Object.fromEntries(flattenToCspSettings(restriction).map((s) => [s.settingId.split(":").pop(), s.value]));
+    const byId = Object.fromEntries(
+      flattenToCspSettings(restriction).map((s) => [s.settingId.split(":").pop(), s.value])
+    );
     expect(byId).toEqual({
       settingsBlockGamingPage: "true",
       windowsSpotlightBlocked: "true",

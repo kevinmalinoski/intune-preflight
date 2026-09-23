@@ -1,16 +1,23 @@
 {
   "name": "intune-preflight",
   "private": true,
-  "version": "2.0.2",
+  "version": "2.1.0",
   "workspaces": [
     "apps/server",
     "apps/web",
-    "packages/shared"
+    "packages/shared",
+    "packages/engine"
   ],
   "scripts": {
-    "dev": "npm run build -w packages/shared && concurrently -k -n shared,server,web -c gray,blue,green \"npm run dev -w packages/shared\" \"npm run dev -w apps/server\" \"npm run dev -w apps/web\"",
-    "build": "npm run build -w packages/shared && npm run build -w apps/server && npm run build -w apps/web",
-    "lint": "npm run build -w packages/shared && npm run lint -w apps/server && npm run lint -w apps/web",
+    "dev": "npm run build:packages && concurrently -k -n shared,engine,server,web -c gray,magenta,blue,green \"npm run dev -w packages/shared\" \"npm run dev -w packages/engine\" \"npm run dev -w apps/server\" \"npm run dev -w apps/web\"",
+    "build:packages": "npm run build -w packages/shared && npm run build -w packages/engine",
+    "build": "npm run build:packages && npm run build -w apps/server && npm run build -w apps/web",
+    "build:demo": "npm run build:packages && npm run build:demo -w apps/web",
+    "typecheck": "npm run build:packages && npm run lint -w apps/server && npm run lint -w apps/web",
+    "lint": "npm run typecheck && eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "test": "vitest run",
     "test:watch": "vitest"
   },
@@ -18,7 +25,14 @@
     "node": ">=20"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "concurrently": "^9.1.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.26",
+    "globals": "^15.15.0",
+    "prettier": "^3.9.6",
+    "typescript-eslint": "^8.70.0",
     "vitest": "^3.0.0"
   }
 }

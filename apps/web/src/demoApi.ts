@@ -1,27 +1,25 @@
-// @ts-nocheck -- imports the server's pure engine via the Vite "@engine" alias,
-// which the web tsconfig doesn't know about. Type safety is preserved at the call
-// site: api.ts casts this to `typeof serverApi`.
-//
 // In-browser implementation of the API surface for the static public demo. It
 // runs the EXACT same pure engine the backend uses (computeSimulation,
 // buildAssignmentReport, ...) over the bundled sample tenant -- no server, no
 // network, nothing leaves the browser. Only bundled when VITE_STATIC_DEMO=1;
 // tree-shaken out of the normal (server-backed) build.
+import type { Platform } from "@intune-preflight/shared";
 import {
   assignmentReportToCsv,
   buildAssignmentReport,
   computeSimulation,
+  demoTenantData,
   listAssignmentFilters,
   listGroupSummaries,
   listUnassignedPolicies,
   simulationToCsv,
-} from "@engine/baseline";
-import { demoTenantData } from "@engine/demo/demoTenant";
+} from "@intune-preflight/engine";
+import type { SimulationInputs } from "./api.ts";
 
 const data = () => demoTenantData();
-const ok = (v) => Promise.resolve(v);
+const ok = <T>(v: T) => Promise.resolve(v);
 
-const toInputs = (i) => ({
+const toInputs = (i: SimulationInputs) => ({
   selectedGroupIds: i.groupIds ?? [],
   platform: i.platform,
   deviceFilterIds: i.deviceFilterIds ?? [],
@@ -30,20 +28,20 @@ const toInputs = (i) => ({
 
 // A data: URL so the download anchors (which carry a `download` attribute) save a
 // real file client-side, no backend Content-Disposition needed.
-const fileUrl = (mime, text) => `data:${mime};charset=utf-8,${encodeURIComponent(text)}`;
+const fileUrl = (mime: string, text: string) => `data:${mime};charset=utf-8,${encodeURIComponent(text)}`;
 
 export const demoApi = {
-  health: () => ok({ status: "ok", demo: true, hasCredentials: false, loadWarnings: [] }),
-  setMode: () => ok({ demo: true, hasCredentials: false }),
+  health: () => ok({ status: "ok", demo: true, hasCredentials: false, loadWarnings: [] as string[] }),
+  setMode: () => ok({ demo: true, hasCredentials: false, loadWarnings: [] as string[] }),
   groups: () => ok(listGroupSummaries(data())),
   filters: () => ok(listAssignmentFilters(data())),
   unassignedPolicies: () => ok(listUnassignedPolicies(data())),
-  assignmentReport: (platform) => ok(buildAssignmentReport(data(), platform)),
-  assignmentReportCsvUrl: (platform) =>
+  assignmentReport: (platform?: Platform) => ok(buildAssignmentReport(data(), platform)),
+  assignmentReportCsvUrl: (platform?: Platform) =>
     fileUrl("text/csv", assignmentReportToCsv(buildAssignmentReport(data(), platform))),
-  refresh: () => ok({ warnings: [] }),
-  simulate: (inputs) => ok(computeSimulation(data(), toInputs(inputs))),
-  simulateExportUrl: (inputs, format) => {
+  refresh: () => ok({ warnings: [] as string[] }),
+  simulate: (inputs: SimulationInputs) => ok(computeSimulation(data(), toInputs(inputs))),
+  simulateExportUrl: (inputs: SimulationInputs, format: "json" | "csv") => {
     const sim = computeSimulation(data(), toInputs(inputs));
     return format === "csv"
       ? fileUrl("text/csv", simulationToCsv(sim))

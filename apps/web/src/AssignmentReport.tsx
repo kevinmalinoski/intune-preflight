@@ -1,8 +1,10 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import type { AssignmentReport as Report, AssignmentReportRow, Platform, PolicyKind } from "@intune-preflight/shared";
 import { api } from "./api.ts";
-import { GroupHeatCluster, type ClusterPolicy } from "./GroupHeatCluster.tsx";
+import { GroupHeatCluster } from "./GroupHeatCluster.tsx";
+import type { ClusterPolicy } from "./policyHeat.ts";
 import { GroupPolicyList } from "./GroupPolicyList.tsx";
+import { toggled } from "./collections.ts";
 
 // An endpoint is defined by its OS, so the manifest is always scoped to one --
 // a mixed-OS view mixes assignments no single device would ever see.
@@ -58,7 +60,9 @@ function SortTh({
         }`}
       >
         {label}
-        <span className={active ? "text-sky-400" : "text-slate-700"}>{active ? (sort.dir === "asc" ? "▲" : "▼") : "▾"}</span>
+        <span className={active ? "text-sky-400" : "text-slate-700"}>
+          {active ? (sort.dir === "asc" ? "▲" : "▼") : "▾"}
+        </span>
       </button>
     </th>
   );
@@ -108,12 +112,7 @@ export function AssignmentReport({
     };
   }, [os]);
 
-  const toggleChecked = (id: string) =>
-    setChecked((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
+  const toggleChecked = (id: string) => setChecked(toggled(id));
 
   // Policies targeting each group, for the expandable detail rows.
   const rowsByGroup = useMemo(() => {
@@ -239,7 +238,8 @@ export function AssignmentReport({
     const rank = (e: Entry) => (e.filteredOut ? 1 : e.row.assignment === "Exclude" ? 2 : 0);
     const merged = [...includeEntries, ...filteredEntries, ...excludeEntries];
     merged.sort(
-      (a, b) => rank(a) - rank(b) || a.row.policyName.localeCompare(b.row.policyName, undefined, { sensitivity: "base" })
+      (a, b) =>
+        rank(a) - rank(b) || a.row.policyName.localeCompare(b.row.policyName, undefined, { sensitivity: "base" })
     );
     return merged;
   };
@@ -269,12 +269,7 @@ export function AssignmentReport({
     return [...m.values()].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
   }, [report]);
 
-  const toggleFilter = (id: string) =>
-    setMatched((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
+  const toggleFilter = (id: string) => setMatched(toggled(id));
 
   // Per-group counts of APPLIED includes, split into directly-assigned vs
   // inherited (All Devices / All Users + implied) -- distinct from the raw
@@ -312,7 +307,8 @@ export function AssignmentReport({
     };
     return [...list].sort((a, b) => {
       if (sort.key === "group") return dir * a.groupName.localeCompare(b.groupName, undefined, { sensitivity: "base" });
-      const diff = valueOf(a.groupId, a.includeCount, a.excludeCount) - valueOf(b.groupId, b.includeCount, b.excludeCount);
+      const diff =
+        valueOf(a.groupId, a.includeCount, a.excludeCount) - valueOf(b.groupId, b.includeCount, b.excludeCount);
       if (diff !== 0) return dir * diff;
       return a.groupName.localeCompare(b.groupName, undefined, { sensitivity: "base" });
     });
@@ -321,14 +317,11 @@ export function AssignmentReport({
   // Toggle direction on the active column; a new column starts descending for
   // the numeric hotspot columns and ascending (A→Z) for the group name.
   const sortBy = (key: SortKey) =>
-    setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: key === "group" ? "asc" : "desc" }));
+    setSort((s) =>
+      s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: key === "group" ? "asc" : "desc" }
+    );
 
-  const toggle = (id: string) =>
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
+  const toggle = (id: string) => setExpanded(toggled(id));
 
   // "Which groups carry each policy" -- powers the per-group seating charts.
   // Real (non-virtual) Include edges only: the All Devices / All Users baseline
@@ -354,28 +347,59 @@ export function AssignmentReport({
     const m = new Map<string, Set<string>>();
     for (const r of report?.rows ?? []) {
       if (r.assignment !== "Include" || r.groupKind !== "virtual") continue;
-      (m.get(r.policyId) ?? m.set(r.policyId, new Set<string>()).get(r.policyId)!).add(r.groupName);
+      const s = m.get(r.policyId) ?? new Set<string>();
+      s.add(r.groupName);
+      m.set(r.policyId, s);
     }
     return m;
   }, [report]);
 
-  const clusterFor = (groupId: string, groupName: string): ClusterPolicy[] => {
-    const seen = new Set<string>();
-    const out: ClusterPolicy[] = [];
+  // Seating charts are rebuilt on every render of this view -- including every
+  // keystroke in the search box -- and the rest of this component was already
+  // memoized for exactly that reason. Index the include rows by group ONCE so a
+  // cluster is a lookup rather than a full scan of report.rows per checked
+  // group (a large tenant has thousands of rows and you can check many groups).
+  // Group display names, from the UNFILTERED list. The seating charts used to
+  // read these out of `overlaps`, which is narrowed by the search box -- so
+  // checking a group and then typing a search that excluded it relabelled its
+  // chart (and the drill-down it opens) with the raw group GUID.
+  const groupNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const o of report?.groupOverlaps ?? []) m.set(o.groupId, o.groupName);
+    return m;
+  }, [report]);
+
+  const includeRowsByGroup = useMemo(() => {
+    const m = new Map<string, AssignmentReportRow[]>();
     for (const r of report?.rows ?? []) {
-      if (r.groupId !== groupId || r.assignment !== "Include" || seen.has(r.policyId)) continue;
-      seen.add(r.policyId);
-      const names = [...(sharedWithByPolicy.get(r.policyId) ?? new Set<string>())];
-      out.push({
-        id: r.policyId,
-        name: r.policyName,
-        shared: names.length || 1,
-        sharedWith: names.filter((n) => n !== groupName),
-        universal: [...(universalByPolicy.get(r.policyId) ?? new Set<string>())],
-      });
+      if (r.assignment !== "Include") continue;
+      const list = m.get(r.groupId);
+      if (list) list.push(r);
+      else m.set(r.groupId, [r]);
     }
-    return out;
-  };
+    return m;
+  }, [report]);
+
+  const clusterFor = useCallback(
+    (groupId: string, groupName: string): ClusterPolicy[] => {
+      const seen = new Set<string>();
+      const out: ClusterPolicy[] = [];
+      for (const r of includeRowsByGroup.get(groupId) ?? []) {
+        if (seen.has(r.policyId)) continue;
+        seen.add(r.policyId);
+        const names = [...(sharedWithByPolicy.get(r.policyId) ?? new Set<string>())];
+        out.push({
+          id: r.policyId,
+          name: r.policyName,
+          shared: names.length || 1,
+          sharedWith: names.filter((n) => n !== groupName),
+          universal: [...(universalByPolicy.get(r.policyId) ?? new Set<string>())],
+        });
+      }
+      return out;
+    },
+    [includeRowsByGroup, sharedWithByPolicy, universalByPolicy]
+  );
 
   if (error) {
     return <div className="flex h-full items-center justify-center p-8 text-center text-sm text-red-400">{error}</div>;
@@ -397,12 +421,14 @@ export function AssignmentReport({
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-3 border-b border-ink-700 bg-ink-900 px-4 py-3">
         <div className="mr-auto flex max-w-xl items-start gap-2">
-          <span className="mt-0.5 text-sm" aria-hidden>📋</span>
+          <span className="mt-0.5 text-sm" aria-hidden>
+            📋
+          </span>
           <div>
             <div className="text-xs font-semibold text-slate-200">Assignment Manifest</div>
             <div className="text-[11px] leading-snug text-slate-400">
-              Which groups carry which policies across your tenant — find your assignment hotspots, and see what a device in
-              any group effectively receives.
+              Which groups carry which policies across your tenant — find your assignment hotspots, and see what a
+              device in any group effectively receives.
             </div>
           </div>
         </div>
@@ -564,7 +590,9 @@ export function AssignmentReport({
                         </div>
                       </td>
                       <td className="px-3 py-2">
-                        <span className={`rounded px-1.5 py-0.5 text-[9px] uppercase ${GROUP_KIND_STYLE[o.groupKind] ?? ""}`}>
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-[9px] uppercase ${GROUP_KIND_STYLE[o.groupKind] ?? ""}`}
+                        >
                           {o.groupKind}
                         </span>
                       </td>
@@ -577,7 +605,9 @@ export function AssignmentReport({
                       <td className="px-3 py-2 text-right tabular-nums text-slate-400">
                         <span className="text-emerald-300">{o.includeCount}</span>
                         {" / "}
-                        <span className={o.excludeCount > 0 ? "text-rose-300" : "text-slate-600"}>{o.excludeCount}</span>
+                        <span className={o.excludeCount > 0 ? "text-rose-300" : "text-slate-600"}>
+                          {o.excludeCount}
+                        </span>
                       </td>
                       <td className="px-3 py-2">
                         <span className="text-slate-400">{o.platforms.join(", ")}</span>
@@ -588,7 +618,10 @@ export function AssignmentReport({
                         <td colSpan={colCount} className="px-3 py-2">
                           <div className="flex flex-col gap-1">
                             {detail.map(({ row: r, inheritedFrom, implied, filteredOut }, i) => {
-                              const kind = KIND_STYLE[r.kind] ?? { label: r.kind, cls: "bg-slate-500/15 text-slate-400" };
+                              const kind = KIND_STYLE[r.kind] ?? {
+                                label: r.kind,
+                                cls: "bg-slate-500/15 text-slate-400",
+                              };
                               return (
                                 <div
                                   key={`${r.policyId}-${r.assignment}-${i}`}
@@ -612,7 +645,9 @@ export function AssignmentReport({
                                   >
                                     {kind.label}
                                   </span>
-                                  <span className={`min-w-0 truncate ${filteredOut ? "text-slate-400 line-through" : "text-slate-200"}`}>
+                                  <span
+                                    className={`min-w-0 truncate ${filteredOut ? "text-slate-400 line-through" : "text-slate-200"}`}
+                                  >
                                     {r.policyName}
                                   </span>
                                   <div className="flex shrink-0 items-center justify-end gap-1.5">
@@ -696,7 +731,10 @@ export function AssignmentReport({
             </div>
             <div className="flex gap-2">
               <dt className="w-24 shrink-0 font-medium text-slate-300">Inherited</dt>
-              <dd>Also received from All Devices / All Users and implied groups — ≈ the same for every group, so it's a count, not a ranking.</dd>
+              <dd>
+                Also received from All Devices / All Users and implied groups — ≈ the same for every group, so it's a
+                count, not a ranking.
+              </dd>
             </div>
             <div className="flex gap-2">
               <dt className="w-24 shrink-0 font-medium">
@@ -707,20 +745,22 @@ export function AssignmentReport({
           </dl>
 
           <p>
-            <span className="text-slate-400">Expand any row</span> for the full set a device in that group effectively gets —
-            sorted A→Z, excludes last. Intune's “exclude wins” rule is applied, so a policy the group is excluded from is
-            dropped from the applied list and shown only as an exclude.
+            <span className="text-slate-400">Expand any row</span> for the full set a device in that group effectively
+            gets — sorted A→Z, excludes last. Intune's “exclude wins” rule is applied, so a policy the group is excluded
+            from is dropped from the applied list and shown only as an exclude.
           </p>
 
           {filtersInPlay.length > 0 && (
             <p>
-              <span className="text-violet-300">⛃ Simulate a filter:</span> click a filter chip (or the toggles up top) to
-              treat the device as matching it. Every group recomputes live, and policies the filter drops move to a
+              <span className="text-violet-300">⛃ Simulate a filter:</span> click a filter chip (or the toggles up top)
+              to treat the device as matching it. Every group recomputes live, and policies the filter drops move to a
               struck-through <span className="text-violet-300">Filtered</span> line.
             </p>
           )}
 
-          <p className="text-slate-600">Export the CSV for the raw per-assignment detail — pivot by Group or Policy in Excel.</p>
+          <p className="text-slate-600">
+            Export the CSV for the raw per-assignment detail — pivot by Group or Policy in Excel.
+          </p>
         </div>
       </div>
 
@@ -737,7 +777,7 @@ export function AssignmentReport({
           {checked.size > 0 && (
             <div className="mx-auto mb-2 flex max-w-6xl gap-2 overflow-x-auto pb-1">
               {[...checked].map((gid) => {
-                const gname = overlaps.find((o) => o.groupId === gid)?.groupName ?? gid;
+                const gname = groupNameById.get(gid) ?? gid;
                 return (
                   <GroupHeatCluster
                     key={gid}
@@ -751,13 +791,17 @@ export function AssignmentReport({
           )}
           <div className="mx-auto flex max-w-5xl items-center gap-3">
             <span className="text-xs text-slate-300">
-              <span className="font-semibold text-slate-100">{checked.size}</span> group{checked.size === 1 ? "" : "s"} selected
+              <span className="font-semibold text-slate-100">{checked.size}</span> group{checked.size === 1 ? "" : "s"}{" "}
+              selected
             </span>
             <span className="hidden text-[11px] text-slate-500 sm:inline">
               All Devices / All Users always apply and are included automatically.
             </span>
             {matched.size > 0 && (
-              <span className="text-[11px] text-violet-300" title="The device filters you're simulating here carry over to the Simulator">
+              <span
+                className="text-[11px] text-violet-300"
+                title="The device filters you're simulating here carry over to the Simulator"
+              >
                 ⛃ carrying {matched.size} device filter{matched.size === 1 ? "" : "s"}
               </span>
             )}

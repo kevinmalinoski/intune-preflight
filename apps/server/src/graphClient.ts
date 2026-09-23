@@ -34,7 +34,9 @@ async function getAccessToken(): Promise<string> {
   }
   const result = await getMsalApp().acquireTokenByClientCredential({ scopes: [SCOPE] });
   if (!result?.accessToken) {
-    throw new Error("Failed to acquire Graph access token. Check TENANT_ID/CLIENT_ID/CLIENT_SECRET and app permissions.");
+    throw new Error(
+      "Failed to acquire Graph access token. Check TENANT_ID/CLIENT_ID/CLIENT_SECRET and app permissions."
+    );
   }
   cachedToken = {
     token: result.accessToken,
@@ -65,6 +67,35 @@ const REQUEST_TIMEOUT_MS = 45_000;
 // and must NOT be retried, so the beta-fallback and per-item skip paths still
 // react immediately.
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+
+/**
+ * A Graph failure that must NOT be retried or reported as a network problem --
+ * a 4xx, or a retryable status that has exhausted its attempts. It exists so
+ * the body-reading `await` can live inside the same try block as the fetch (so
+ * the timeout covers it) without the catch mistaking a real HTTP error for a
+ * transient socket failure, and so callers can branch on the STATUS rather than
+ * pattern-matching an error message.
+ */
+export class GraphHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number
+  ) {
+    super(message);
+    this.name = "GraphHttpError";
+  }
+}
+
+/**
+ * Did this request fail with one of the given HTTP statuses? Lets a caller react
+ * to a specific Graph response (e.g. the v1.0 "Resource not found for the
+ * segment" 400 that the beta fallback exists for) without treating an unrelated
+ * failure -- a 403 for a missing permission, or no connectivity at all -- as the
+ * same thing.
+ */
+export function isGraphStatus(err: unknown, ...statuses: number[]): boolean {
+  return err instanceof GraphHttpError && statuses.includes(err.status);
+}
 
 /** Whether an HTTP status is a transient failure worth retrying (vs a permanent 4xx). */
 export function isRetryableStatus(status: number): boolean {
@@ -111,6 +142,7 @@ async function graphFetch(url: string, init?: { method?: string; body?: string }
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
     let res: Response;
+    let parsed: unknown;
     stats.requests++;
     try {
       res = await fetch(url, {
@@ -122,35 +154,50 @@ async function graphFetch(url: string, init?: { method?: string; body?: string }
           ...(init?.body !== undefined ? { "Content-Type": "application/json" } : {}),
         },
       });
+
+      // Count the outcome before any branch can throw, so the LAST attempt of a
+      // losing request still shows up in the load telemetry.
+      if (res.status === 429) stats.throttled++;
+      else if (res.status >= 500) stats.serverErrors++;
+
+      // Read the body INSIDE the try, while the abort signal is still armed.
+      // `fetch` resolves as soon as the headers arrive, so a response whose body
+      // then stalls mid-stream would otherwise hang forever -- past the timeout
+      // that exists precisely to stop a wedged socket from pinning one of the
+      // bounded-concurrency workers and collapsing the whole load's throughput.
+      if (res.ok) {
+        parsed = res.status === 204 ? undefined : await res.json();
+      } else if (!isRetryableStatus(res.status) || attempt >= MAX_ATTEMPTS) {
+        // Terminal failure: read the body for the error message.
+        const body = await res.text().catch(() => "");
+        throw new GraphHttpError(
+          `Graph request failed (${res.status} ${res.statusText}) for ${url}: ${body}`,
+          res.status
+        );
+      }
     } catch (err) {
-      clearTimeout(timer);
+      if (err instanceof GraphHttpError) throw err;
       if (err instanceof Error && err.name === "AbortError") stats.timeouts++;
       if (isRetryableNetworkError(err) && attempt < MAX_ATTEMPTS) {
         stats.retries++;
         await sleep(backoffMs(attempt));
         continue;
       }
-      const reason = err instanceof Error && err.name === "AbortError" ? `timed out after ${REQUEST_TIMEOUT_MS}ms` : String(err);
+      const reason =
+        err instanceof Error && err.name === "AbortError" ? `timed out after ${REQUEST_TIMEOUT_MS}ms` : String(err);
       throw new Error(`Graph request to ${url} failed after ${attempt} attempt(s): ${reason}`);
     } finally {
       clearTimeout(timer);
     }
 
-    if (res.ok) return res.status === 204 ? undefined : res.json();
+    if (res.ok) return parsed;
 
-    if (res.status === 429) stats.throttled++;
-    else if (res.status >= 500) stats.serverErrors++;
-
-    if (isRetryableStatus(res.status) && attempt < MAX_ATTEMPTS) {
-      stats.retries++;
-      const retryAfter = Number(res.headers.get("Retry-After"));
-      const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : backoffMs(attempt);
-      await sleep(waitMs);
-      continue;
-    }
-
-    const body = await res.text().catch(() => "");
-    throw new Error(`Graph request failed (${res.status} ${res.statusText}) for ${url}: ${body}`);
+    // Only retryable statuses with attempts left reach here -- the terminal case
+    // threw above, and the status was already counted.
+    stats.retries++;
+    const retryAfter = Number(res.headers.get("Retry-After"));
+    const waitMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : backoffMs(attempt);
+    await sleep(waitMs);
   }
 }
 
@@ -180,7 +227,6 @@ export async function graphGetObject<T>(path: string, useBeta = false): Promise<
   return (await graphFetch(`${base}${path}`)) as T;
 }
 
-
 /** Fetches every page of a Graph collection endpoint, following @odata.nextLink. */
 export async function graphGetCollection<T>(path: string, useBeta = false): Promise<T[]> {
   const base = useBeta ? GRAPH_BETA : GRAPH_BASE;
@@ -188,9 +234,12 @@ export async function graphGetCollection<T>(path: string, useBeta = false): Prom
   const items: T[] = [];
 
   while (url) {
-    const page = (await graphFetch(url)) as { value?: T[]; "@odata.nextLink"?: string };
-    items.push(...(page.value ?? []));
-    url = page["@odata.nextLink"];
+    // `graphFetch` returns undefined for a 204, so read the page defensively --
+    // an empty collection is an empty result, not a TypeError from a blind
+    // dereference several frames away from the request that caused it.
+    const page = (await graphFetch(url)) as { value?: T[]; "@odata.nextLink"?: string } | undefined;
+    items.push(...(page?.value ?? []));
+    url = page?.["@odata.nextLink"];
   }
 
   return items;

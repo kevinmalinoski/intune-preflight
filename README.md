@@ -58,15 +58,16 @@ The normal loop is deploy-and-pray: assign a policy, wait for devices to check i
 
 ## Known limitations
 
-Honest edges in v2.0 — none block the core use, but know them before you rely on a result:
+Honest edges in v2 — none block the core use, but know them before you rely on a result:
 
 - **Dynamic membership is surfaced, not fully evaluated.** Group Tag / Autopilot auto-selection reads the `[OrderID]` and `[ZTDId]` clauses in `device.devicePhysicalIds` (`-eq` / `-startsWith`); a confident match is auto-selected. When a rule *also* hinges on a property a tag can't decide (`deviceOSType`, `deviceCategory`, …), the group is flagged **+ conditions** with its rule shown, and a tag that's merely referenced is flagged **conditional** (not auto-selected) — so the edge is visible per group rather than guessed. A real membership-rule engine is a post-2.0 accuracy upgrade.
 - **Conflict & overlap detection is Windows-only.** Other platforms don't map cleanly onto value-level comparison yet. The **merged baseline itself is still shown on every platform** — only the conflict/overlap flags are Windows-scoped.
 - **Cross-model collision detection is best-effort.** Settings Catalog ↔ OMA-URI is exact (shared CSP path); the legacy-template → CSP crosswalk is a small, hand-verified set, and legacy Endpoint Security intents aren't crosswalked yet — so it checks *common* cross-model settings, not every one. Migrating legacy templates to the Settings Catalog is the real fix, which the "Legacy template" flag encourages.
 - **Settings flattening is schema-agnostic** — derived from each Graph resource's own properties rather than a hand-maintained CSP schema, so raw Graph field names can show up as setting names in some cases (legacy intents now resolve real names/values from their template definitions).
 - **Tested against sandbox Microsoft 365 tenants.** Always verify against the Intune admin center before relying on a computed baseline for compliance decisions.
+- **A conflicted setting has no computed winner.** The merged baseline shows one row per setting; where applied policies disagree, the UI and CSV expand every value rather than picking one, and the API marks the row `conflicted`. Deciding which value wins on the device is left to Intune — deliberately. See [reading a conflicted setting](docs/SETUP.md#reading-a-conflicted-setting-from-the-api).
 
-➡️ **[Full limitations and post-2.0 work — ROADMAP.md](ROADMAP.md)**
+➡️ **[Full limitations, v2 maintenance and v3 bets — ROADMAP.md](ROADMAP.md)**
 
 ## Security
 
@@ -84,7 +85,7 @@ Read this before you host it anywhere other than your own machine:
 |---|---|
 | **[docs/FEATURES.md](docs/FEATURES.md)** | Full walkthrough of the simulator and the Assignment Manifest, with screenshots |
 | **[docs/SETUP.md](docs/SETUP.md)** | Entra app registration, permissions, `.env`, Docker / npm, API reference, troubleshooting |
-| **[ROADMAP.md](ROADMAP.md)** | Known limitations in detail and planned v2 work |
+| **[ROADMAP.md](ROADMAP.md)** | Known limitations in detail, remaining v2 maintenance, and the v3 bets |
 | **[CHANGELOG.md](CHANGELOG.md)** | Release history |
 
 ## Acknowledgments

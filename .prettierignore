@@ -1,0 +1,12 @@
+dist/
+dist-demo/
+node_modules/
+package-lock.json
+*.tsbuildinfo
+docs/img/
+
+# Markdown is hand-wrapped for readability in a plain editor (README, ROADMAP and
+# CHANGELOG are written to ~80 columns with deliberate line breaks). Prettier
+# would reflow all of it for no gain, so prose stays out of the formatter's reach
+# -- it formats code only.
+*.md

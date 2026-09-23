@@ -1,13 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { groupTagMatchesRule, isGroupTagRule, isAutopilotJoinedRule } from "@intune-preflight/shared";
-import type {
-  AssignmentFilter,
-  GroupSummary,
-  Platform,
-  SimulationResult,
-  UnassignedPolicy,
-} from "@intune-preflight/shared";
+import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
+import type { AssignmentFilter, Platform, SimulationResult } from "@intune-preflight/shared";
 import { api } from "./api.ts";
+import { deviceReducer, initialDeviceState } from "./endpointDevice.ts";
 import { EndpointPicker } from "./EndpointPicker.tsx";
 import { PolicyPreflight } from "./PolicyPreflight.tsx";
 import { SimulationDiagram } from "./SimulationDiagram.tsx";
@@ -21,133 +15,54 @@ export function EndpointSimulator({
   handoff?: { groupIds: string[]; platform: Platform; filterIds: string[] } | null;
   onHandoffConsumed?: () => void;
 } = {}) {
-  const [groups, setGroups] = useState<GroupSummary[]>([]);
+  // The simulated endpoint's whole definition -- OS, groups, filters, Autopilot,
+  // Group Tag, waitlisted policies -- lives in one reducer. See endpointDevice.ts
+  // for why (the rules relating these fields used to be a chain of effects).
+  // A Manifest handoff is consumed here as initial state on this fresh mount, so
+  // nothing can run later and stomp it.
+  const [device, dispatch] = useReducer(deviceReducer, handoff, initialDeviceState);
+  const {
+    groups,
+    platform,
+    selectedGroupIds,
+    deviceFilterIds,
+    unassignedPolicies,
+    unassignedPolicyIds,
+    isAutopilotDevice,
+    groupTag,
+  } = device;
+
   const [filters, setFilters] = useState<AssignmentFilter[]>([]);
-  // Seed the OS, group selection, and matched device filters from a Manifest
-  // handoff on this fresh mount; everything else (Autopilot, waitlist) starts
-  // clean, so it's a faithful continuation of what you were exploring in the
-  // Manifest. The seeded state drives the simulate effect below like a manual one.
-  const [platform, setPlatform] = useState<Platform>(handoff?.platform ?? "windows");
-  const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>(handoff?.groupIds ?? []);
-  const [deviceFilterIds, setDeviceFilterIds] = useState<string[]>(handoff?.filterIds ?? []);
-  const [unassignedPolicies, setUnassignedPolicies] = useState<UnassignedPolicy[]>([]);
-  const [unassignedPolicyIds, setUnassignedPolicyIds] = useState<string[]>([]);
-  const [isAutopilotDevice, setIsAutopilotDevice] = useState(false);
-  const [groupTag, setGroupTag] = useState("");
   const [simulation, setSimulation] = useState<SimulationResult | null>(null);
   const [showBaseline, setShowBaseline] = useState(false);
   const [baselineScope, setBaselineScope] = useState<BaselineScope | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // The handoff is consumed by the useState initializers above; clear it once so
-  // that returning to this tab later (without re-copying) starts a blank device.
+  // The handoff was consumed by the reducer's initial state above; clear it once
+  // so returning to this tab later (without re-copying) starts a blank device.
   useEffect(() => {
     if (handoff) onHandoffConsumed?.();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [handoff, onHandoffConsumed]);
 
   useEffect(() => {
     Promise.all([api.groups(), api.filters(), api.unassignedPolicies()])
       .then(([allGroups, allFilters, allUnassigned]) => {
-        setGroups(allGroups.filter((g) => !g.id.startsWith("virtual-")));
         setFilters(allFilters);
-        setUnassignedPolicies(allUnassigned);
+        dispatch({
+          type: "catalogLoaded",
+          groups: allGroups.filter((g) => !g.id.startsWith("virtual-")),
+          unassignedPolicies: allUnassigned,
+        });
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
 
-  // Filters selected for one platform won't apply to another -- reset when the
-  // user actually switches OS. Compare against the PREVIOUS platform via a ref
-  // rather than a "skip first mount" flag: React StrictMode double-invokes mount
-  // effects in dev, and the flag approach would let the second invoke wipe the
-  // filters seeded from a Manifest handoff. A real OS switch still clears them.
-  const lastPlatform = useRef(platform);
-  useEffect(() => {
-    if (lastPlatform.current !== platform) {
-      lastPlatform.current = platform;
-      setDeviceFilterIds([]);
-    }
-  }, [platform]);
-
-  // Autopilot is Windows-only -- turn it (and any Group Tag) off when the
-  // simulated OS isn't Windows, so stale Autopilot state can't linger.
-  useEffect(() => {
-    if (platform !== "windows") {
-      setIsAutopilotDevice(false);
-      setGroupTag("");
-    }
-  }, [platform]);
-
-  // Manually-added unassigned policies are OS-specific too -- drop any whose
-  // platform no longer matches when the simulated OS changes.
-  useEffect(() => {
-    setUnassignedPolicyIds((prev) =>
-      prev.filter((id) => unassignedPolicies.find((p) => p.id === id)?.platform === platform)
-    );
-  }, [platform, unassignedPolicies]);
-
-  // Drop selected groups that have no policies for the newly-selected OS, so the
-  // selection stays consistent with the (platform-filtered) group list.
-  useEffect(() => {
-    setSelectedGroupIds((prev) =>
-      prev.filter((id) => {
-        const g = groups.find((x) => x.id === id);
-        return !g || g.platforms.includes(platform);
-      })
-    );
-  }, [platform, groups]);
-
-  // Entering a Group Tag drives selection directly, in real time: every group
-  // a device carrying that tag would be a member of (evaluating its [OrderID]
-  // clauses -- -eq, -startsWith, and or/and combinations) is auto-selected. A
-  // device tagged "SALES-KIOSK-VM" is a member of both a startsWith "SALES-KIOSK"
-  // group and an -eq "SALES-KIOSK-VM" group, so both get selected. Group Tag
-  // groups the tag no longer matches are dropped; groups with no Group Tag
-  // rule are left untouched.
-  useEffect(() => {
-    const trimmedTag = groupTag.trim();
-    if (!trimmedTag) return;
-    const matchingIds = groups.filter((g) => groupTagMatchesRule(g.membershipRule, trimmedTag)).map((g) => g.id);
-    setSelectedGroupIds((prev) => {
-      const kept = prev.filter((id) => {
-        const rule = groups.find((g) => g.id === id)?.membershipRule;
-        return !isGroupTagRule(rule) || groupTagMatchesRule(rule, trimmedTag);
-      });
-      const merged = [...kept];
-      for (const id of matchingIds) {
-        if (!merged.includes(id)) merged.push(id);
-      }
-      return merged;
-    });
-  }, [groupTag, groups]);
-
-  // Checking "Autopilot device" links the endpoint to every default
-  // Autopilot-joined dynamic group (bare "[ZTDId]" startsWith rule) by selecting
-  // them directly, the same way a Group Tag drives selection. This only ever
-  // ADDS: it must NOT strip an Autopilot-joined group the user selected
-  // deliberately (e.g. handed off from the Manifest, or picked directly) just
-  // because Autopilot mode happens to be off -- doing so silently dropped that
-  // group from the simulation. Removal when the toggle is switched off is handled
-  // by toggleAutopilotDevice; switching the OS off Windows drops them via the
-  // platform filter above.
-  useEffect(() => {
-    if (!isAutopilotDevice) return;
-    const autopilotGroupIds = groups.filter((g) => isAutopilotJoinedRule(g.membershipRule)).map((g) => g.id);
-    if (autopilotGroupIds.length === 0) return;
-    setSelectedGroupIds((prev) => {
-      const merged = [...prev];
-      for (const id of autopilotGroupIds) if (!merged.includes(id)) merged.push(id);
-      return merged;
-    });
-  }, [isAutopilotDevice, groups]);
-
   // Recompute the simulation whenever the endpoint definition changes. Debounced
-  // and abortable: a single OS switch cascades into several state updates (reset
-  // filters, drop off-platform groups/unassigned), and without this each would
-  // fire its own request and re-render the graph. The debounce coalesces them
-  // into one call and the AbortController cancels any superseded request.
+  // and abortable: the debounce coalesces a burst of changes (typing a Group Tag
+  // re-resolves group selection on each keystroke) into one call, and the
+  // AbortController cancels any superseded request.
   useEffect(() => {
     const controller = new AbortController();
     const timer = setTimeout(() => {
@@ -164,51 +79,12 @@ export function EndpointSimulator({
     };
   }, [selectedGroupIds, platform, deviceFilterIds, unassignedPolicyIds]);
 
-  const toggleUnassignedPolicy = (id: string) => {
-    setUnassignedPolicyIds((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
-  };
-
-  const selectUnassignedPolicies = (ids: string[]) => {
-    setUnassignedPolicyIds((prev) => Array.from(new Set([...prev, ...ids])));
-  };
-
-  const deselectUnassignedPolicies = (ids: string[]) => {
-    const remove = new Set(ids);
-    setUnassignedPolicyIds((prev) => prev.filter((id) => !remove.has(id)));
-  };
-
   // Open the merged-baseline panel, optionally scoped to a policy type or a
   // single policy (from clicking in the diagram). null = the whole baseline.
   const openBaseline = useCallback((scope: BaselineScope | null) => {
     setBaselineScope(scope);
     setShowBaseline(true);
   }, []);
-
-  const toggleGroup = (id: string) => {
-    setSelectedGroupIds((prev) => (prev.includes(id) ? prev.filter((g) => g !== id) : [...prev, id]));
-  };
-
-  const toggleDeviceFilter = (id: string) => {
-    setDeviceFilterIds((prev) => (prev.includes(id) ? prev.filter((f) => f !== id) : [...prev, id]));
-  };
-
-  // Unchecking "Autopilot device" turns the endpoint back into a non-Autopilot
-  // device: it has no Group Tag and can't belong to any Autopilot-joined or
-  // Group Tag group. So clear the tag and drop both kinds of auto-selected
-  // groups, rather than leaving stale tag selections behind.
-  const toggleAutopilotDevice = () => {
-    const nowOn = !isAutopilotDevice;
-    setIsAutopilotDevice(nowOn);
-    if (!nowOn) {
-      setGroupTag("");
-      setSelectedGroupIds((prev) =>
-        prev.filter((id) => {
-          const rule = groups.find((g) => g.id === id)?.membershipRule;
-          return !isGroupTagRule(rule) && !isAutopilotJoinedRule(rule);
-        })
-      );
-    }
-  };
 
   // Memoized so its identity is stable across renders -- the diagram keys a
   // layout memo on it, and a fresh array each render would thrash that memo (and
@@ -227,24 +103,24 @@ export function EndpointSimulator({
         groups={groups}
         selectedGroupIds={selectedGroupIds}
         platform={platform}
-        onTogglePlatform={setPlatform}
-        onToggleGroup={toggleGroup}
+        onTogglePlatform={(p) => dispatch({ type: "setPlatform", platform: p })}
+        onToggleGroup={(id) => dispatch({ type: "toggleGroup", id })}
         filters={filters}
         deviceFilterIds={deviceFilterIds}
-        onToggleDeviceFilter={toggleDeviceFilter}
+        onToggleDeviceFilter={(id) => dispatch({ type: "toggleDeviceFilter", id })}
         isAutopilotDevice={isAutopilotDevice}
-        onToggleAutopilotDevice={toggleAutopilotDevice}
+        onToggleAutopilotDevice={() => dispatch({ type: "toggleAutopilotDevice" })}
         groupTag={groupTag}
-        onGroupTagChange={setGroupTag}
+        onGroupTagChange={(groupTag) => dispatch({ type: "setGroupTag", groupTag })}
         loading={loading}
       />
 
       <PolicyPreflight
         policies={unassignedPolicies}
         selectedIds={unassignedPolicyIds}
-        onToggle={toggleUnassignedPolicy}
-        onSelectMany={selectUnassignedPolicies}
-        onDeselectMany={deselectUnassignedPolicies}
+        onToggle={(id) => dispatch({ type: "toggleUnassignedPolicy", id })}
+        onSelectMany={(ids) => dispatch({ type: "selectUnassignedPolicies", ids })}
+        onDeselectMany={(ids) => dispatch({ type: "deselectUnassignedPolicies", ids })}
         platform={platform}
       />
 

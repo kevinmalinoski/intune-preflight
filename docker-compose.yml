@@ -15,6 +15,20 @@ services:
     ports:
       - "4000:4000"
     restart: unless-stopped
+    # /api/health answers as soon as Fastify is listening (it does not wait on a
+    # tenant load), so this reports "is the API up", which is what `web` needs.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
 
   web:
     build:
@@ -22,6 +36,10 @@ services:
       dockerfile: apps/web/Dockerfile
     ports:
       - "8080:80"
+    # nginx proxies /api to the server, so wait for it to pass its healthcheck --
+    # a plain `depends_on` only waits for the container to be created, which used
+    # to let the first page load 502.
     depends_on:
-      - server
+      server:
+        condition: service_healthy
     restart: unless-stopped

@@ -6,6 +6,174 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [2.1.0] — 2026-09-23
+
+v2.1 is the release that makes v2 something you can leave alone. No new
+capabilities — v2's feature set is complete and meant to stay that way (the
+roadmap now separates remaining **v2 maintenance** from the **v3 bets**). What's
+here is the structural, correctness and reliability work behind that promise,
+plus the bugs a deliberate quality pass turned up: a browser setting that could
+blank the page, a Graph response that could hang a tenant load, a filter that
+under-reported, and a request size that a large tenant could genuinely hit.
+
+The test suite went from 114 to 178, and now covers the three things that had
+none: the whole documented API surface, the Graph retry loop, and the simulator's
+state rules.
+
+### Fixed
+- **The "Legacy policies" baseline filter missed settings a legacy policy only
+  co-configures.** The merged baseline carries one row per setting, and the view
+  keyed off that row's single `sourceKind` — whichever contributing policy the
+  merge happened to reach first. So a setting configured by *both* a Settings
+  Catalog policy and a legacy Endpoint Security intent appeared under "Legacy
+  policies only" only if the legacy one sorted first, and the count in the
+  dropdown was wrong the same way. Both the filter and the count now key on
+  **every** contributing policy — exactly the settings a migration needs to look
+  at — and are derived from the same data, so they can no longer disagree.
+- **A conflicted setting no longer reads as an effective value over the API.**
+  For a setting two applied policies disagree on, the single merged `value` is
+  whichever policy was reached first — not a computed winner. The UI and the CSV
+  export already expanded conflicts to a row per value, but a consumer of
+  `GET /api/simulate` or the JSON export saw one confident-looking value. Such a
+  row now carries **`conflicted: true`**, pointing at the full disagreement in
+  `conflicts`; it follows the same Windows-only gate as conflict detection, so
+  the flag never points at a deliberately empty list. Documented in
+  [docs/SETUP.md](docs/SETUP.md#reading-a-conflicted-setting-from-the-api).
+  Deciding a winner stays deliberately out of scope — see "Considered and parked"
+  in [ROADMAP.md](ROADMAP.md).
+- **The merged-baseline panel is keyboard-usable.** It was a panel you could only
+  leave with the mouse: no **Esc**, no focus management, nothing announcing it to
+  a screen reader. Esc now backs out one level (a drill-down scope first, then the
+  panel — matching the group policy list), focus moves into the panel on open and
+  returns to whatever opened it on close, and it's labelled as a dialog. Not
+  `aria-modal`, because it's a docked side panel and the diagram beside it stays
+  usable.
+- **`docker compose up` no longer 502s on the first page load.** `web` waited only
+  for the server *container*, not for the API to answer; the server now has a
+  healthcheck and `web` waits for it.
+
+- **A browser with site data blocked no longer blanks the page.** Safari's "Block
+  all cookies", Chrome's blocked-site-data setting and some enterprise policies
+  make *every* `localStorage` access throw — reads included. The merged-baseline
+  panel persists its width in a render effect with an unguarded write, so opening
+  it threw, and with no error boundary React unmounted the whole app. Reproduced
+  on the built demo (clicking "View merged baseline" left the page empty) and
+  fixed: storage access is now guarded everywhere, and an **error boundary**
+  catches anything else — showing the error, a Reload button and a link to report
+  it, instead of a white screen.
+- **A stalled Graph response body could hang a tenant load indefinitely.** `fetch`
+  resolves when the headers arrive, and the per-request timeout was being cleared
+  before the body was read — so a response that stalled mid-body had no timeout
+  at all, pinning one of the eight concurrent workers. The body read now happens
+  inside the timeout's scope and retries like any other dropped connection. Also
+  fixes the load telemetry undercounting by one: the final failing attempt of a
+  throttled request wasn't counted, and `graphGetCollection` could throw a
+  `TypeError` on a 204 instead of returning an empty result.
+- **Searching in the Assignment Manifest relabelled a checked group with its
+  GUID.** The seating charts read group names from the search-filtered list while
+  the selection bar shows every checked group, so filtering one out replaced its
+  chart label (and its drill-down title) with the raw group id.
+- **Very large selections no longer fail with a bare HTTP 431.** Group ids travel
+  in the query string, so ~430 selected groups passed Node's 16KB header limit and
+  the request was rejected before it reached the app. The limit is raised to 64KB
+  — verified past 1,500 groups.
+
+### Changed
+- **The simulation engine is its own package (`packages/engine`).** It was living
+  in `apps/server` next to the Graph client, and the web app reached into it
+  sideways through a Vite alias and a file-wide `@ts-nocheck`. The engine is pure
+  by design — that's what lets the identical code run behind the API *and* fully
+  in the browser for the public demo — but nothing enforced it: `TenantData`, the
+  engine's own input type, was declared inside the module that fetches it, and
+  purity held only because every reference happened to be an erased `import type`.
+  One value import would have broken the demo build with no warning. Now the
+  boundary is a package dependency the compiler checks, and the guard is explicit
+  three ways: a purity test that names the offending file, an ESLint rule while you
+  type, and CI building the demo so the browser path is proven end to end. The
+  alias, the custom Vite resolver plugin and the `@ts-nocheck` are all gone, so the
+  in-browser API implementation is type-checked against the server's surface —
+  drift between them is now a build error.
+- **The simulator's state is one tested reducer** (`apps/web/src/endpointDevice.ts`).
+  Six `useState`s and a chain of `useEffect`s reacting to each other became a pure
+  function of state + action, which separates rules that must always hold
+  (Autopilot is Windows-only) from effects belonging to one action (switching OS
+  clears device filters). Both bugs that cascade shipped — StrictMode's
+  double-invoked mount effect wiping filters seeded by a Manifest handoff, and the
+  Autopilot rule silently stripping deliberately-selected groups — are now pinned
+  by regression tests, and this state is unit-testable for the first time.
+- **`npm run lint` actually lints.** It was `tsc --noEmit` alone; two
+  `eslint-disable` comments were sitting in the app suppressing a rule that was
+  never installed. ESLint is now configured (with `react-hooks/exhaustive-deps` as
+  an **error**, since a stale dependency array is precisely what cost the simulator
+  those two fixes) and Prettier formats the code — docs stay hand-wrapped and out
+  of the formatter's reach. CI runs `lint`, `format:check`, `build`, `test` and the
+  demo build.
+- **Docker images are reproducible and slimmer.** Both Dockerfiles used
+  `npm install` despite a committed lockfile, and shipped the whole build-time
+  `node_modules` — TypeScript, tsx and all — into the runtime image. Now `npm ci`,
+  a separate `--omit=dev` dependency stage, a non-root user, and Node **20** to
+  match `.nvmrc` and CI (they said 22).
+- Eight copies of the same copy-mutate-return Set-toggle closure became one helper
+  (`apps/web/src/collections.ts`), and the shared policy-heat scale moved out of the
+  component that draws it (`apps/web/src/policyHeat.ts`).
+
+- The Manifest's per-group seating charts index their rows once instead of
+  rescanning every assignment row per checked group on every render — this view
+  re-renders on each keystroke in its own search box. The group picker had the
+  same shape (classifying membership rules inside a sort comparator, so O(n log n)
+  re-parses per keystroke) and now ranks each group once: 4.1ms → 0.6ms at 800
+  groups.
+- **The beta endpoint fallback only fires on 400/404 now.** It exists for the
+  v1.0 "Resource not found for the segment" response, but caught every failure —
+  so a 403 for a missing permission, or an outage, was quietly attempted twice
+  and reported against the wrong URL.
+- **`SimulationDiagram` is four files instead of one 972-line one**:
+  `diagram/theme.ts` (the visual and layout vocabulary), `diagram/nodes.tsx`
+  (the node components), `diagram/buildGraph.ts` (the layout engine) and the
+  view itself. No behaviour change — verified against the built demo. The legend
+  now derives its colours from the theme rather than repeating nine hex codes
+  that could drift from the nodes they label.
+
+### Added
+- **The public demo deploys itself.** Publishing it to `gh-pages` was a manual
+  step that followed from no source push, which is exactly why the live demo could
+  silently lag a release — and it's both the project's front door and where
+  CONTRIBUTING asks people to reproduce bugs. A workflow now builds and publishes
+  it on a release tag (or on demand), touching only the `demo/` subtree so the
+  landing page and screenshots are left alone.
+- A favicon and a meta description on the app shell (inline SVG, so nothing 404s
+  when the app is served from a sub-path like the demo's).
+
+- **Tests for the whole documented API surface** — all ten endpoints in
+  docs/SETUP.md, driven through Fastify's `inject()` with no socket and no Graph,
+  against demo mode. They had none before, which is how the 431 ceiling above
+  went unnoticed. The server is now `buildServer()` plus a seventeen-line entry
+  point, so the routes can be imported without opening a port.
+- An **invariants test suite** for the engine: properties checked over 400
+  seeded-random endpoints (one baseline row per setting, `conflicted` always
+  having a conflict to point at, nothing both applied and excluded, the CSV
+  staying rectangular, determinism, monotonicity) rather than more examples.
+- **Tests for the Graph retry loop** — the code that runs against a real tenant
+  under throttling previously had none: 503-then-success, a 403 that must not
+  retry, giving up after five attempts, `Retry-After` beating the backoff, a
+  dropped connection, a body failing mid-stream, `@odata.nextLink` paging, 204.
+
+### Docs
+- **ROADMAP split into [v2 maintenance](ROADMAP.md#v2-maintenance) and
+  [v3 bets](ROADMAP.md#v3-bets).** The forward-looking list read as six
+  commitments led by the largest of them (a real dynamic-group rule
+  parser). v2 maintenance is now explicitly the whole scope of the 2.x line, the
+  rule parser is explicitly deferred — the "surfaced, not guessed" Group Tag work
+  is what makes it an accuracy upgrade rather than a correctness prerequisite —
+  and decisions already taken (effective-value resolution, group-collision
+  analysis) are recorded as parked with their reasoning.
+- CONTRIBUTING and SETUP document the engine boundary, the reducer pattern for UI
+  state with rules, and the four commands CI runs. Folds in the CONTRIBUTING
+  refresh that had been waiting for a release — it still called the project a
+  "0.5 beta" and told contributors to configure an app registration before
+  running anything, when no `.env` starts in Demo mode and needs no tenant.
+- Removed an orphaned screenshot (`docs/simulator.png`) that nothing referenced.
+
 ## [2.0.2] — 2026-09-09
 
 ### Fixed

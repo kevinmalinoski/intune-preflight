@@ -3,7 +3,7 @@ import type { AutopilotProfile, CspSetting, IntuneGroup, IntunePolicy } from "@i
 import { UNASSIGNED_SOURCE_GROUP } from "@intune-preflight/shared";
 import { assignmentReportToCsv, buildAssignmentReport, computeSimulation, listUnassignedPolicies } from "./baseline.js";
 import { VIRTUAL_GROUP_ALL_DEVICES } from "./normalize.js";
-import type { TenantData } from "./intuneData.js";
+import type { TenantData } from "./tenantData.js";
 
 const setting = (settingId: string, value: string): CspSetting => ({
   settingId,
@@ -109,6 +109,60 @@ describe("computeSimulation", () => {
     expect(sim.conflicts.map((c) => c.settingId)).toContain("s1");
   });
 
+  it("flags the merged row of a conflicted setting, and does not flag an agreed one", () => {
+    // The baseline carries ONE row per setting, so a conflicted row's `value` is
+    // whichever policy the merge reached first -- not a computed winner. The flag
+    // is what tells a JSON/API consumer to go read `conflicts` instead.
+    const data = tenant({
+      groups: [group("g1")],
+      policies: [
+        policy({ id: "a", assignedGroupIds: ["g1"], settings: [setting("s1", "on"), setting("agreed", "yes")] }),
+        policy({ id: "b", assignedGroupIds: ["g1"], settings: [setting("s1", "off"), setting("agreed", "yes")] }),
+      ],
+    });
+    const sim = computeSimulation(data, { selectedGroupIds: ["g1"], platform: "windows" });
+    expect(sim.settings.find((s) => s.settingId === "s1")?.conflicted).toBe(true);
+    // An overlap (same value from both policies) is redundancy, not disagreement.
+    expect(sim.settings.find((s) => s.settingId === "agreed")?.conflicted).toBeUndefined();
+    // Every flagged setting is cross-referenceable in `conflicts`.
+    for (const flagged of sim.settings.filter((s) => s.conflicted)) {
+      expect(sim.conflicts.map((c) => c.settingId)).toContain(flagged.settingId);
+    }
+  });
+
+  it("carries every contributing source kind on a conflict, not just the merged one", () => {
+    // What the merged row's own sourceKind can't answer: "is a legacy Endpoint
+    // Security intent involved in this setting at all?" -- which is exactly what
+    // the baseline panel's "Legacy policies" view asks. The answer has to come
+    // from the conflict's values, so each one carries its own sourceKind.
+    const data = tenant({
+      groups: [group("g1")],
+      policies: [
+        policy({ id: "modern", kind: "settingsCatalog", assignedGroupIds: ["g1"], settings: [setting("s1", "on")] }),
+        policy({ id: "legacy", kind: "endpointSecurity", assignedGroupIds: ["g1"], settings: [setting("s1", "off")] }),
+      ],
+    });
+    const sim = computeSimulation(data, { selectedGroupIds: ["g1"], platform: "windows" });
+    const conflict = sim.conflicts.find((c) => c.settingId === "s1");
+    expect(conflict?.values.map((v) => v.sourceKind).sort()).toEqual(["endpointSecurity", "settingsCatalog"]);
+    // The merged row alone only ever names ONE of them -- hence the view keying
+    // on the conflict's values rather than on this.
+    expect(sim.settings.find((s) => s.settingId === "s1")?.sourceKind).toBe("settingsCatalog");
+  });
+
+  it("carries every contributing source kind on an overlap too", () => {
+    const data = tenant({
+      groups: [group("g1")],
+      policies: [
+        policy({ id: "modern", kind: "settingsCatalog", assignedGroupIds: ["g1"], settings: [setting("s1", "on")] }),
+        policy({ id: "legacy", kind: "endpointSecurity", assignedGroupIds: ["g1"], settings: [setting("s1", "on")] }),
+      ],
+    });
+    const sim = computeSimulation(data, { selectedGroupIds: ["g1"], platform: "windows" });
+    const overlap = sim.overlaps.find((o) => o.settingId === "s1");
+    expect(overlap?.sourcePolicies.map((sp) => sp.sourceKind).sort()).toEqual(["endpointSecurity", "settingsCatalog"]);
+  });
+
   it("suppresses conflicts and overlaps off Windows (only trustworthy there)", () => {
     const data = tenant({
       groups: [group("g1")],
@@ -123,6 +177,9 @@ describe("computeSimulation", () => {
     // ...but not reported as a conflict/overlap off Windows.
     expect(sim.conflicts).toEqual([]);
     expect(sim.overlaps).toEqual([]);
+    // And the per-setting flag follows the same gate, so it never points at the
+    // deliberately empty `conflicts` list.
+    expect(sim.settings.find((s) => s.settingId === "s1")?.conflicted).toBeUndefined();
   });
 
   it("reports each policy's own settingsCount even when settings collide", () => {
@@ -166,12 +223,17 @@ describe("computeSimulation Autopilot targeting", () => {
   it("targets a v1 profile via its device group, and exclusion wins", () => {
     const data = tenant({
       groups: [group("g-ap"), group("g-kiosk")],
-      autopilotProfiles: [ap({ id: "v1", generation: "v1", assignedGroupIds: ["g-ap"], excludedGroupIds: ["g-kiosk"] })],
+      autopilotProfiles: [
+        ap({ id: "v1", generation: "v1", assignedGroupIds: ["g-ap"], excludedGroupIds: ["g-kiosk"] }),
+      ],
     });
     const targeted = computeSimulation(data, { selectedGroupIds: ["g-ap"], platform: "windows" }).autopilotProfiles;
     expect(targeted?.[0]).toMatchObject({ id: "v1", status: "targeted" });
 
-    const excluded = computeSimulation(data, { selectedGroupIds: ["g-ap", "g-kiosk"], platform: "windows" }).autopilotProfiles;
+    const excluded = computeSimulation(data, {
+      selectedGroupIds: ["g-ap", "g-kiosk"],
+      platform: "windows",
+    }).autopilotProfiles;
     expect(excluded?.[0]).toMatchObject({ status: "excluded", excludedViaGroupIds: ["g-kiosk"] });
   });
 
@@ -187,7 +249,9 @@ describe("computeSimulation Autopilot targeting", () => {
     const both = computeSimulation(data, { selectedGroupIds: ["g-dev"], platform: "windows" }).autopilotProfiles;
     expect(both?.map((a) => a.id).sort()).toEqual(["v1", "v2"]);
     // ...the v2 user-group assignment alone targets nothing...
-    expect(computeSimulation(data, { selectedGroupIds: ["g-users"], platform: "windows" }).autopilotProfiles).toEqual([]);
+    expect(computeSimulation(data, { selectedGroupIds: ["g-users"], platform: "windows" }).autopilotProfiles).toEqual(
+      []
+    );
     // ...and none of it applies off Windows.
     expect(computeSimulation(data, { selectedGroupIds: ["g-dev"], platform: "macos" }).autopilotProfiles).toEqual([]);
   });
@@ -197,11 +261,17 @@ describe("assignmentReportToCsv (formula-injection safe)", () => {
   it("prefixes formula-triggering values with a quote and RFC-4180 quotes them", () => {
     const data = tenant({
       groups: [group("g1")],
-      policies: [policy({ id: "=HYPERLINK(\"http://evil\",\"x\")", displayName: "=HYPERLINK(\"http://evil\",\"x\")", assignedGroupIds: ["g1"] })],
+      policies: [
+        policy({
+          id: '=HYPERLINK("http://evil","x")',
+          displayName: '=HYPERLINK("http://evil","x")',
+          assignedGroupIds: ["g1"],
+        }),
+      ],
     });
     const csv = assignmentReportToCsv(buildAssignmentReport(data, "windows"));
     // The dangerous cell is neutralized: leading single quote, wrapped in quotes.
-    expect(csv).toContain('"\'=HYPERLINK');
+    expect(csv).toContain("\"'=HYPERLINK");
     // A benign value is not altered.
     expect(csv).toContain('"g1"');
   });
@@ -294,7 +364,9 @@ describe("detectCrossModel (cross-model conflict/overlap)", () => {
         policy({ id: "sc", kind: "settingsCatalog", assignedGroupIds: [ALL], settings: [scSetting("Allow")] }),
       ],
     });
-    expect(computeSimulation(data, { selectedGroupIds: [], platform: "windows" }).crossModel[0].agreement).toBe("differs");
+    expect(computeSimulation(data, { selectedGroupIds: [], platform: "windows" }).crossModel[0].agreement).toBe(
+      "differs"
+    );
     expect(computeSimulation(data, { selectedGroupIds: [], platform: "macos" }).crossModel).toEqual([]);
   });
 
@@ -343,8 +415,18 @@ describe("detectCrossModel (cross-model conflict/overlap)", () => {
     const node = "bitlocker/encryptionmethodbydrivetype";
     const data = tenant({
       policies: [
-        policy({ id: "a", kind: "settingsCatalog", assignedGroupIds: [ALL], settings: [{ settingId: "def_a", cspArea: "x", displayName: "a", value: "1", cspNode: node }] }),
-        policy({ id: "b", kind: "settingsCatalog", assignedGroupIds: [ALL], settings: [{ settingId: "def_b", cspArea: "x", displayName: "b", value: "1", cspNode: node }] }),
+        policy({
+          id: "a",
+          kind: "settingsCatalog",
+          assignedGroupIds: [ALL],
+          settings: [{ settingId: "def_a", cspArea: "x", displayName: "a", value: "1", cspNode: node }],
+        }),
+        policy({
+          id: "b",
+          kind: "settingsCatalog",
+          assignedGroupIds: [ALL],
+          settings: [{ settingId: "def_b", cspArea: "x", displayName: "b", value: "1", cspNode: node }],
+        }),
       ],
     });
     // Two "catalog"-model policies -> not cross-MODEL (would be a same-model concern).

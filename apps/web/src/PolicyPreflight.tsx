@@ -73,15 +73,21 @@ export function PolicyPreflight({
               },
             })}
       >
-        <span className="text-base" aria-hidden>🎫</span>
+        <span className="text-base" aria-hidden>
+          🎫
+        </span>
         <span className="text-sm font-semibold text-orange-300">Policy Waitlist</span>
         {none ? (
           <span className="text-xs text-slate-600">— no unassigned policies for this OS</span>
         ) : (
           <>
-            <span className="rounded bg-orange-500/15 px-1.5 py-0.5 text-[11px] text-orange-300">{forPlatform.length}</span>
+            <span className="rounded bg-orange-500/15 px-1.5 py-0.5 text-[11px] text-orange-300">
+              {forPlatform.length}
+            </span>
             {selectedCount > 0 && (
-              <span className="rounded bg-orange-500/25 px-1.5 py-0.5 text-[11px] text-orange-200">{selectedCount} added</span>
+              <span className="rounded bg-orange-500/25 px-1.5 py-0.5 text-[11px] text-orange-200">
+                {selectedCount} added
+              </span>
             )}
             <span className="min-w-0 flex-1 truncate text-xs text-slate-500">
               — unassigned policies waiting to board; add one to simulate “what if I assigned this?”

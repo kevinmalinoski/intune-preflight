@@ -21,7 +21,7 @@ import type {
   UnassignedPolicy,
 } from "@intune-preflight/shared";
 import { UNASSIGNED_SOURCE_GROUP } from "@intune-preflight/shared";
-import type { TenantData } from "./intuneData.js";
+import type { TenantData } from "./tenantData.js";
 import { ruleImplies, VIRTUAL_GROUP_ALL_DEVICES, VIRTUAL_GROUP_ALL_USERS } from "./normalize.js";
 
 /** A policy with no include assignment is deployed nowhere -- not to any group, nor All Devices/All Users. */
@@ -62,9 +62,11 @@ function appliesTo(policy: IntunePolicy, groupIds: string[]): boolean {
  * configuration, tracked separately as a Policy Overlap so it doesn't get
  * lost among real conflicts but also isn't reported as a false alarm.
  */
-function mergeSettings(
-  policies: IntunePolicy[]
-): { settings: BaselineSetting[]; conflicts: ConflictingSetting[]; overlaps: PolicyOverlap[] } {
+function mergeSettings(policies: IntunePolicy[]): {
+  settings: BaselineSetting[];
+  conflicts: ConflictingSetting[];
+  overlaps: PolicyOverlap[];
+} {
   const bySettingId = new Map<string, BaselineSetting[]>();
   for (const policy of policies) {
     for (const setting of policy.settings) {
@@ -85,8 +87,13 @@ function mergeSettings(
   const conflicts: ConflictingSetting[] = [];
   const overlaps: PolicyOverlap[] = [];
   for (const [settingId, entries] of bySettingId) {
-    settings.push(entries[0]);
     const distinctValues = new Set(entries.map((e) => e.value));
+    // ONE baseline row per setting. When the contributing policies disagree,
+    // that row is the first one reached -- an arbitrary pick, not a computed
+    // winner -- so flag it. The UI and CSV expand the disagreement to a row per
+    // value; `conflicted` is what stops a JSON/API consumer reading this single
+    // `value` as the effective one. See BaselineSetting.conflicted.
+    settings.push(distinctValues.size > 1 ? { ...entries[0], conflicted: true } : entries[0]);
     if (distinctValues.size > 1) {
       conflicts.push({
         settingId,
@@ -228,7 +235,7 @@ export function buildAssignmentReport(data: TenantData, platform?: Platform): As
         groupName: name,
         groupKind: kind,
         filterId: filter?.filterId,
-        filterName: filter ? filterNameById.get(filter.filterId) ?? filter.filterId : undefined,
+        filterName: filter ? (filterNameById.get(filter.filterId) ?? filter.filterId) : undefined,
         filterType: filter?.filterType,
       });
     }
@@ -277,8 +284,15 @@ export function buildAssignmentReport(data: TenantData, platform?: Platform): As
   };
 
   const groupOverlaps: GroupOverlapSummary[] = [...byGroup.values()]
-    .map(({ policyIds, ...rest }) => ({ ...rest, policyCount: policyIds.size, impliedGroupIds: impliedFor(rest.groupId) }))
-    .sort((a, b) => b.policyCount - a.policyCount || b.includeCount - a.includeCount || a.groupName.localeCompare(b.groupName));
+    .map(({ policyIds, ...rest }) => ({
+      ...rest,
+      policyCount: policyIds.size,
+      impliedGroupIds: impliedFor(rest.groupId),
+    }))
+    .sort(
+      (a, b) =>
+        b.policyCount - a.policyCount || b.includeCount - a.includeCount || a.groupName.localeCompare(b.groupName)
+    );
 
   const unassigned = policies.filter(isUnassigned).length;
   return {
@@ -419,7 +433,9 @@ export function computeSimulation(
     }
 
     const filterByGroupId = new Map(policy.assignmentFilters.map((f) => [f.groupId, f]));
-    const passingGroupIds = rawViaGroupIds.filter((id) => passesAssignmentFilter(filterByGroupId.get(id), deviceFilterIds));
+    const passingGroupIds = rawViaGroupIds.filter((id) =>
+      passesAssignmentFilter(filterByGroupId.get(id), deviceFilterIds)
+    );
 
     if (passingGroupIds.length === 0) {
       const failingFilter = filterByGroupId.get(rawViaGroupIds[0]);
@@ -494,7 +510,8 @@ export function computeSimulation(
       // v1 targets the device groups it's assigned to. v2 is device-focused via
       // the policy's configured (just-in-time) Autopilot device group -- the
       // user-group assignment governs who may enroll, not which device this is.
-      const targetGroupIds = ap.generation === "v2" ? (ap.deviceGroupId ? [ap.deviceGroupId] : []) : ap.assignedGroupIds;
+      const targetGroupIds =
+        ap.generation === "v2" ? (ap.deviceGroupId ? [ap.deviceGroupId] : []) : ap.assignedGroupIds;
       const viaGroupIds = targetGroupIds.filter((id) => groupIds.includes(id));
       if (viaGroupIds.length === 0) continue;
       const excludedViaGroupIds = ap.excludedGroupIds.filter((id) => groupIds.includes(id));
@@ -525,13 +542,24 @@ export function computeSimulation(
   const platformConflicts = isWindows ? conflicts : [];
   const platformOverlaps = isWindows ? overlaps : [];
   const crossModel = isWindows ? detectCrossModel(settings) : [];
+  // `conflicted` follows the same platform gate, so the flag on a setting always
+  // pairs with an entry in `conflicts` it can be cross-referenced against. Left
+  // set off Windows it would point at a deliberately empty list.
+  const platformSettings = isWindows
+    ? settings
+    : settings.map((s) => {
+        if (!s.conflicted) return s;
+        const { conflicted, ...rest } = s;
+        void conflicted;
+        return rest;
+      });
 
   return {
     groups,
     autopilotProfiles,
     policies,
     excludedPolicies,
-    settings,
+    settings: platformSettings,
     conflicts: platformConflicts,
     overlaps: platformOverlaps,
     crossModel,
@@ -560,7 +588,17 @@ function detectCrossModel(settings: BaselineSetting[]): CrossModelFinding[] {
   // Coarse block/allow bucketing so equivalent labels across models
   // ("Block" / "Not allowed" / "0" -- "Allow" / "Allowed" / "1") don't read as a
   // false conflict. Anything unrecognized compares on its own lowercased value.
-  const RESTRICT = new Set(["block", "blocked", "not allowed", "notallowed", "disabled", "deny", "denied", "0", "false"]);
+  const RESTRICT = new Set([
+    "block",
+    "blocked",
+    "not allowed",
+    "notallowed",
+    "disabled",
+    "deny",
+    "denied",
+    "0",
+    "false",
+  ]);
   const PERMIT = new Set(["allow", "allowed", "enabled", "1", "true"]);
   const coarse = (v: string): string => {
     const t = v.trim().toLowerCase();
@@ -572,7 +610,13 @@ function detectCrossModel(settings: BaselineSetting[]): CrossModelFinding[] {
   // setting expands into many sub-settings that all normalize to one cspNode
   // within the SAME policy, which must not be flagged).
   const modelOf = (id: string): string =>
-    id.startsWith("omaUri:") ? "oma" : id.startsWith("endpointSecurity:") ? "intent" : id.includes(":") ? "template" : "catalog";
+    id.startsWith("omaUri:")
+      ? "oma"
+      : id.startsWith("endpointSecurity:")
+        ? "intent"
+        : id.includes(":")
+          ? "template"
+          : "catalog";
   const findings: CrossModelFinding[] = [];
   for (const [cspNode, group] of byNode) {
     // Collapse to one representative per source POLICY -- a complex Settings
@@ -606,7 +650,16 @@ function detectCrossModel(settings: BaselineSetting[]): CrossModelFinding[] {
 }
 
 export function simulationToCsv(simulation: SimulationResult): string {
-  const header = ["CSP Area", "Setting", "CSP Path", "Value", "Source Policy", "Policy Type", "Conflict", "Policy Overlap"];
+  const header = [
+    "CSP Area",
+    "Setting",
+    "CSP Path",
+    "Value",
+    "Source Policy",
+    "Policy Type",
+    "Conflict",
+    "Policy Overlap",
+  ];
   const conflictsBySettingId = new Map(simulation.conflicts.map((c) => [c.settingId, c]));
   const overlapsBySettingId = new Map(simulation.overlaps.map((o) => [o.settingId, o]));
 
@@ -619,7 +672,16 @@ export function simulationToCsv(simulation: SimulationResult): string {
       // so both sides of the disagreement are visible directly in the export,
       // not just flagged on a single row.
       for (const v of conflict.values) {
-        rows.push([conflict.cspArea, conflict.displayName, path, v.value, v.sourcePolicyName, v.sourceKind, "yes", "no"]);
+        rows.push([
+          conflict.cspArea,
+          conflict.displayName,
+          path,
+          v.value,
+          v.sourcePolicyName,
+          v.sourceKind,
+          "yes",
+          "no",
+        ]);
       }
       continue;
     }
@@ -628,7 +690,16 @@ export function simulationToCsv(simulation: SimulationResult): string {
       // Same idea, but for policies that agree on the value -- still worth
       // surfacing as redundant configuration, distinct from a real conflict.
       for (const sp of overlap.sourcePolicies) {
-        rows.push([overlap.cspArea, overlap.displayName, path, overlap.value, sp.sourcePolicyName, sp.sourceKind, "no", "yes"]);
+        rows.push([
+          overlap.cspArea,
+          overlap.displayName,
+          path,
+          overlap.value,
+          sp.sourcePolicyName,
+          sp.sourceKind,
+          "no",
+          "yes",
+        ]);
       }
       continue;
     }

@@ -48,7 +48,10 @@ export default function App() {
     // The first view load triggers the tenant fetch; re-poll health shortly after
     // to pick up any warnings it produced.
     const t = setTimeout(() => {
-      api.health().then((s) => setLoadWarnings(s.loadWarnings ?? [])).catch(() => {});
+      api
+        .health()
+        .then((s) => setLoadWarnings(s.loadWarnings ?? []))
+        .catch(() => {});
     }, 3000);
     return () => clearTimeout(t);
   }, []);
@@ -79,7 +82,10 @@ export default function App() {
       setRefreshKey((k) => k + 1); // remount views so they refetch from the new source
       if (target === "connected") {
         setTimeout(() => {
-          api.health().then((s) => setLoadWarnings(s.loadWarnings ?? [])).catch(() => {});
+          api
+            .health()
+            .then((s) => setLoadWarnings(s.loadWarnings ?? []))
+            .catch(() => {});
         }, 3000);
       }
     } catch (e) {
@@ -183,7 +189,13 @@ export default function App() {
           } disabled:cursor-wait disabled:opacity-60`}
         >
           <span className={refreshing ? "animate-spin" : ""}>{refreshing ? "⟳" : refreshed ? "✓" : "⟳"}</span>
-          {refreshing ? "Refreshing…" : refreshed ? "Data refreshed" : demo ? "Reload demo data" : "Refresh from Intune"}
+          {refreshing
+            ? "Refreshing…"
+            : refreshed
+              ? "Data refreshed"
+              : demo
+                ? "Reload demo data"
+                : "Refresh from Intune"}
         </button>
       </header>
 
@@ -233,9 +245,9 @@ export default function App() {
           <div className="flex items-start gap-2">
             <span aria-hidden>⚠️</span>
             <div>
-              <span className="font-semibold">Incomplete load — {loadWarnings.length} item(s) failed to import.</span> The
-              baseline may be missing policies. Try <span className="font-medium">Refresh from Intune</span>; if it persists,
-              check the server logs.
+              <span className="font-semibold">Incomplete load — {loadWarnings.length} item(s) failed to import.</span>{" "}
+              The baseline may be missing policies. Try <span className="font-medium">Refresh from Intune</span>; if it
+              persists, check the server logs.
               <ul className="mt-1 list-disc space-y-0.5 pl-4 text-red-300/80">
                 {loadWarnings.slice(0, 4).map((w, i) => (
                   <li key={i}>{w}</li>

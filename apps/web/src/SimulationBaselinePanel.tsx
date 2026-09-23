@@ -1,8 +1,10 @@
-import { type MouseEvent as ReactMouseEvent, type ReactNode, useEffect, useMemo, useState } from "react";
+import { type MouseEvent as ReactMouseEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import type { Platform, PolicyKind, SimulationResult } from "@intune-preflight/shared";
 import { filterExclusionReason } from "@intune-preflight/shared";
 import { api } from "./api.ts";
 import { msLearnCspUrl, splitCspRef } from "./cspDocs.ts";
+import { readStored, readStoredJson, writeStored } from "./storage.ts";
+import { toggled } from "./collections.ts";
 
 type ViewFilter = "all" | "conflicts" | "overlaps" | "legacy" | "collision";
 
@@ -44,20 +46,53 @@ function applyScope(simulation: SimulationResult, scope: BaselineScope | null | 
   // (where another policy's value won the merge) so its full involvement shows.
   const involved = new Set<string>();
   for (const c of simulation.conflicts) if (c.values.some((v) => v.sourcePolicyId === pid)) involved.add(c.settingId);
-  for (const o of simulation.overlaps) if (o.sourcePolicies.some((sp) => sp.sourcePolicyId === pid)) involved.add(o.settingId);
+  for (const o of simulation.overlaps)
+    if (o.sourcePolicies.some((sp) => sp.sourcePolicyId === pid)) involved.add(o.settingId);
   return {
     ...simulation,
     settings: simulation.settings.filter((s) => s.sourcePolicyId === pid || involved.has(s.settingId)),
   };
 }
 
-// `sourceKind` is the kind of the applied (winning) policy for the setting --
-// used by the "Legacy policies" view to show only settings contributed by the
-// legacy intents-based Endpoint Security policies.
+// `sourceKinds` is EVERY policy kind that contributes this setting, not just the
+// one whose value landed in the merged row. That distinction is the "Legacy
+// policies" view: a conflicted setting configured by both a Settings Catalog
+// policy and a legacy Endpoint Security intent must appear under it whichever
+// source the merge happened to reach first.
 type DisplayRow =
-  | { kind: "normal"; sourceKind: PolicyKind; sourceLegacyTemplate?: boolean; settingId: string; cspPath?: string; docUrl?: string; cspArea: string; displayName: string; value: string; sourcePolicyName: string }
-  | { kind: "conflict"; sourceKind: PolicyKind; sourceLegacyTemplate?: boolean; settingId: string; cspPath?: string; docUrl?: string; cspArea: string; displayName: string; values: { value: string; sourcePolicyName: string }[] }
-  | { kind: "overlap"; sourceKind: PolicyKind; sourceLegacyTemplate?: boolean; settingId: string; cspPath?: string; docUrl?: string; cspArea: string; displayName: string; value: string; sources: string[] };
+  | {
+      kind: "normal";
+      sourceKinds: PolicyKind[];
+      sourceLegacyTemplate?: boolean;
+      settingId: string;
+      cspPath?: string;
+      docUrl?: string;
+      cspArea: string;
+      displayName: string;
+      value: string;
+      sourcePolicyName: string;
+    }
+  | {
+      kind: "conflict";
+      sourceKinds: PolicyKind[];
+      settingId: string;
+      cspPath?: string;
+      docUrl?: string;
+      cspArea: string;
+      displayName: string;
+      values: { value: string; sourcePolicyName: string }[];
+    }
+  | {
+      kind: "overlap";
+      sourceKinds: PolicyKind[];
+      settingId: string;
+      cspPath?: string;
+      docUrl?: string;
+      cspArea: string;
+      displayName: string;
+      value: string;
+      sources: string[];
+    };
 
 /** The real CSP path if we resolved one, else the setting id (OMA-URI / type:key). */
 const cspRef = (r: DisplayRow) => r.cspPath ?? r.settingId;
@@ -134,8 +169,7 @@ function buildRows(simulation: SimulationResult): DisplayRow[] {
     if (conflict) {
       rows.push({
         kind: "conflict",
-        sourceKind: s.sourceKind,
-        sourceLegacyTemplate: s.sourceLegacyTemplate,
+        sourceKinds: [...new Set(conflict.values.map((v) => v.sourceKind))],
         settingId: s.settingId,
         cspPath: s.cspPath,
         docUrl: s.docUrl,
@@ -149,8 +183,7 @@ function buildRows(simulation: SimulationResult): DisplayRow[] {
     if (overlap) {
       rows.push({
         kind: "overlap",
-        sourceKind: s.sourceKind,
-        sourceLegacyTemplate: s.sourceLegacyTemplate,
+        sourceKinds: [...new Set(overlap.sourcePolicies.map((sp) => sp.sourceKind))],
         settingId: s.settingId,
         cspPath: s.cspPath,
         docUrl: s.docUrl,
@@ -163,7 +196,7 @@ function buildRows(simulation: SimulationResult): DisplayRow[] {
     }
     rows.push({
       kind: "normal",
-      sourceKind: s.sourceKind,
+      sourceKinds: [s.sourceKind],
       sourceLegacyTemplate: s.sourceLegacyTemplate,
       settingId: s.settingId,
       cspPath: s.cspPath,
@@ -175,6 +208,16 @@ function buildRows(simulation: SimulationResult): DisplayRow[] {
     });
   }
   return rows;
+}
+
+/**
+ * Does any policy contributing this setting come from the legacy intents-based
+ * Endpoint Security model? Keyed on every contributing source, so a setting a
+ * legacy intent only CO-configures (with a Settings Catalog policy, say) still
+ * counts -- it's exactly the setting a migration needs to look at.
+ */
+function isLegacyRow(row: DisplayRow): boolean {
+  return row.sourceKinds.includes("endpointSecurity");
 }
 
 function rowMatchesText(row: DisplayRow, needle: string): boolean {
@@ -211,12 +254,42 @@ export function SimulationBaselinePanel({
   // Resizable panel width (docked to the right edge, so width = viewport - cursorX).
   // Persisted so it stays where the user left it.
   const [width, setWidth] = useState<number>(() => {
-    const saved = Number(localStorage.getItem("baselinePanelWidth"));
+    const saved = Number(readStored("baselinePanelWidth"));
     return saved >= 380 ? saved : 720;
   });
   useEffect(() => {
-    localStorage.setItem("baselinePanelWidth", String(Math.round(width)));
+    writeStored("baselinePanelWidth", String(Math.round(width)));
   }, [width]);
+
+  // Escape backs out one level: a drill-down scope first (so you return to the
+  // full baseline rather than losing the panel), then the panel itself. Same
+  // behaviour as the group policy list's Escape, which this panel was missing.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      // Optional handler: with no way to clear the scope, Escape just closes.
+      if (scope && onClearScope) onClearScope();
+      else onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [scope, onClearScope, onClose]);
+
+  // Move focus into the panel when it opens and hand it back to whatever opened
+  // it on close -- the "View merged baseline" button, or a node in the diagram.
+  // Without this, opening the panel left focus behind it and closing it dropped
+  // focus to the document, so a keyboard user had to tab in from the top of the
+  // page again.
+  const panelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    panelRef.current?.focus();
+    return () => {
+      // The opener can be gone by now (a diagram node that re-rendered), in
+      // which case focus just stays where the browser put it.
+      if (opener?.isConnected) opener.focus();
+    };
+  }, []);
 
   const startResize = (e: ReactMouseEvent) => {
     e.preventDefault();
@@ -234,29 +307,23 @@ export function SimulationBaselinePanel({
     document.addEventListener("mouseup", onUp);
   };
 
-  const toggleOverlap = (id: string) =>
-    setExpandedOverlaps((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
+  const toggleOverlap = (id: string) => setExpandedOverlaps(toggled(id));
 
   const scoped = useMemo(() => applyScope(simulation, scope), [simulation, scope]);
   const allRows = useMemo(() => buildRows(scoped), [scoped]);
-  // Count of settings contributed by legacy Endpoint Security (intents) policies,
-  // for the "Legacy policies" view option. From the unscoped prop, like the
-  // conflict/overlap counts shown alongside it.
-  const legacyCount = useMemo(
-    () => simulation.settings.filter((s) => s.sourceKind === "endpointSecurity").length,
-    [simulation]
-  );
+  // Count of settings ANY of whose contributing policies is a legacy Endpoint
+  // Security (intents) policy, for the "Legacy policies" view option. Counted
+  // off the unscoped rows -- like the conflict/overlap counts shown alongside it
+  // -- and via the same `sourceKinds` the view filters on, so the number in the
+  // dropdown can't disagree with the rows it selects.
+  const legacyCount = useMemo(() => buildRows(simulation).filter(isLegacyRow).length, [simulation]);
   const needle = filter.toLowerCase();
   const rows = allRows.filter(
     (r) =>
       (view === "all" ||
         (view === "conflicts" && r.kind === "conflict") ||
         (view === "overlaps" && r.kind === "overlap") ||
-        (view === "legacy" && r.sourceKind === "endpointSecurity")) &&
+        (view === "legacy" && isLegacyRow(r))) &&
       (!filter || rowMatchesText(r, needle))
   );
 
@@ -271,26 +338,19 @@ export function SimulationBaselinePanel({
   const remaining = rows.length - visibleRows.length;
 
   // --- Column layout: persisted widths + hidden set, drag-resize, picker ---
-  const [colWidths, setColWidths] = useState<Record<ColumnId, number>>(() => {
-    try {
-      return { ...DEFAULT_WIDTHS, ...JSON.parse(localStorage.getItem(COL_WIDTHS_KEY) ?? "{}") };
-    } catch {
-      return { ...DEFAULT_WIDTHS };
-    }
-  });
-  const [hiddenCols, setHiddenCols] = useState<Set<ColumnId>>(() => {
-    try {
-      return new Set(JSON.parse(localStorage.getItem(HIDDEN_COLS_KEY) ?? "[]") as ColumnId[]);
-    } catch {
-      return new Set();
-    }
-  });
+  const [colWidths, setColWidths] = useState<Record<ColumnId, number>>(() => ({
+    ...DEFAULT_WIDTHS,
+    ...readStoredJson<Partial<Record<ColumnId, number>>>(COL_WIDTHS_KEY, {}),
+  }));
+  const [hiddenCols, setHiddenCols] = useState<Set<ColumnId>>(
+    () => new Set(readStoredJson<ColumnId[]>(HIDDEN_COLS_KEY, []))
+  );
   const [showColumnPicker, setShowColumnPicker] = useState(false);
   useEffect(() => {
-    localStorage.setItem(COL_WIDTHS_KEY, JSON.stringify(colWidths));
+    writeStored(COL_WIDTHS_KEY, JSON.stringify(colWidths));
   }, [colWidths]);
   useEffect(() => {
-    localStorage.setItem(HIDDEN_COLS_KEY, JSON.stringify([...hiddenCols]));
+    writeStored(HIDDEN_COLS_KEY, JSON.stringify([...hiddenCols]));
   }, [hiddenCols]);
 
   const visibleDefs = COLUMN_DEFS.filter((d) => !hiddenCols.has(d.id));
@@ -315,12 +375,7 @@ export function SimulationBaselinePanel({
     document.addEventListener("mouseup", onUp);
   };
 
-  const toggleCol = (id: ColumnId) =>
-    setHiddenCols((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
+  const toggleCol = (id: ColumnId) => setHiddenCols(toggled(id));
 
   const resetLayout = () => {
     setColWidths({ ...DEFAULT_WIDTHS });
@@ -443,7 +498,11 @@ export function SimulationBaselinePanel({
     const bg = f.agreement === "differs" ? "bg-rose-500/10" : "bg-amber-500/10";
     return f.entries.map((e, i) => (
       <tr key={`${f.cspNode}-${i}`} className={`border-t border-ink-800 ${bg}`}>
-        {cell("cspArea", "px-3 py-2 align-top", i === 0 ? <span className={`rounded px-1.5 py-0.5 text-[9px] font-medium ${badge.c}`}>{badge.t}</span> : "")}
+        {cell(
+          "cspArea",
+          "px-3 py-2 align-top",
+          i === 0 ? <span className={`rounded px-1.5 py-0.5 text-[9px] font-medium ${badge.c}`}>{badge.t}</span> : ""
+        )}
         {cell("setting", "px-3 py-2 align-top text-slate-200", i === 0 ? f.displayName : "")}
         {cell("value", "truncate px-3 py-2 align-top text-slate-300", <span title={e.value}>{e.value}</span>)}
         {cell(
@@ -456,14 +515,26 @@ export function SimulationBaselinePanel({
             )}
           </span>
         )}
-        {cell("cspPath", "px-3 py-2 align-top", i === 0 ? <span className="break-all font-mono text-[11px] text-slate-400">{f.cspNode}</span> : "")}
+        {cell(
+          "cspPath",
+          "px-3 py-2 align-top",
+          i === 0 ? <span className="break-all font-mono text-[11px] text-slate-400">{f.cspNode}</span> : ""
+        )}
       </tr>
     ));
   };
 
   return (
+    // A docked side panel rather than a screen-covering modal -- the diagram
+    // stays visible and usable beside it -- so it's a focusable `dialog` WITHOUT
+    // aria-modal, which would tell a screen reader the rest of the page is
+    // inert when it isn't.
     <div
-      className="fixed inset-y-0 right-0 z-20 flex max-w-full flex-col border-l border-ink-700 bg-ink-900 shadow-2xl"
+      ref={panelRef}
+      role="dialog"
+      aria-label="Merged baseline"
+      tabIndex={-1}
+      className="fixed inset-y-0 right-0 z-20 flex max-w-full flex-col border-l border-ink-700 bg-ink-900 shadow-2xl outline-none"
       style={{ width }}
     >
       {/* Drag handle on the left edge to resize the panel */}
@@ -492,7 +563,9 @@ export function SimulationBaselinePanel({
             {simulation.crossModel.length > 0 && (
               <>
                 {" · "}
-                <span className="text-amber-400">{simulation.crossModel.length} legacy collision{simulation.crossModel.length > 1 ? "s" : ""}</span>
+                <span className="text-amber-400">
+                  {simulation.crossModel.length} legacy collision{simulation.crossModel.length > 1 ? "s" : ""}
+                </span>
               </>
             )}
             {simulation.excludedPolicies.length > 0 && (
@@ -507,10 +580,14 @@ export function SimulationBaselinePanel({
           )}
           {simulation.crossModel.length > 0 && (
             <div className="mt-1.5 text-[11px] text-amber-300/90">
-              ⚠ {simulation.crossModel.length} legacy policy collision{simulation.crossModel.length > 1 ? "s" : ""} — a legacy
-              template that targets the same CSP as the Settings Catalog can reflect the setting using opposite vocabulary.
-              Update your legacy policies to the Settings Catalog to participate in conflict/overlap detection.{" "}
-              <button onClick={() => setView("collision")} className="underline decoration-amber-400/50 hover:text-amber-200">
+              ⚠ {simulation.crossModel.length} legacy policy collision{simulation.crossModel.length > 1 ? "s" : ""} — a
+              legacy template that targets the same CSP as the Settings Catalog can reflect the setting using opposite
+              vocabulary. Update your legacy policies to the Settings Catalog to participate in conflict/overlap
+              detection.{" "}
+              <button
+                onClick={() => setView("collision")}
+                className="underline decoration-amber-400/50 hover:text-amber-200"
+              >
                 Review
               </button>{" "}
               <span className="text-amber-300/60">· best-effort</span>
@@ -533,7 +610,12 @@ export function SimulationBaselinePanel({
             </div>
           )}
         </div>
-        <button onClick={onClose} className="rounded-md px-2 py-1 text-slate-400 hover:bg-ink-800 hover:text-slate-200">
+        <button
+          onClick={onClose}
+          aria-label="Close the merged baseline"
+          title="Close (Esc)"
+          className="rounded-md px-2 py-1 text-slate-400 hover:bg-ink-800 hover:text-slate-200"
+        >
           ✕
         </button>
       </div>
@@ -700,8 +782,8 @@ export function SimulationBaselinePanel({
                     onClick={() => setRenderLimit((n) => n + ROW_RENDER_CHUNK)}
                     className="w-full px-3 py-2.5 text-center text-xs font-medium text-sky-300 transition-colors hover:bg-ink-800"
                   >
-                    Show {Math.min(ROW_RENDER_CHUNK, remaining)} more ({remaining} remaining — filters and exports always
-                    cover everything)
+                    Show {Math.min(ROW_RENDER_CHUNK, remaining)} more ({remaining} remaining — filters and exports
+                    always cover everything)
                   </button>
                 </td>
               </tr>

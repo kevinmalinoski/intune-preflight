@@ -1,0 +1,70 @@
+name: Deploy demo
+
+# The public demo (the app running the engine in-browser over the bundled sample
+# tenant) lives on the gh-pages branch under /demo. It used to be redeployed by
+# hand, which is exactly why the live demo could silently lag a release -- and
+# the demo is both the project's front door and where CONTRIBUTING asks people to
+# reproduce bugs, so a stale one is worse than a missing one.
+#
+# Runs on a release tag, or on demand for a mid-cycle refresh.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+# Only the demo/ subtree is touched; the landing page and screenshots at the
+# branch root are left exactly as they are.
+permissions:
+  contents: write
+
+concurrency:
+  group: deploy-demo
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build the static demo
+        run: npm run build:demo
+
+      - name: Publish it to gh-pages under /demo
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          BUILD="$PWD/apps/web/dist-demo"
+          test -f "$BUILD/index.html"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Work in a separate worktree so the build output isn't disturbed.
+          git fetch origin gh-pages
+          git worktree add ../pages origin/gh-pages
+          cd ../pages
+
+          # Replace only the app, so the landing page + screenshots survive.
+          rm -rf demo
+          mkdir -p demo
+          cp -R "$BUILD"/. demo/
+
+          if git diff --quiet && git diff --cached --quiet && [ -z "$(git status --porcelain)" ]; then
+            echo "Demo is already up to date; nothing to publish."
+            exit 0
+          fi
+
+          git add demo
+          git commit -m "Deploy demo from ${GITHUB_REF_NAME} (${GITHUB_SHA::7})"
+          git push origin HEAD:gh-pages

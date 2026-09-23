@@ -455,7 +455,9 @@ function intentSettingName(definitionId: string): string {
 /** Child setting instances of a complex/collection intent setting, from `value` or a JSON `valueJson`. */
 function intentChildInstances(inst: Record<string, unknown>): Record<string, unknown>[] | undefined {
   const isInstanceArray = (v: unknown): v is Record<string, unknown>[] =>
-    Array.isArray(v) && v.length > 0 && v.every((c) => c !== null && typeof c === "object" && "definitionId" in (c as object));
+    Array.isArray(v) &&
+    v.length > 0 &&
+    v.every((c) => c !== null && typeof c === "object" && "definitionId" in (c as object));
   if (isInstanceArray(inst["value"])) return inst["value"] as Record<string, unknown>[];
   const vj = inst["valueJson"];
   if (typeof vj === "string" && (vj.startsWith("[") || vj.startsWith("{"))) {
@@ -588,7 +590,12 @@ export function platformFromIntentTemplate(platformType: string | undefined): Pl
  * reads as security/baseline (or cloudPC for the Windows 365 baseline).
  */
 export function isSecurityIntentTemplate(template: Record<string, unknown>): boolean {
-  if (String(template["@odata.type"] ?? "").toLowerCase().includes("securitybaselinetemplate")) return true;
+  if (
+    String(template["@odata.type"] ?? "")
+      .toLowerCase()
+      .includes("securitybaselinetemplate")
+  )
+    return true;
   const type = String(template["templateType"] ?? "").toLowerCase();
   return type.includes("security") || type.includes("baseline") || type === "cloudpc";
 }
@@ -644,11 +651,14 @@ export function parseAssignmentTarget(assignment: {
     target?.deviceAndAppManagementAssignmentFilterType === "exclude"
       ? target.deviceAndAppManagementAssignmentFilterType
       : undefined;
-  const filter: Pick<AssignmentTarget, "filterId" | "filterType"> = filterId && filterType ? { filterId, filterType } : {};
+  const filter: Pick<AssignmentTarget, "filterId" | "filterType"> =
+    filterId && filterType ? { filterId, filterType } : {};
 
   if (type.includes("exclusionGroupAssignmentTarget")) return { groupId, isExclude: true, ...filter };
-  if (type.includes("allDevices") || wellKnown === WELL_KNOWN_ALL_DEVICES_GUID) return { isAllDevices: true, ...filter };
-  if (type.includes("allLicensedUsers") || wellKnown === WELL_KNOWN_ALL_USERS_GUID) return { isAllUsers: true, ...filter };
+  if (type.includes("allDevices") || wellKnown === WELL_KNOWN_ALL_DEVICES_GUID)
+    return { isAllDevices: true, ...filter };
+  if (type.includes("allLicensedUsers") || wellKnown === WELL_KNOWN_ALL_USERS_GUID)
+    return { isAllUsers: true, ...filter };
   return { groupId, ...filter };
 }
 

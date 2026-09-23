@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { containment, policyColor, type ClusterPolicy } from "./GroupHeatCluster.tsx";
+import { containment, policyColor, type ClusterPolicy } from "./policyHeat.ts";
 
 // The chip-list destination opened from a group's seating chart: every policy the
 // group carries, named, colored by how shared it is (unique / shared / universal).
@@ -37,7 +37,9 @@ export function GroupPolicyList({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      sel ? setSel(null) : onClose();
+      // Back out one level at a time: the selected policy first, then the list.
+      if (sel) setSel(null);
+      else onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -83,7 +85,9 @@ export function GroupPolicyList({
               {sorted.map((p) => {
                 const c = policyColor(p);
                 const active = sel?.id === p.id;
-                const badge = p.universal.length ? `⚠ +${p.universal.length > 1 ? "All" : p.universal[0]}` : `×${p.shared}`;
+                const badge = p.universal.length
+                  ? `⚠ +${p.universal.length > 1 ? "All" : p.universal[0]}`
+                  : `×${p.shared}`;
                 return (
                   <button
                     key={p.id}
@@ -123,8 +127,9 @@ export function GroupPolicyList({
             </div>
             {sel.universal.length ? (
               <div className="text-[11px] text-indigo-300">
-                ⚠ Assigned to <span className="font-medium">both {sel.universal.join(" & ")} and this group</span> directly.
-                Intune's portal blocks assigning both, so this was likely created via Graph/PowerShell — verify it's intended.
+                ⚠ Assigned to <span className="font-medium">both {sel.universal.join(" & ")} and this group</span>{" "}
+                directly. Intune's portal blocks assigning both, so this was likely created via Graph/PowerShell —
+                verify it's intended.
               </div>
             ) : sel.shared === 1 ? (
               <div className="text-[11px] text-emerald-300">Unique to this group.</div>

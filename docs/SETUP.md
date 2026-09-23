@@ -119,11 +119,19 @@ npm run lint    # typecheck
 ## Project layout
 
 ```
-apps/server/      Fastify API — Graph auth, data fetch, simulation engine
+apps/server/      Fastify API — Graph auth + tenant fetch (the I/O shell)
 apps/web/         React + Vite UI — endpoint simulator (React Flow) + drill-down panel
-packages/shared/  TypeScript types + rule helpers shared by both apps
+packages/engine/  The simulation engine — pure, I/O-free, runs in Node AND the browser
+packages/shared/  TypeScript types + rule helpers shared by everything
 docs/             Documentation and screenshots
 ```
+
+The **engine** is deliberately its own package. It takes a `TenantData` (the whole
+tenant's configuration, already normalized) and computes baselines, conflicts and
+reports from it — never fetching anything itself. That's what lets the identical
+code run behind the API *and* entirely in the browser for the public demo. It
+declares no server dependencies, and a test (`packages/engine/src/purity.test.ts`)
+plus an ESLint rule fail the build if one creeps in.
 
 The server authenticates to Microsoft Graph using the app registration (client-credentials flow — no per-user sign-in), pulls every policy along with its assignments (included and excluded), the assignment filters, the Autopilot profiles, and the referenced security groups with their dynamic membership rules, then computes a merged baseline for whatever combination of groups / platform / filters you select. Results are cached in memory — there is intentionally **no database**.
 
@@ -143,6 +151,39 @@ The server authenticates to Microsoft Graph using the app registration (client-c
 | `POST /api/refresh` | Clear the cache, re-fetch from Graph, and report any load warnings |
 
 > Autopilot "device" and Group Tag selection are resolved in the web UI (they drive which group ids get sent in `groups`), so the API surface stays a simple "given these groups, compute the baseline."
+
+### Reading a conflicted setting from the API
+
+`settings` in a simulation response carries **one row per setting**. When two
+applied policies disagree on a value, that row is whichever policy the tenant
+load reached first — **not** a computed winner; the tool deliberately doesn't
+claim to know which value wins on the device. Such a row is marked
+`"conflicted": true`, and the full disagreement is in `conflicts` under the same
+`settingId`:
+
+```jsonc
+// GET /api/simulate?groups=…&platform=windows
+{
+  "settings": [
+    { "settingId": "defender_cloudblocklevel", "value": "High", "conflicted": true, … }
+  ],
+  "conflicts": [
+    {
+      "settingId": "defender_cloudblocklevel",
+      "values": [
+        { "value": "High", "sourcePolicyName": "OIB — Defender Antivirus" },
+        { "value": "Zero tolerance blocking level", "sourcePolicyName": "CORP — AV override" }
+      ]
+    }
+  ]
+}
+```
+
+So: **if `conflicted` is set, read `conflicts` rather than `value`.** The CSV
+export needs no such care — it already writes one row per conflicting value with
+a `Conflict` column. Conflict detection is Windows-only (see
+[ROADMAP.md](../ROADMAP.md)), and `conflicted` follows the same gate, so the flag
+never points at an intentionally empty `conflicts` list.
 
 ## Troubleshooting
 
