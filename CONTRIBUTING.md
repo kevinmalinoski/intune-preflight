@@ -73,16 +73,18 @@ Rule parsing is where a test earns its keep most. The evaluator is **best-effort
 clause shapes real tenants use**, not a full parser, so its tests double as the record of what is
 and isn't claimed to work — if you extend it, the test is how that boundary moves.
 
-Two test files exist to stop a specific regression rather than to check a feature, and are worth
-reading before you touch what they guard: `packages/engine/src/purity.test.ts` (the engine's
-browser-compatibility boundary) and `apps/web/src/endpointDevice.test.ts` (the simulator's state
-rules, including the two bugs the old effect chain shipped).
+Three test files exist to stop a specific regression rather than to check a feature, and are
+worth reading before you touch what they guard: `packages/engine/src/purity.test.ts` (the
+engine's browser-compatibility boundary), `packages/graph/src/purity.test.ts` (the same boundary
+for the Graph reader) and `apps/web/src/endpointDevice.test.ts` (the simulator's state rules,
+including the two bugs the old effect chain shipped).
 
 ## Project layout
 
 ```
-apps/server/      Fastify API — Graph auth + tenant fetch (the I/O shell)
+apps/server/      Fastify API — app-only Graph auth, routes, config (the server shell)
 apps/web/         React + Vite UI — endpoint simulator, assignment manifest, baseline drill-down
+packages/graph/   The Graph reader — fetches a tenant into a TenantData, runs in Node AND the browser
 packages/engine/  The simulation engine — pure, I/O-free, runs in Node AND the browser
 packages/shared/  TypeScript types + rule helpers shared by everything
 docs/             Setup guide, feature reference, screenshots
@@ -93,10 +95,17 @@ configuration, already normalized — and computes everything from it, never fet
 is what lets the public demo (the same web app built with `VITE_STATIC_DEMO=1`) run the identical
 code in the browser over the bundled sample tenant with no backend at all.
 
-So: new analysis logic goes in `packages/engine`; anything that talks to Graph, reads
-`process.env`, or needs a request context goes in `apps/server`. A value import of a Node built-in
-or a server-only package from the engine fails `packages/engine/src/purity.test.ts` and an ESLint
-rule, and CI also builds the demo (`npm run build:demo`) so the browser path is proven end to end.
+**`packages/graph` must stay browser-portable.** It *is* the I/O — it reads every
+`deviceManagement` endpoint — but only over `fetch` and `AbortController`, which exist in Node and
+in the browser alike. The two things that differ per host come in as parameters: the access token
+(`createGraphClient({ getToken })`) and the cache the loaded tenant lives in. That is what will let
+the whole app run in a tab against a delegated (user sign-in) token with no backend.
+
+So: new analysis logic goes in `packages/engine`; new Graph reading goes in `packages/graph`; only
+what genuinely needs the server — `process.env`, the MSAL confidential client, a request context —
+goes in `apps/server`. A value import of a Node built-in or a server-only package from either
+package fails its `purity.test.ts` and an ESLint rule, and CI also builds the demo
+(`npm run build:demo`) so the browser path is proven end to end.
 
 UI state that has *rules* — "this field resets that one", "turning this on selects those" — belongs
 in a pure reducer next to its component rather than in a chain of `useEffect`s.

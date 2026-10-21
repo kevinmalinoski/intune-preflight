@@ -7,6 +7,8 @@ import type {
   UnassignedPolicy,
 } from "@intune-preflight/shared";
 import { demoApi } from "./demoApi.ts";
+import { createLiveApi } from "./liveApi.ts";
+import { ensureReady, ensureSignedIn, getToken, isConfigured, isSignedIn } from "./liveSession.ts";
 
 /**
  * When true, the app is the self-contained public demo: it runs the pure engine
@@ -15,6 +17,18 @@ import { demoApi } from "./demoApi.ts";
  * so the demo implementation (and the engine it pulls in) is tree-shaken away.
  */
 export const STATIC_DEMO = import.meta.env.VITE_STATIC_DEMO === "1";
+
+/**
+ * When true, the app is the live build: the admin signs in to their own tenant
+ * with MSAL in the browser and `packages/graph` reads it straight from Graph,
+ * still with no backend. Set at build/dev time via VITE_MODE=live.
+ *
+ * "Connected" means something different in each build, which is the whole point
+ * of three flags rather than one: the server build connects through a backend
+ * holding a client secret, and this one connects as the signed-in user with no
+ * secret anywhere.
+ */
+export const LIVE_MODE = import.meta.env.VITE_MODE === "live";
 
 async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(`/api${path}`, { signal });
@@ -83,12 +97,19 @@ const serverApi = {
 };
 
 /**
- * The active API. In the static public demo it's the in-browser implementation;
- * otherwise the server-backed one. The ternary folds to a constant in each build,
- * so only the chosen implementation ships.
+ * The active API: the live (delegated-auth) implementation, the static public
+ * demo's in-browser one, or the server-backed one. Both flags fold to constants
+ * at build time, so each build ships only the implementation it chose -- the
+ * server build carries no MSAL and no engine-over-sample-data, and the demo
+ * bundle is byte-for-byte what it was before the live mode existed.
  *
- * Both sides are real TypeScript now that the engine is its own package, so the
- * demo implementation is structurally checked against the server surface here --
- * a drift between them is a build error rather than a runtime surprise.
+ * All three are real TypeScript, so each alternative is structurally checked
+ * against the server surface by this one annotation -- a drift between them is a
+ * build error rather than a runtime surprise. That is what has kept `demoApi`
+ * honest, and it is now what keeps `liveApi` honest too.
  */
-export const api: typeof serverApi = STATIC_DEMO ? demoApi : serverApi;
+export const api: typeof serverApi = LIVE_MODE
+  ? createLiveApi({ ensureReady, getToken, ensureSignedIn, isSignedIn, isConfigured })
+  : STATIC_DEMO
+    ? demoApi
+    : serverApi;

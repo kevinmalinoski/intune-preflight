@@ -10,6 +10,7 @@ export default defineConfig({
     alias: {
       "@intune-preflight/shared": fileURLToPath(new URL("./packages/shared/src/index.ts", import.meta.url)),
       "@intune-preflight/engine": fileURLToPath(new URL("./packages/engine/src/index.ts", import.meta.url)),
+      "@intune-preflight/graph": fileURLToPath(new URL("./packages/graph/src/index.ts", import.meta.url)),
     },
   },
   test: {

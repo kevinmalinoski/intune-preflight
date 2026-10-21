@@ -3,7 +3,7 @@ import cors from "@fastify/cors";
 import type { Platform } from "@intune-preflight/shared";
 import { config } from "./config.js";
 import { getMode, setMode, type TenantMode } from "./mode.js";
-import { loadTenantData, clearTenantDataCache, getLastLoadWarnings } from "./intuneData.js";
+import { loadTenantData, clearTenantDataCache, getLastLoadWarnings } from "./tenantData.js";
 import {
   assignmentReportToCsv,
   buildAssignmentReport,

@@ -6,6 +6,60 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [2.2.0] — 2026-10-21
+
+Intune Preflight can now run **entirely in a browser tab**. An admin opens a URL,
+signs in with their own account, and the page reads their tenant straight from
+Microsoft Graph — no server, nothing installed, and **no client secret anywhere**,
+because a single-page app is a public client and PKCE replaces the secret. The
+tenant data lives in the tab and goes when it closes.
+
+**Self-hosting is unchanged and stays fully supported.** The Fastify server, the
+`.env` contract, the Docker images and app-only authentication are byte-identical
+to v2.1. They remain the only way to get the complete, *unfiltered* view of a
+tenant, because a delegated token is scoped to the signed-in admin's Intune RBAC —
+which is narrower for a scoped admin. Browser mode is the easy way in; self-hosted
+is the thorough one.
+
+Nothing in the engine changed. This is a third way to *load* a tenant, not a new
+way to reason about one — which is why it is 2.2 and not 3.0. The v3 bets on the
+roadmap (combined dynamic-group rule evaluation, richer user modelling) are
+untouched.
+
+### Added
+- **Browser (delegated-auth) data source.** A `build:live` bundle that signs in
+  with MSAL, reads the tenant client-side through the same engine the server and
+  the public demo use, and holds nothing on disk. Tenant and client ID persist in
+  `localStorage` (neither is a secret); the token lives in `sessionStorage`, so
+  closing the tab ends the session. A `?tenant=…&client=…` link self-configures
+  the page, which suits consultants who carry one bookmark per client tenant.
+- **`packages/graph`** — the Graph-reading layer, extracted from `apps/server` so
+  it can run in either host. Its only injected dependency is
+  `getToken: () => Promise<string>`: the server supplies an app-only MSAL-node
+  token, the browser a delegated one. A `purity.test.ts` keeps it free of
+  `node:*`, `process.env` and any reach back into `apps/server`.
+- **First-run setup panel** in the browser build, with the exact redirect URI the
+  build will send — the value Entra compares character for character.
+
+### Fixed
+- **Both purity tests could fail open**, which is the worst way for a guard to
+  fail: it reports green forever while the boundary it protects rots. Type-only
+  statements were stripped with an unbounded `[\s\S]*?`, which assumes every
+  `import type` / `export type` carries a `from` clause. A local alias such as
+  `export type TenantMode = "demo" | "connected";` does not, so the scan ran on to
+  the next unrelated `from "…"` and deleted everything between — blinding the
+  import check over the rest of the file. In `packages/engine` it had been quietly
+  skipping 481 characters of `baseline.ts`. Statements are now bounded to
+  themselves, side-effect imports (`import "x";`) are caught for the first time,
+  and both extractors have tests of their own.
+- **The header's Demo button did nothing in an unconfigured browser build.** The
+  setup panel owned the dismissal flag, and `switchMode` returned early because an
+  unconfigured build already reports `demo === true` — so of two controls offering
+  the sample tenant, only the panel's own link worked.
+
+### Changed
+- The test suite went from 178 to 245.
+
 ## [2.1.0] — 2026-09-23
 
 v2.1 is the release that makes v2 something you can leave alone. No new

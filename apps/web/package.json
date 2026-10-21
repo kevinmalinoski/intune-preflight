@@ -1,16 +1,19 @@
 {
   "name": "@intune-preflight/web",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:live": "VITE_MODE=live vite",
     "build": "tsc -b && vite build",
     "build:demo": "VITE_STATIC_DEMO=1 vite build --base=/intune-preflight/demo/ --outDir dist-demo --emptyOutDir",
+    "build:live": "VITE_MODE=live vite build --base=\"${PREFLIGHT_LIVE_BASE:-/intune-preflight/app/}\" --outDir dist-live --emptyOutDir",
     "preview": "vite preview",
     "lint": "tsc -b --noEmit"
   },
   "dependencies": {
+    "@azure/msal-browser": "^5.25.1",
     "@intune-preflight/engine": "*",
     "@intune-preflight/shared": "*",
     "@xyflow/react": "^12.3.5",

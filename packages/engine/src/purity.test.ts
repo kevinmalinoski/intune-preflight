@@ -28,14 +28,34 @@ const FORBIDDEN = [
   /^@fastify\//,
 ];
 
-/** Every `import ... from "x"` / `export ... from "x"` specifier, excluding type-only ones. */
+/**
+ * An `import`/`export ... from "x"` statement, captured as (keyword, clause,
+ * specifier). The clause is bounded by `[^;]*?` so a match cannot escape its own
+ * statement: the previous version stripped type-only statements with
+ * `[\s\S]*?`, which assumed every `import type` / `export type` carries a
+ * `from`. A local alias like `export type Platform = "windows" | ...;` does not,
+ * so the lazy scan ran on to the next unrelated `from "..."` and deleted
+ * everything in between -- silently blinding the scan over the rest of the file.
+ * It cost `baseline.ts` 481 unscanned characters, and the same bug let an
+ * injected `node:fs` import pass unnoticed in the sibling graph package.
+ */
+const FROM_STATEMENT = /(?:^|\n)[ \t]*(import|export)\b([^;]*?)\bfrom\s*["']([^"']+)["']/g;
+
+/** A side-effect import -- `import "x";` -- which has no `from` clause but still loads x. */
+const BARE_IMPORT = /(?:^|\n)[ \t]*import\s*["']([^"']+)["']/g;
+
+/** Every value (non-type-only) import/export specifier in a source file. */
 function valueImports(source: string): string[] {
-  // Strip type-only imports/exports -- they erase at compile time and can never
-  // pull a runtime dependency into the bundle.
-  const runtime = source
-    .replace(/^\s*import\s+type\s[\s\S]*?from\s*["'][^"']+["'];?/gm, "")
-    .replace(/^\s*export\s+type\s[\s\S]*?from\s*["'][^"']+["'];?/gm, "");
-  return [...runtime.matchAll(/(?:^|\n)\s*(?:import|export)[\s\S]*?from\s*["']([^"']+)["']/g)].map((m) => m[1]);
+  const specifiers: string[] = [];
+  for (const [, , clause, specifier] of source.matchAll(FROM_STATEMENT)) {
+    // `import type {...}` / `export type {...}` erase at compile time. An inline
+    // `{ type X }` specifier does not make the statement type-only -- the module
+    // is still loaded at runtime.
+    if (/^\s*type\s/.test(clause)) continue;
+    specifiers.push(specifier);
+  }
+  for (const [, specifier] of source.matchAll(BARE_IMPORT)) specifiers.push(specifier);
+  return specifiers;
 }
 
 function tsFiles(dir: string): string[] {
@@ -45,6 +65,65 @@ function tsFiles(dir: string): string[] {
     return name.endsWith(".ts") && !name.endsWith(".test.ts") ? [full] : [];
   });
 }
+
+/**
+ * The extractor gets its own tests because this guard previously failed OPEN --
+ * the worst outcome for a test whose entire job is catching a regression, since
+ * it reports green forever while the thing it guards quietly rots. These pin
+ * what `valueImports` must and must not see.
+ */
+describe("valueImports", () => {
+  it("finds a value import that sits BELOW a local type alias", () => {
+    // The exact regression: the alias has no `from` clause of its own, so an
+    // unbounded scan matched the import's `from` and swallowed everything between.
+    const source = [
+      'import type { Platform } from "@intune-preflight/shared";',
+      "",
+      'export type CspNode = "windows" | "macos";',
+      "",
+      'import { readFileSync } from "node:fs";',
+    ].join("\n");
+    expect(valueImports(source)).toEqual(["node:fs"]);
+  });
+
+  it("does not let an exported declaration swallow a later import", () => {
+    const source = [
+      "export function normalizeCspNode(raw: string): string {",
+      "  return raw.toLowerCase();",
+      "}",
+      "",
+      'import { join } from "node:path";',
+    ].join("\n");
+    expect(valueImports(source)).toEqual(["node:path"]);
+  });
+
+  it("ignores type-only imports and re-exports, on one line or many", () => {
+    const source = [
+      'import type { Platform } from "@intune-preflight/shared";',
+      'export type { TenantData } from "./tenantData.js";',
+      "import type {",
+      "  AssignmentFilter,",
+      "  IntunePolicy,",
+      '} from "node:fs";',
+    ].join("\n");
+    expect(valueImports(source)).toEqual([]);
+  });
+
+  it("reports a value import that merely carries an inline type specifier", () => {
+    // `{ type Platform, flattenToCspSettings }` still loads the module at runtime.
+    const source = 'import { type Platform, flattenToCspSettings } from "./normalize.js";';
+    expect(valueImports(source)).toEqual(["./normalize.js"]);
+  });
+
+  it("reports a side-effect import, which has no from clause at all", () => {
+    // The previous regex required a `from`, so this form was invisible to it.
+    expect(valueImports('import "node:crypto";')).toEqual(["node:crypto"]);
+  });
+
+  it("reads no specifier out of a bare type alias", () => {
+    expect(valueImports('export type CspNode = "windows" | "macos";')).toEqual([]);
+  });
+});
 
 describe("engine purity", () => {
   const files = tsFiles(SRC);

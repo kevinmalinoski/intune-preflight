@@ -4,7 +4,7 @@
 
 Intune makes you click into every Configuration Profile, Compliance Policy, Settings Catalog policy, and Administrative Template one at a time to work out what actually lands on a device. Intune Preflight connects to your tenant, reads every policy and its assignments, and lets you **simulate an endpoint** — pick an OS, the Entra groups it belongs to, its Autopilot Group Tag, and any Assignment Filters it matches — then computes the full merged CSP-level baseline that endpoint would receive. No hardware, no enrollment, no Policy Sets.
 
-It's a **read-only, self-hosted** tool for validating and understanding assignments in a sandbox or production tenant before you roll changes out to real devices.
+It's **read-only**, and you can run it two ways: open it in a browser tab and sign in with your own admin account — nothing installed, no server, no secret — or **self-host** it with an app registration of your own for the complete, unfiltered view of a tenant. Both run the same engine.
 
 ![Intune Preflight — endpoint simulator](docs/img/01-simulator-overview.png)
 
@@ -23,7 +23,26 @@ npm run dev        # server :4000, web :5173 — open http://localhost:5173
 
 With no `.env` present it starts in **Demo** mode against synthetic data that exercises every feature: a conflict, an overlap, an exclude-wins case, an All Devices + include-filter case, dynamic Group Tag implication, an unassigned policy, and Autopilot V1 + V2. A **Demo / Connected** toggle in the header flips between the sample data and your real tenant — **Connected** unlocks once you add a `.env`.
 
-➡️ **[Full setup guide — app registration, config, Docker](docs/SETUP.md)**
+## Three ways to run it
+
+All three run the **same engine** — `packages/engine` is pure and I/O-free, and the public demo is the proof that it runs unchanged in a browser. What differs is only where the tenant data comes from.
+
+| | Demo | **Browser** | Self-hosted |
+|---|---|---|---|
+| **Setup** | none | one app registration, ~3 min | app registration + `.env` + Docker/npm |
+| **Auth** | none | **you sign in** (delegated, PKCE) | app-only client secret |
+| **Client secret** | — | **none exists** | yes, you manage it |
+| **Runs on** | your browser | your browser | your server |
+| **Sees** | bundled sample tenant | the tenant, as scoped to **your** Intune RBAC | the **entire** tenant, unfiltered |
+| **Data at rest** | — | nothing; dies with the tab | in-memory cache on your server |
+
+**Browser mode is the quickest way in** — open a page, sign in, read your tenant. Nothing is installed, there is no server, and no secret exists anywhere, because a single-page app is a public client and PKCE replaces it.
+
+**Self-hosting is always available, and is still the thorough option.** App-only credentials are the only way to get the complete picture: a delegated token is bounded by the signed-in admin's Intune RBAC, so a scoped admin sees their slice rather than the tenant. It is also the fallback for tenants whose Conditional Access won't pass a single-page app. Nothing about it changed in 2.2 — same `.env`, same Docker images, same behaviour.
+
+➡️ **[Full setup guide — app registration, browser mode, config, Docker](docs/SETUP.md)**
+
+There is also a **browser mode**: a static build with no backend, where an admin signs in with their own account and the page reads the tenant directly from Graph with delegated, read-only permissions and no client secret. ➡️ **[Browser mode setup](docs/SETUP.md#browser-mode--sign-in-as-yourself-no-backend)**
 
 ## Why preflight?
 
@@ -73,10 +92,11 @@ Honest edges in v2 — none block the core use, but know them before you rely on
 
 Read this before you host it anywhere other than your own machine:
 
-- **No built-in authentication.** There is no login and API callers are not authenticated. Anyone who can reach the web UI or API port can read the policy data it surfaces.
-- **The server listens on all interfaces** (`0.0.0.0`). Combined with the point above: **run it on localhost or a trusted private network, and never expose it directly to the internet** without putting your own authentication in front of it.
+- **The self-hosted server has no built-in authentication.** This applies to the `apps/server` build only, and it has not changed: there is no login and API callers are not authenticated, so anyone who can reach the web UI or API port can read the policy data it surfaces. Browser mode is a different build with a different security model — see below — and the existence of sign-in *there* changes nothing about the server.
+- **The self-hosted server listens on all interfaces** (`0.0.0.0`). Combined with the point above: **run it on localhost or a trusted private network, and never expose it directly to the internet** without putting your own authentication in front of it. Browser mode is the build that is designed to be hosted publicly; the server is not.
 - **Read-only.** Every Graph permission is `*.Read.All`; the tool never writes to your tenant.
 - **Credentials stay server-side.** `TENANT_ID` / `CLIENT_ID` / `CLIENT_SECRET` live only in the server's `.env`, are never sent to the browser, and `.env` is gitignored.
+- **Browser mode has no secret at all.** The static build is a public client using PKCE: the tenant and client IDs it stores in the browser are not secrets, the access token lives in `sessionStorage` and dies with the tab, and the permissions are delegated — bounded by what the signed-in admin can already read.
 - **Full-tenant visibility by design.** App-only permissions mean it sees the *entire* tenant's configuration, unfiltered by scope tags or admin units. That's intended — but it makes the app registration effectively a tenant-wide read key. Protect it, grant only the permissions listed in the setup guide, and rotate the secret periodically.
 
 ## Documentation

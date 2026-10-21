@@ -1,31 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createGraphClient, isGraphStatus } from "./graphClient.js";
 
 // graphFetch is the riskiest code in the repo -- it is what runs against a real
 // tenant under throttling -- and until now only its predicate helpers were
 // tested. These drive the retry loop itself through the public collection API,
 // with fetch and the token call stubbed.
-
-vi.mock("./config.js", () => ({
-  config: {
-    tenantId: "t",
-    clientId: "c",
-    clientSecret: "s",
-    hasCredentials: true,
-    port: 4000,
-    cacheTtlSeconds: 300,
-    corsOrigins: [],
-  },
-}));
-
-vi.mock("@azure/msal-node", () => ({
-  ConfidentialClientApplication: class {
-    async acquireTokenByClientCredential() {
-      return { accessToken: "fake-token", expiresOn: new Date(Date.now() + 3_600_000) };
-    }
-  },
-}));
-
-const { getGraphStats, graphGetCollection, isGraphStatus, resetGraphStats } = await import("./graphClient.js");
+//
+// The token is the one thing this layer deliberately does NOT own -- the server
+// injects an app-only MSAL token, a browser a delegated one -- so stubbing it is
+// the whole of the auth setup, with no MSAL or config to mock.
+const { getGraphStats, graphGetCollection, resetGraphStats } = createGraphClient({
+  getToken: async () => "fake-token",
+});
 
 /** A Response-like object good enough for the code paths under test. */
 const reply = (status: number, body: unknown, headers: Record<string, string> = {}) => ({

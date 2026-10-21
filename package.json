@@ -1,18 +1,21 @@
 {
   "name": "intune-preflight",
   "private": true,
-  "version": "2.1.0",
+  "version": "2.2.0",
   "workspaces": [
     "apps/server",
     "apps/web",
     "packages/shared",
-    "packages/engine"
+    "packages/engine",
+    "packages/graph"
   ],
   "scripts": {
-    "dev": "npm run build:packages && concurrently -k -n shared,engine,server,web -c gray,magenta,blue,green \"npm run dev -w packages/shared\" \"npm run dev -w packages/engine\" \"npm run dev -w apps/server\" \"npm run dev -w apps/web\"",
-    "build:packages": "npm run build -w packages/shared && npm run build -w packages/engine",
+    "dev": "npm run build:packages && concurrently -k -n shared,engine,graph,server,web -c gray,magenta,cyan,blue,green \"npm run dev -w packages/shared\" \"npm run dev -w packages/engine\" \"npm run dev -w packages/graph\" \"npm run dev -w apps/server\" \"npm run dev -w apps/web\"",
+    "build:packages": "npm run build -w packages/shared && npm run build -w packages/engine && npm run build -w packages/graph",
     "build": "npm run build:packages && npm run build -w apps/server && npm run build -w apps/web",
     "build:demo": "npm run build:packages && npm run build:demo -w apps/web",
+    "build:live": "npm run build:packages && npm run build:live -w apps/web",
+    "dev:live": "npm run build:packages && npm run dev:live -w apps/web",
     "typecheck": "npm run build:packages && npm run lint -w apps/server && npm run lint -w apps/web",
     "lint": "npm run typecheck && eslint .",
     "lint:fix": "eslint . --fix",

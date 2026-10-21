@@ -36,3 +36,42 @@ export function writeStored(key: string, value: string): void {
     // Blocked or out of quota -- the preference just won't persist.
   }
 }
+
+export function removeStored(key: string): void {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // Same as above: nothing to do if site data is blocked.
+  }
+}
+
+/**
+ * The same guards over `sessionStorage`, for the values whose lifetime is the
+ * TAB rather than the browser profile. The live (delegated-auth) build keeps its
+ * sign-in state here on purpose, alongside MSAL's own token cache: closing the
+ * tab ends the session and leaves nothing behind.
+ */
+
+export function readSession(key: string): string | null {
+  try {
+    return sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+export function writeSession(key: string, value: string): void {
+  try {
+    sessionStorage.setItem(key, value);
+  } catch {
+    // Blocked or out of quota -- the value just won't survive a reload.
+  }
+}
+
+export function removeSession(key: string): void {
+  try {
+    sessionStorage.removeItem(key);
+  } catch {
+    // Nothing to do.
+  }
+}

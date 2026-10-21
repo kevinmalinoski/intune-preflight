@@ -1,15 +1,19 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
+import { mapWithConcurrency } from "./graphClient.js";
+import { fetchEndpointSecurityIntents } from "./intuneData.js";
 
 // Simulate a legacy Endpoint Security intent end-to-end without a real tenant:
-// mock the single Graph seam (graphGetCollection) with a recorded-shape response
-// for a BitLocker intent -- its template, categories, settingDefinitions,
+// stand in for the single Graph seam (graphGetCollection) with a recorded-shape
+// response for a BitLocker intent -- its template, categories, settingDefinitions,
 // settings and assignments -- and assert the fetcher produces a merged policy
 // with REAL Intune setting names (from settingDefinitions), falling back to the
 // definitionId heuristic only where a definition is missing.
 //
 // This is the deterministic stand-in for "create a legacy policy to test": it
 // exercises fetchEndpointSecurityIntents' real wiring against the documented
-// Graph shapes, so the name resolution can't silently regress.
+// Graph shapes, so the name resolution can't silently regress. The fetcher takes
+// its client as a parameter, so the seam is now an argument rather than a module
+// mock.
 
 const TEMPLATE_ID = "tmpl-bitlocker";
 const INTENT_ID = "intent-1";
@@ -68,22 +72,34 @@ const routeCollection = (path: string): unknown[] => {
   return [];
 };
 
-vi.mock("./graphClient.js", async (orig) => {
-  const actual = await orig<typeof import("./graphClient.js")>();
-  return {
-    ...actual,
-    graphGetCollection: vi.fn(async (path: string) => routeCollection(path)),
-  };
+/**
+ * A Graph client that serves the recorded shapes above and nothing else. The
+ * real retry/paging client is covered by graphFetch.test.ts; what matters here
+ * is the response shapes, so this answers collection reads directly.
+ */
+const fakeClient = () => ({
+  graphGetCollection: async <T>(path: string): Promise<T[]> => routeCollection(path) as T[],
+  graphGetObject: async <T>(): Promise<T> => {
+    throw new Error("fetchEndpointSecurityIntents makes no single-object calls");
+  },
+  mapWithConcurrency,
+  concurrency: 8,
+  resetGraphStats: () => {},
+  getGraphStats: () => ({ requests: 0, retries: 0, throttled: 0, serverErrors: 0, timeouts: 0 }),
 });
 
-// Imported after the mock is registered so it binds to the mocked graphGetCollection.
-const { fetchEndpointSecurityIntents } = await import("./intuneData.js");
+/** The fetcher's context: the client above, plus a warning sink to inspect. */
+const fakeContext = () => {
+  const warnings: string[] = [];
+  return { ctx: { client: fakeClient(), recordWarning: (msg: string) => warnings.push(msg) }, warnings };
+};
 
 describe("fetchEndpointSecurityIntents (simulated legacy intent)", () => {
-  beforeEach(() => vi.clearAllMocks());
-
   it("resolves real Intune setting names from the template settingDefinitions", async () => {
-    const [policy] = await fetchEndpointSecurityIntents();
+    const { ctx, warnings } = fakeContext();
+    const [policy] = await fetchEndpointSecurityIntents(ctx);
+    // Nothing was dropped -- every assertion below is about a policy that loaded.
+    expect(warnings).toEqual([]);
 
     expect(policy.kind).toBe("endpointSecurity");
     expect(policy.platform).toBe("windows");
@@ -104,7 +120,8 @@ describe("fetchEndpointSecurityIntents (simulated legacy intent)", () => {
   });
 
   it("falls back to the definitionId heuristic when a setting has no definition", async () => {
-    const [policy] = await fetchEndpointSecurityIntents();
+    const { ctx } = fakeContext();
+    const [policy] = await fetchEndpointSecurityIntents(ctx);
     const orphan = policy.settings.find((s) => s.settingId === "endpointSecurity:bitlocker_orphanSetting");
     // No settingDefinition for it -> humanized last segment.
     expect(orphan?.displayName).toBe("Orphan Setting");

@@ -7,14 +7,7 @@ import type {
   IntunePolicy,
   Platform,
 } from "@intune-preflight/shared";
-import {
-  getGraphStats,
-  graphGetCollection,
-  graphGetObject,
-  isGraphStatus,
-  mapWithConcurrency,
-  resetGraphStats,
-} from "./graphClient.js";
+import { type GraphClient, isGraphStatus, mapWithConcurrency } from "./graphClient.js";
 import {
   demoTenantData,
   flattenIntentSettings,
@@ -35,27 +28,25 @@ import {
   VIRTUAL_GROUP_ALL_DEVICES,
   VIRTUAL_GROUP_ALL_USERS,
 } from "@intune-preflight/engine";
-import { TtlCache } from "./cache.js";
-import { config } from "./config.js";
-import { getMode } from "./mode.js";
+import type { TtlCache } from "./cache.js";
 
-const cache = new TtlCache(config.cacheTtlSeconds);
+/** Which data source a load reads from. The caller decides; this package never guesses. */
+export type TenantMode = "demo" | "connected";
 
-// Warnings from the connected load in progress: per-item drops and unexpected
-// category failures that mean the baseline is INCOMPLETE. Collected so a partial
-// load is surfaced to the user (and logged) rather than failing silently -- the
-// tool's core promise is that it never quietly misses policies. Reset at the
-// start of each load; the completed set is copied to `lastLoadWarnings`.
-let loadWarnings: string[] = [];
-let lastLoadWarnings: string[] = [];
-function recordWarning(msg: string): void {
-  loadWarnings.push(msg);
-  console.warn(msg);
-}
-
-/** Warnings from the most recent connected tenant load, for the /api/health surface. */
-export function getLastLoadWarnings(): string[] {
-  return lastLoadWarnings;
+/**
+ * What every fetcher below needs: the Graph client to read through, and the sink
+ * for warnings that mean the baseline came back INCOMPLETE -- per-item drops and
+ * unexpected category failures. Warnings are collected so a partial load is
+ * surfaced to the user (and logged) rather than failing silently; the tool's core
+ * promise is that it never quietly misses policies.
+ *
+ * Both are passed explicitly rather than read from module state, so the same code
+ * can serve an app-only server load and a delegated browser load -- and so two
+ * concurrent loads can't bleed warnings or telemetry into each other.
+ */
+interface LoadContext {
+  client: GraphClient;
+  recordWarning: (msg: string) => void;
 }
 
 interface RawAssignment {
@@ -82,12 +73,15 @@ interface RawAssignment {
  * URL. Transient failures never reach here -- graphGetCollection has already
  * retried them.
  */
-async function getCollectionWithBetaFallback<T>(path: string): Promise<{ items: T[]; useBeta: boolean }> {
+async function getCollectionWithBetaFallback<T>(
+  ctx: LoadContext,
+  path: string
+): Promise<{ items: T[]; useBeta: boolean }> {
   try {
-    return { items: await graphGetCollection<T>(path), useBeta: false };
+    return { items: await ctx.client.graphGetCollection<T>(path), useBeta: false };
   } catch (err) {
     if (!isGraphStatus(err, 400, 404)) throw err;
-    return { items: await graphGetCollection<T>(path, true), useBeta: true };
+    return { items: await ctx.client.graphGetCollection<T>(path, true), useBeta: true };
   }
 }
 
@@ -142,16 +136,11 @@ function resolveAssignmentGroupIds(assignments: RawAssignment[]): ResolvedAssign
  * graphFetch already retried every transient error before this, so reaching here
  * means the item is genuinely unloadable (or a rare persistent failure) -- either
  * way the baseline is now missing it, so it's surfaced, not just logged. */
-function warnSkippedItem(kind: string, id: unknown, err: unknown): void {
-  recordWarning(
+function warnSkippedItem(ctx: LoadContext, kind: string, id: unknown, err: unknown): void {
+  ctx.recordWarning(
     `Dropped one ${kind} (${(id as string) ?? "unknown"}) after retries — it is missing from the baseline: ${(err as Error).message}`
   );
 }
-
-// How many per-item Graph detail calls run in flight at once. High enough to
-// make a 150+ policy tenant load in seconds instead of minutes, low enough to
-// stay clear of Intune's service throttling (graphFetch also retries 429s).
-const GRAPH_CONCURRENCY = 8;
 
 /**
  * Map raw Graph items to policies with bounded concurrency. Failed items are
@@ -159,22 +148,23 @@ const GRAPH_CONCURRENCY = 8;
  * so one malformed policy never drops its whole category.
  */
 async function mapItems<T>(
+  ctx: LoadContext,
   items: Record<string, unknown>[],
   label: string,
   fn: (item: Record<string, unknown>) => Promise<T>
 ): Promise<T[]> {
-  const mapped = await mapWithConcurrency(items, GRAPH_CONCURRENCY, async (item) => {
+  const mapped = await mapWithConcurrency(items, ctx.client.concurrency, async (item) => {
     try {
       return await fn(item);
     } catch (err) {
-      warnSkippedItem(label, item.id, err);
+      warnSkippedItem(ctx, label, item.id, err);
       return null;
     }
   });
   return mapped.filter((p): p is Awaited<T> => p !== null);
 }
 
-async function fetchDeviceConfigurations(): Promise<IntunePolicy[]> {
+async function fetchDeviceConfigurations(ctx: LoadContext): Promise<IntunePolicy[]> {
   // Read deviceConfigurations from BETA directly. Several newer types -- notably
   // the Apple/Android Wi-Fi profiles (macOSWiFiConfiguration, iosWiFiConfiguration,
   // aospDeviceOwnerWiFiConfiguration) plus a couple of Windows ones -- are only
@@ -184,11 +174,11 @@ async function fetchDeviceConfigurations(): Promise<IntunePolicy[]> {
   // $expand=assignments returns each policy's assignments INLINE with the
   // collection, eliminating a per-policy round-trip (the dominant cost, and
   // 5xx surface, on large tenants). Same for every fetcher below.
-  const items = await graphGetCollection<Record<string, unknown>>(
+  const items = await ctx.client.graphGetCollection<Record<string, unknown>>(
     "/deviceManagement/deviceConfigurations?$expand=assignments",
     true
   );
-  return mapItems(items, "device configuration", async (item): Promise<IntunePolicy> => {
+  return mapItems(ctx, items, "device configuration", async (item): Promise<IntunePolicy> => {
     const id = item.id as string;
     const displayName = (item.displayName as string) ?? "Untitled";
     const assignments = (item.assignments as RawAssignment[] | undefined) ?? [];
@@ -208,15 +198,15 @@ async function fetchDeviceConfigurations(): Promise<IntunePolicy[]> {
   });
 }
 
-async function fetchCompliancePolicies(): Promise<IntunePolicy[]> {
+async function fetchCompliancePolicies(ctx: LoadContext): Promise<IntunePolicy[]> {
   // Read from BETA directly. On v1.0, compliance policies for newer types --
   // e.g. aospDeviceOwnerCompliancePolicy -- come back with NO @odata.type, so
   // they classify as "other" and disappear. Beta returns the proper type.
-  const items = await graphGetCollection<Record<string, unknown>>(
+  const items = await ctx.client.graphGetCollection<Record<string, unknown>>(
     "/deviceManagement/deviceCompliancePolicies?$expand=assignments",
     true
   );
-  return mapItems(items, "compliance policy", async (item): Promise<IntunePolicy> => {
+  return mapItems(ctx, items, "compliance policy", async (item): Promise<IntunePolicy> => {
     const id = item.id as string;
     const displayName = (item.displayName as string) ?? "Untitled";
     const assignments = (item.assignments as RawAssignment[] | undefined) ?? [];
@@ -251,11 +241,13 @@ function isEnrollmentTimePolicy(item: Record<string, unknown>): boolean {
   return technologies.includes("enrollment") || templateFamily === "enrollmentconfiguration";
 }
 
-async function fetchSettingsCatalogPolicies(): Promise<IntunePolicy[]> {
+async function fetchSettingsCatalogPolicies(ctx: LoadContext): Promise<IntunePolicy[]> {
   const { items, useBeta } = await getCollectionWithBetaFallback<Record<string, unknown>>(
+    ctx,
     "/deviceManagement/configurationPolicies?$expand=assignments"
   );
   return mapItems(
+    ctx,
     items.filter((item) => !isEnrollmentTimePolicy(item)),
     "Settings Catalog policy",
     async (item): Promise<IntunePolicy> => {
@@ -263,7 +255,7 @@ async function fetchSettingsCatalogPolicies(): Promise<IntunePolicy[]> {
       const displayName = (item.name as string) ?? (item.displayName as string) ?? "Untitled";
       // Assignments come inline via $expand above; only the settings still need a
       // per-policy call (settings can't be expanded on the collection).
-      const settingEntries = await graphGetCollection<{
+      const settingEntries = await ctx.client.graphGetCollection<{
         settingInstance?: Record<string, unknown>;
         settingDefinitions?: Record<string, unknown>[];
         // Expand the setting definitions so each setting carries its human name,
@@ -287,11 +279,12 @@ async function fetchSettingsCatalogPolicies(): Promise<IntunePolicy[]> {
   );
 }
 
-async function fetchAdminTemplates(): Promise<IntunePolicy[]> {
+async function fetchAdminTemplates(ctx: LoadContext): Promise<IntunePolicy[]> {
   const { items, useBeta } = await getCollectionWithBetaFallback<Record<string, unknown>>(
+    ctx,
     "/deviceManagement/groupPolicyConfigurations?$expand=assignments"
   );
-  return mapItems(items, "administrative template", async (item): Promise<IntunePolicy> => {
+  return mapItems(ctx, items, "administrative template", async (item): Promise<IntunePolicy> => {
     const id = item.id as string;
     const displayName = (item.displayName as string) ?? "Untitled";
     const assignments = (item.assignments as RawAssignment[] | undefined) ?? [];
@@ -300,7 +293,7 @@ async function fetchAdminTemplates(): Promise<IntunePolicy[]> {
     // real name and category path (a genuine CSP-style area) instead of a bare
     // index, and so its settingId keys on the definition -- letting the same ADMX
     // setting configured by two policies be detected as a conflict/overlap.
-    const definitionValues = await graphGetCollection<Record<string, unknown>>(
+    const definitionValues = await ctx.client.graphGetCollection<Record<string, unknown>>(
       `/deviceManagement/groupPolicyConfigurations/${id}/definitionValues?$expand=definition`,
       useBeta
     );
@@ -359,7 +352,7 @@ function resolveGroupAssignmentIds(assignments: RawGroupAssignment[]): string[] 
  * Proactive Remediations (`deviceHealthScripts`, detection+remediation
  * script pairs) -- a separate, broader feature out of scope for now.
  */
-async function fetchPlatformScripts(): Promise<IntunePolicy[]> {
+async function fetchPlatformScripts(ctx: LoadContext): Promise<IntunePolicy[]> {
   const sources: { path: string; platform: "windows" | "macos"; assignmentStyle: "standard" | "groupOnly" }[] = [
     { path: "/deviceManagement/deviceManagementScripts", platform: "windows", assignmentStyle: "standard" },
     { path: "/deviceManagement/deviceShellScripts", platform: "macos", assignmentStyle: "groupOnly" },
@@ -373,7 +366,10 @@ async function fetchPlatformScripts(): Promise<IntunePolicy[]> {
     // scripts use a different groupAssignments sub-resource, fetched per item.
     const expand = source.assignmentStyle === "standard" ? "?$expand=assignments" : "";
     try {
-      ({ items, useBeta } = await getCollectionWithBetaFallback<Record<string, unknown>>(`${source.path}${expand}`));
+      ({ items, useBeta } = await getCollectionWithBetaFallback<Record<string, unknown>>(
+        ctx,
+        `${source.path}${expand}`
+      ));
     } catch (err) {
       // Platform scripts require an extra Graph permission
       // (DeviceManagementScripts.Read.All) beyond the core set. Treat this
@@ -384,7 +380,7 @@ async function fetchPlatformScripts(): Promise<IntunePolicy[]> {
       continue;
     }
     result.push(
-      ...(await mapItems(items, "platform script", async (item): Promise<IntunePolicy> => {
+      ...(await mapItems(ctx, items, "platform script", async (item): Promise<IntunePolicy> => {
         const id = item.id as string;
         const displayName = (item.displayName as string) ?? (item.fileName as string) ?? "Untitled";
 
@@ -392,7 +388,7 @@ async function fetchPlatformScripts(): Promise<IntunePolicy[]> {
         let excludedGroupIds: string[];
         let assignmentFilters: AssignmentFilterRef[];
         if (source.assignmentStyle === "groupOnly") {
-          const assignments = await graphGetCollection<RawGroupAssignment>(
+          const assignments = await ctx.client.graphGetCollection<RawGroupAssignment>(
             `${source.path}/${id}/groupAssignments`,
             useBeta
           );
@@ -421,10 +417,11 @@ async function fetchPlatformScripts(): Promise<IntunePolicy[]> {
   return result;
 }
 
-async function fetchAutopilotProfiles(): Promise<AutopilotProfile[]> {
+async function fetchAutopilotProfiles(ctx: LoadContext): Promise<AutopilotProfile[]> {
   let items: Record<string, unknown>[];
   try {
     ({ items } = await getCollectionWithBetaFallback<Record<string, unknown>>(
+      ctx,
       "/deviceManagement/windowsAutopilotDeploymentProfiles?$expand=assignments"
     ));
   } catch (err) {
@@ -436,7 +433,7 @@ async function fetchAutopilotProfiles(): Promise<AutopilotProfile[]> {
     );
     return [];
   }
-  return mapItems(items, "Autopilot profile", async (item): Promise<AutopilotProfile> => {
+  return mapItems(ctx, items, "Autopilot profile", async (item): Promise<AutopilotProfile> => {
     const assignments = (item.assignments as RawAssignment[] | undefined) ?? [];
     const { includedGroupIds, excludedGroupIds } = resolveAssignmentGroupIds(assignments);
     return {
@@ -494,11 +491,12 @@ function autopilotV1Settings(item: Record<string, unknown>): AutopilotProfileSet
  * devices are added to -- surfaced here with the group id marked for name
  * resolution in loadTenantData.
  */
-async function fetchAutopilotV2Policies(): Promise<AutopilotProfile[]> {
+async function fetchAutopilotV2Policies(ctx: LoadContext): Promise<AutopilotProfile[]> {
   let items: Record<string, unknown>[];
   let useBeta: boolean;
   try {
     ({ items, useBeta } = await getCollectionWithBetaFallback<Record<string, unknown>>(
+      ctx,
       "/deviceManagement/configurationPolicies?$expand=assignments"
     ));
   } catch (err) {
@@ -509,12 +507,13 @@ async function fetchAutopilotV2Policies(): Promise<AutopilotProfile[]> {
   }
   const candidates = items.filter(isEnrollmentTimePolicy);
   const mapped = await mapItems(
+    ctx,
     candidates,
     "Autopilot device preparation policy",
     async (item): Promise<AutopilotProfile | null> => {
       const id = item.id as string;
       const assignments = (item.assignments as RawAssignment[] | undefined) ?? [];
-      const settingEntries = await graphGetCollection<{
+      const settingEntries = await ctx.client.graphGetCollection<{
         settingInstance?: Record<string, unknown>;
         settingDefinitions?: Record<string, unknown>[];
       }>(`/deviceManagement/configurationPolicies/${id}/settings?$expand=settingDefinitions`, useBeta);
@@ -533,7 +532,7 @@ async function fetchAutopilotV2Policies(): Promise<AutopilotProfile[]> {
       let deviceGroupId = dppSettings.find((s) => s.settingId.includes("_dpp_devicegroup"))?.value;
       if (!deviceGroupId) {
         try {
-          const membership = await graphGetObject<{
+          const membership = await ctx.client.graphGetObject<{
             enrollmentTimeDeviceMembershipTargetValidationStatuses?: { targetId?: string }[];
           }>(`/deviceManagement/configurationPolicies('${id}')/retrieveEnrollmentTimeDeviceMembershipTarget`, useBeta);
           deviceGroupId = membership.enrollmentTimeDeviceMembershipTargetValidationStatuses?.[0]?.targetId;
@@ -572,10 +571,11 @@ async function fetchAutopilotV2Policies(): Promise<AutopilotProfile[]> {
   return mapped.filter((p): p is AutopilotProfile => p !== null);
 }
 
-async function fetchAssignmentFilters(): Promise<AssignmentFilter[]> {
+async function fetchAssignmentFilters(ctx: LoadContext): Promise<AssignmentFilter[]> {
   let items: Record<string, unknown>[];
   try {
-    items = (await getCollectionWithBetaFallback<Record<string, unknown>>("/deviceManagement/assignmentFilters")).items;
+    items = (await getCollectionWithBetaFallback<Record<string, unknown>>(ctx, "/deviceManagement/assignmentFilters"))
+      .items;
   } catch (err) {
     console.warn(
       `Skipping Assignment Filters: ${skipReason(err as Error, "If this is a 403, grant the required permission to enable them.")}`
@@ -600,7 +600,7 @@ async function fetchAssignmentFilters(): Promise<AssignmentFilter[]> {
  * device is targeted to -- and two profiles targeting different versions are a
  * real conflict.
  */
-async function fetchWindowsUpdateProfiles(): Promise<IntunePolicy[]> {
+async function fetchWindowsUpdateProfiles(ctx: LoadContext): Promise<IntunePolicy[]> {
   const sources = [
     { path: "windowsFeatureUpdateProfiles", type: "windowsFeatureUpdateProfile" },
     { path: "windowsQualityUpdateProfiles", type: "windowsQualityUpdateProfile" },
@@ -610,7 +610,7 @@ async function fetchWindowsUpdateProfiles(): Promise<IntunePolicy[]> {
   for (const source of sources) {
     let items: Record<string, unknown>[];
     try {
-      items = await graphGetCollection<Record<string, unknown>>(
+      items = await ctx.client.graphGetCollection<Record<string, unknown>>(
         `/deviceManagement/${source.path}?$expand=assignments`,
         true
       );
@@ -621,7 +621,7 @@ async function fetchWindowsUpdateProfiles(): Promise<IntunePolicy[]> {
       continue;
     }
     result.push(
-      ...(await mapItems(items, "Windows update profile", async (item): Promise<IntunePolicy> => {
+      ...(await mapItems(ctx, items, "Windows update profile", async (item): Promise<IntunePolicy> => {
         const id = item.id as string;
         const displayName = (item.displayName as string) ?? "Untitled";
         const assignments = (item.assignments as RawAssignment[] | undefined) ?? [];
@@ -657,20 +657,21 @@ async function fetchWindowsUpdateProfiles(): Promise<IntunePolicy[]> {
  * the `definitionId`-derived heuristic and raw values rather than dropping data.
  */
 async function loadIntentSettingDefinitions(
+  ctx: LoadContext,
   templateReps: Array<{ templateId: string; intentId: string }>
 ): Promise<Map<string, Map<string, IntentSettingDef>>> {
   const byTemplate = new Map<string, Map<string, IntentSettingDef>>();
   await mapWithConcurrency(templateReps, 3, async ({ templateId, intentId }) => {
     const allDefs: Record<string, unknown>[] = [];
     try {
-      const categories = await graphGetCollection<Record<string, unknown>>(
+      const categories = await ctx.client.graphGetCollection<Record<string, unknown>>(
         `/deviceManagement/intents/${intentId}/categories`,
         true
       );
       for (const cat of categories) {
         const catId = cat.id as string | undefined;
         if (!catId) continue;
-        const defs = await graphGetCollection<Record<string, unknown>>(
+        const defs = await ctx.client.graphGetCollection<Record<string, unknown>>(
           `/deviceManagement/intents/${intentId}/categories/${catId}/settingDefinitions`,
           true
         );
@@ -698,12 +699,12 @@ async function loadIntentSettingDefinitions(
  * fetcher; this covers only tenants that still have the legacy intents-based
  * ones. Windows-centric, so they join Windows conflict/overlap detection.
  */
-export async function fetchEndpointSecurityIntents(): Promise<IntunePolicy[]> {
+export async function fetchEndpointSecurityIntents(ctx: LoadContext): Promise<IntunePolicy[]> {
   // Intents are a legacy resource served on BETA -- the per-intent /assignments
   // and /settings sub-collections 400 on v1.0 -- so read the whole feature on beta.
   let intents: Record<string, unknown>[];
   try {
-    intents = await graphGetCollection<Record<string, unknown>>("/deviceManagement/intents", true);
+    intents = await ctx.client.graphGetCollection<Record<string, unknown>>("/deviceManagement/intents", true);
   } catch (err) {
     console.warn(
       `Skipping legacy Endpoint Security (intents): ${skipReason(err as Error, "If this is a 403, grant DeviceManagementConfiguration.Read.All to enable legacy Endpoint Security / Security Baselines.")}`
@@ -718,7 +719,7 @@ export async function fetchEndpointSecurityIntents(): Promise<IntunePolicy[]> {
   // security check, so a non-security intent isn't mislabeled Endpoint Security.
   const templateInfo = new Map<string, { area: string; platform: Platform; isSecurity: boolean }>();
   try {
-    const templates = await graphGetCollection<Record<string, unknown>>(
+    const templates = await ctx.client.graphGetCollection<Record<string, unknown>>(
       "/deviceManagement/templates?$select=id,displayName,platformType,templateType",
       true
     );
@@ -746,9 +747,9 @@ export async function fetchEndpointSecurityIntents(): Promise<IntunePolicy[]> {
         .map((i) => [i.templateId as string, { templateId: i.templateId as string, intentId: i.id as string }])
     ).values(),
   ];
-  const defsByTemplate = await loadIntentSettingDefinitions(templateReps);
+  const defsByTemplate = await loadIntentSettingDefinitions(ctx, templateReps);
 
-  return mapItems(intents, "Endpoint Security (legacy)", async (item): Promise<IntunePolicy> => {
+  return mapItems(ctx, intents, "Endpoint Security (legacy)", async (item): Promise<IntunePolicy> => {
     const id = item.id as string;
     const displayName = (item.displayName as string) ?? "Untitled";
     const info = templateInfo.get(item.templateId as string);
@@ -767,10 +768,13 @@ export async function fetchEndpointSecurityIntents(): Promise<IntunePolicy[]> {
     // silently drops every group. Fetched on beta (the v1.0 sub-collection 400s);
     // same target shape as every other resource, so exclude-wins and filters just
     // work through the shared resolver.
-    const assignments = await graphGetCollection<RawAssignment>(`/deviceManagement/intents/${id}/assignments`, true);
+    const assignments = await ctx.client.graphGetCollection<RawAssignment>(
+      `/deviceManagement/intents/${id}/assignments`,
+      true
+    );
     const { includedGroupIds, excludedGroupIds, assignmentFilters } = resolveAssignmentGroupIds(assignments);
 
-    const rawSettings = await graphGetCollection<Record<string, unknown>>(
+    const rawSettings = await ctx.client.graphGetCollection<Record<string, unknown>>(
       `/deviceManagement/intents/${id}/settings`,
       true
     );
@@ -795,28 +799,48 @@ export async function fetchEndpointSecurityIntents(): Promise<IntunePolicy[]> {
  * independent, so the rest of the baseline still renders and the failure is
  * logged rather than swallowed silently.
  */
-async function safeFetch<T>(label: string, fn: () => Promise<T[]>): Promise<T[]> {
+async function safeFetch<T>(ctx: LoadContext, label: string, fn: (ctx: LoadContext) => Promise<T[]>): Promise<T[]> {
   try {
-    return await fn();
+    return await fn(ctx);
   } catch (err) {
     // Reaching here means a whole category failed even after per-request retries
     // -- so the entire category is missing, not just one item. Surface it.
-    recordWarning(
+    ctx.recordWarning(
       `Could not load ${label} after retries — this entire category is missing from the baseline: ${(err as Error).message}`
     );
     return [];
   }
 }
 
-export async function loadTenantData(): Promise<TenantData> {
+export interface LoadTenantDataOptions {
+  /** Reads Graph through this client -- app-only on the server, delegated in a browser. */
+  client: GraphClient;
+  /** Which source to read: the bundled sample tenant, or the real one via Graph. */
+  mode: TenantMode;
+  /**
+   * Caches the loaded tenant. Owned by the caller because its lifetime is the
+   * caller's: a server process keeps one for its configured TTL and clears it on
+   * refresh, where a browser session's ends with the tab.
+   */
+  cache: TtlCache;
+}
+
+export async function loadTenantData({ client, mode, cache }: LoadTenantDataOptions): Promise<TenantData> {
   // Demo mode serves bundled sample data and never touches Graph. Cache keys are
   // per-mode so switching Demo <-> Connected doesn't require a manual refresh.
-  if (getMode() === "demo") {
+  if (mode === "demo") {
     return cache.getOrFetch("tenant-data:demo", async () => demoTenantData());
   }
   return cache.getOrFetch("tenant-data:connected", async () => {
-    loadWarnings = [];
-    resetGraphStats();
+    const loadWarnings: string[] = [];
+    const ctx: LoadContext = {
+      client,
+      recordWarning: (msg: string) => {
+        loadWarnings.push(msg);
+        console.warn(msg);
+      },
+    };
+    client.resetGraphStats();
     const startedAt = Date.now();
     const [
       deviceConfigs,
@@ -830,16 +854,16 @@ export async function loadTenantData(): Promise<TenantData> {
       autopilotV2,
       assignmentFilters,
     ] = await Promise.all([
-      safeFetch("device configurations", fetchDeviceConfigurations),
-      safeFetch("compliance policies", fetchCompliancePolicies),
-      safeFetch("Settings Catalog policies", fetchSettingsCatalogPolicies),
-      safeFetch("administrative templates", fetchAdminTemplates),
-      safeFetch("platform scripts", fetchPlatformScripts),
-      safeFetch("Windows update profiles", fetchWindowsUpdateProfiles),
-      safeFetch("legacy Endpoint Security (intents)", fetchEndpointSecurityIntents),
-      safeFetch("Autopilot profiles", fetchAutopilotProfiles),
-      safeFetch("Autopilot device preparation policies", fetchAutopilotV2Policies),
-      safeFetch("assignment filters", fetchAssignmentFilters),
+      safeFetch(ctx, "device configurations", fetchDeviceConfigurations),
+      safeFetch(ctx, "compliance policies", fetchCompliancePolicies),
+      safeFetch(ctx, "Settings Catalog policies", fetchSettingsCatalogPolicies),
+      safeFetch(ctx, "administrative templates", fetchAdminTemplates),
+      safeFetch(ctx, "platform scripts", fetchPlatformScripts),
+      safeFetch(ctx, "Windows update profiles", fetchWindowsUpdateProfiles),
+      safeFetch(ctx, "legacy Endpoint Security (intents)", fetchEndpointSecurityIntents),
+      safeFetch(ctx, "Autopilot profiles", fetchAutopilotProfiles),
+      safeFetch(ctx, "Autopilot device preparation policies", fetchAutopilotV2Policies),
+      safeFetch(ctx, "assignment filters", fetchAssignmentFilters),
     ]);
     const autopilotProfiles = [...autopilotV1, ...autopilotV2];
 
@@ -880,10 +904,10 @@ export async function loadTenantData(): Promise<TenantData> {
     // round-trip per group. A referenced group can be gone (a policy still
     // assigned to a deleted group) or unreadable -- in both cases Graph
     // returns no match; label it clearly rather than leaving a bare GUID.
-    const resolved = await mapWithConcurrency(realGroupIds, GRAPH_CONCURRENCY, async (id): Promise<IntuneGroup> => {
+    const resolved = await mapWithConcurrency(realGroupIds, client.concurrency, async (id): Promise<IntuneGroup> => {
       const unresolvedLabel = `⚠ Deleted or inaccessible group (${id.slice(0, 8)}…)`;
       try {
-        const group = await graphGetCollection<Record<string, unknown>>(
+        const group = await client.graphGetCollection<Record<string, unknown>>(
           `/groups?$filter=id eq '${id}'&$select=id,displayName,groupTypes,membershipRule`
         );
         const match = group[0];
@@ -909,9 +933,8 @@ export async function loadTenantData(): Promise<TenantData> {
       }
     }
 
-    lastLoadWarnings = [...loadWarnings];
     const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
-    const s = getGraphStats();
+    const s = client.getGraphStats();
     // Telemetry so a slow load is diagnosable: how many Graph calls, and whether
     // the time went to throttling (429s + retries) vs sheer call volume.
     const detail = `${s.requests} Graph calls, ${s.retries} retried (${s.throttled} throttled, ${s.serverErrors} server errors, ${s.timeouts} timeouts)`;
@@ -925,10 +948,6 @@ export async function loadTenantData(): Promise<TenantData> {
       );
     }
 
-    return { policies, groups, autopilotProfiles, assignmentFilters, warnings: lastLoadWarnings };
+    return { policies, groups, autopilotProfiles, assignmentFilters, warnings: loadWarnings };
   });
-}
-
-export function clearTenantDataCache() {
-  cache.clear();
 }

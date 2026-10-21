@@ -1,6 +1,14 @@
 # Security Policy
 
-Intune Preflight is a **self-hosted, read-only** tool. It authenticates to Microsoft Graph with **application (app-only)** credentials you supply, and it never writes to your tenant. Even so, it handles a tenant-wide read credential, so security reports are taken seriously.
+Intune Preflight is **read-only** and never writes to your tenant. It ships in two shapes with
+different security models, and the distinction matters:
+
+- **Self-hosted** (`apps/server`) — authenticates with **application (app-only)** credentials you
+  supply, and so handles a tenant-wide read credential. **It has no authentication of its own.**
+- **Browser** (the static `build:live` bundle) — no server and no secret; the admin signs in
+  themselves and the token is bounded by their own Intune RBAC.
+
+Security reports are taken seriously for both. Please say which one you are reporting against.
 
 ## Reporting a vulnerability
 
@@ -20,10 +28,22 @@ This is pre-1.0 software. Security fixes land on `main` and the latest release; 
 
 ## Security model & expectations
 
+- **Read-only.** Both builds request only `*.Read.All` Graph scopes and perform no writes. See the permissions table in the [README](README.md).
+- **No telemetry, either way.** There are no external calls beyond Microsoft Graph and Entra login.
+
+### Self-hosted server
+
 - **Credentials stay server-side.** `TENANT_ID` / `CLIENT_ID` / `CLIENT_SECRET` live in `.env`, are read only by the server, and are **never** sent to the browser. `.env*` is git-ignored — never commit it.
-- **Read-only.** The app requests only `*.Read.All` Graph scopes and performs no writes. See the permissions table in the [README](README.md).
-- **No data leaves your infrastructure.** Tenant data is fetched on demand, cached in memory, and served only to your own browser. There is no telemetry and no external calls beyond Microsoft Graph and Entra login.
-- **You run it.** Deploy it somewhere only trusted admins can reach (it is an unauthenticated local/self-hosted app that deliberately exposes the whole tenant's configuration). Do not expose it to the public internet.
+- **No data leaves your infrastructure.** Tenant data is fetched on demand, cached in memory, and served only to your own browser.
+- **It is unauthenticated, and that has not changed.** Deploy it somewhere only trusted admins can reach, and **do not expose it to the public internet.** The sign-in added in 2.2 belongs to the *browser* build; it gives the server nothing. Anyone who can reach the server's port can read the whole tenant's configuration without presenting a credential.
+- **App-only means unfiltered.** It deliberately sees the entire tenant, unscoped by scope tags or admin units, which makes the app registration effectively a tenant-wide read key. Grant only the listed permissions and rotate the secret periodically.
+
+### Browser build
+
+- **There is no secret to protect.** A single-page app is a public client; PKCE replaces the client secret. The tenant and client IDs it keeps in `localStorage` appear in every sign-in URL and are not secrets.
+- **The session is the tab.** The access token lives in `sessionStorage` and goes when the tab closes; a SPA refresh token is capped at 24 hours and cannot be extended. Tenant data is held in memory only and is never written to disk.
+- **It is bounded by the signed-in admin.** Permissions are delegated, so the page can read only what that admin could already read — including their Intune RBAC scope tags — and every read is attributable to them in your sign-in logs.
+- **It is designed to be hosted publicly.** That is the difference from the server build. It still requires an app registration you control and an admin consent you grant.
 
 ## In scope for reports
 

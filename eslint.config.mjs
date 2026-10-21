@@ -77,6 +77,33 @@ export default tseslint.config(
     },
   },
 
+  // The Graph layer must stay browser-portable so the whole app can eventually
+  // run in a tab against a delegated token. It IS the I/O -- unlike the engine --
+  // but only over `fetch`, with the token and cache injected.
+  // packages/graph/src/purity.test.ts asserts the same thing at test time.
+  {
+    files: ["packages/graph/src/**/*.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["node:*", "fs", "path", "os", "crypto", "http", "https", "dns", "child_process"],
+              message:
+                "The Graph layer must stay browser-portable -- it uses fetch and AbortController only. Keep Node APIs in apps/server.",
+            },
+            {
+              group: ["@azure/*", "dotenv", "fastify", "@fastify/*"],
+              message:
+                "Server-only dependency. The Graph client takes an injected getToken; the server supplies the MSAL one.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+
   // Tests are allowed the Node APIs they need to inspect the source tree.
   {
     files: ["**/*.test.ts", "**/*.test.tsx"],
