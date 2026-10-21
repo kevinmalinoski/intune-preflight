@@ -46,6 +46,16 @@ export function EndpointPicker({
 }) {
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState(false);
+  /**
+   * Per-group overrides for whether the membership rule is visible, keyed by
+   * group id. Only groups the admin has actually clicked appear here: everything
+   * else falls back to `showRule`, which opens the rules we could not decide.
+   * Storing the override rather than the state is what lets an auto-opened rule
+   * be closed again without the next render re-opening it.
+   */
+  const [ruleOverrides, setRuleOverrides] = useState<Record<string, boolean>>({});
+  const toggleRule = (id: string, currentlyOpen: boolean) =>
+    setRuleOverrides((prev) => ({ ...prev, [id]: !currentlyOpen }));
 
   // Only show groups that actually have policies (included or excluded) for the
   // simulated OS -- a Windows-only group is noise when simulating macOS, etc. --
@@ -226,7 +236,7 @@ export function EndpointPicker({
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <div
             className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-500"
-            title="Entra security groups this device/user belongs to. Dynamic groups show their membership rule on hover. If a selected group's rule logically implies membership in another dynamic group (e.g. a narrower OrderID prefix), that group is added automatically and shown in amber in the diagram. Entering a Group Tag above auto-selects groups scoped to it."
+            title="Entra security groups this device/user belongs to. Expand “membership rule” on a dynamic group to read the rule that decides whether a device lands in it; rules we could not fully evaluate open on their own. If a selected group's rule logically implies membership in another dynamic group (e.g. a narrower OrderID prefix), that group is added automatically and shown in amber in the diagram. Entering a Group Tag above auto-selects groups scoped to it."
           >
             Entra security groups
             {selectedGroupIds.length > 0 && (
@@ -261,6 +271,14 @@ export function EndpointPicker({
               // a tag match that also hinges on other properties, or an Autopilot
               // "+ conditions" group whose extra condition we can't check).
               const showRule = isConditional || (isMatch && !tm.fullyEvaluated) || isAutopilotConditional;
+              // Every dynamic group's rule is worth being able to read, not just the
+              // ones we could not decide: the rule is what determines whether a real
+              // device lands in the group at all, and an admin judging an assignment
+              // needs it whether or not a Group Tag happens to be typed in. The
+              // undecidable ones still open themselves, because there the rule is a
+              // warning rather than a detail.
+              const canShowRule = Boolean(g.membershipRule);
+              const ruleOpen = ruleOverrides[g.id] ?? showRule;
               const title = isGroupTagRule(g.membershipRule)
                 ? `Autopilot Group Tag group — rule: ${g.membershipRule}`
                 : isAutopilotJoined
@@ -360,13 +378,44 @@ export function EndpointPicker({
                         </span>
                       )}
                     </div>
-                    {showRule && g.membershipRule && (
-                      <div
-                        className="mt-1 truncate border-l border-ink-700 pl-2 font-mono text-[10px] text-slate-500"
-                        title={g.membershipRule}
-                      >
-                        {g.membershipRule}
-                      </div>
+                    {canShowRule && (
+                      <>
+                        {/* `type="button"` and stopping the click matter: this sits
+                            inside the row's <label>, so without both, reading a rule
+                            would also tick the group's checkbox. */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            toggleRule(g.id, ruleOpen);
+                          }}
+                          aria-expanded={ruleOpen}
+                          className="mt-1 inline-flex items-center gap-1 rounded text-[10px] leading-none text-slate-500 transition-colors hover:text-slate-300"
+                          title={ruleOpen ? "Hide the membership rule" : "Show the membership rule"}
+                        >
+                          <svg
+                            width="9"
+                            height="9"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="3"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            className={`shrink-0 transition-transform ${ruleOpen ? "rotate-90" : ""}`}
+                            aria-hidden="true"
+                          >
+                            <path d="M9 18l6-6-6-6" />
+                          </svg>
+                          membership rule
+                        </button>
+                        {ruleOpen && (
+                          <div className="mt-1 break-words border-l border-ink-700 pl-2 font-mono text-[10px] leading-relaxed text-slate-500">
+                            {g.membershipRule}
+                          </div>
+                        )}
+                      </>
                     )}
                   </div>
                 </label>

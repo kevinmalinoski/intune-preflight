@@ -1,0 +1,101 @@
+name: Deploy site
+
+# The GitHub Pages site carries two builds of the app, both under the gh-pages
+# branch:
+#
+#   /demo  the engine running in-browser over the bundled sample tenant
+#   /app   the browser (delegated-auth) build, which reads a real tenant
+#
+# Both are published here, from the same tag, in a single commit. That is
+# deliberate: /demo was automated in v2.0.3 precisely because a hand-deployed
+# page silently lags its release, and /app went out by hand once in v2.2.0 and
+# would have drifted the same way. They are also the same application, so a
+# release where one has a fix and the other does not is worse than either being
+# missing -- two URLs on one site behaving differently, with nothing to warn you.
+#
+# One workflow rather than two, because two jobs pushing to gh-pages on the same
+# tag race each other and the loser's push is rejected. One checkout, one
+# `npm ci`, one commit.
+#
+# Runs on a release tag, or on demand for a mid-cycle refresh.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+# Only the demo/ and app/ subtrees are touched; the landing page, the connect
+# guide and the screenshots at the branch root are left exactly as they are.
+permissions:
+  contents: write
+
+concurrency:
+  group: deploy-site
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build the static demo
+        run: npm run build:demo
+
+      # build:live defaults its --base to /intune-preflight/app/, which is where
+      # this site serves it from. A wrong base is not a soft failure: every asset
+      # 404s and the page comes up blank, so it is asserted below rather than
+      # trusted.
+      - name: Build the browser app
+        run: npm run build:live
+
+      - name: Publish both to gh-pages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          DEMO="$PWD/apps/web/dist-demo"
+          APP="$PWD/apps/web/dist-live"
+          test -f "$DEMO/index.html"
+          test -f "$APP/index.html"
+
+          # The browser build's redirect URI is derived from the base path it was
+          # built for, and it has to match the app registration character for
+          # character. Publishing a bundle built for the wrong base would break
+          # every visitor's sign-in with AADSTS50011, so fail here instead.
+          grep -q '/intune-preflight/app/' "$APP/index.html" || {
+            echo "::error::dist-live was not built for /intune-preflight/app/ — refusing to publish"
+            exit 1
+          }
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Work in a separate worktree so the build output isn't disturbed.
+          git fetch origin gh-pages
+          git worktree add ../pages origin/gh-pages
+          cd ../pages
+
+          # Replace only the two app subtrees, so the landing page, the connect
+          # guide and the screenshots survive.
+          rm -rf demo app
+          mkdir -p demo app
+          cp -R "$DEMO"/. demo/
+          cp -R "$APP"/. app/
+
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "Site is already up to date; nothing to publish."
+            exit 0
+          fi
+
+          git add demo app
+          git commit -m "Deploy demo + app from ${GITHUB_REF_NAME} (${GITHUB_SHA::7})"
+          git push origin HEAD:gh-pages

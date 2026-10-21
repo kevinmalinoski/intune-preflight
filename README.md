@@ -4,17 +4,25 @@
 
 Intune makes you click into every Configuration Profile, Compliance Policy, Settings Catalog policy, and Administrative Template one at a time to work out what actually lands on a device. Intune Preflight connects to your tenant, reads every policy and its assignments, and lets you **simulate an endpoint** — pick an OS, the Entra groups it belongs to, its Autopilot Group Tag, and any Assignment Filters it matches — then computes the full merged CSP-level baseline that endpoint would receive. No hardware, no enrollment, no Policy Sets.
 
-It's **read-only**, and you can run it two ways: open it in a browser tab and sign in with your own admin account — nothing installed, no server, no secret — or **self-host** it with an app registration of your own for the complete, unfiltered view of a tenant. Both run the same engine.
+**Open it and sign in. That is the whole setup.** There is nothing to install, no container to run and no server to deploy, because there isn't one: the page is the only thing you download, and your tenant's configuration goes from Microsoft Graph straight into your browser tab and nowhere else. No client secret is ever created, since a single-page app can't hold one. Every permission it asks for ends in `.Read.All`, so it cannot change anything in your tenant.
+
+Prefer to run it on your own infrastructure? It **self-hosts** exactly as it always has, with application credentials in your own `.env`. That mode sees the entire tenant unfiltered, which a signed-in admin does not. Same code, same engine, your choice.
 
 ![Intune Preflight — endpoint simulator](docs/img/01-simulator-overview.png)
 
 _Pick an OS and the Entra groups an endpoint belongs to, and see exactly which policies apply as a connected diagram: endpoint → Autopilot → groups → policies._
 
-## Try it in 30 seconds (demo mode)
+## Try it now
 
-**▶️ Try the live demo in your browser — [kevinmalinoski.github.io/intune-preflight/demo](https://kevinmalinoski.github.io/intune-preflight/demo/)** — the full tool running over a bundled sample tenant, entirely in your browser (no backend, nothing leaves the page). Best on a desktop-sized screen.
+**▶️ [Open Intune Preflight](https://kevinmalinoski.github.io/intune-preflight/app/)** — sign in with your own admin account to read your tenant, or explore the bundled sample tenant with no sign-in at all. Best on a desktop-sized screen.
 
-Or run it yourself — no tenant and no app registration required, it ships with a **bundled sample tenant**. Clone the repo, or download the [latest release](https://github.com/kevinmalinoski/intune-preflight/releases/latest):
+Connecting your own tenant takes one PowerShell script and about three minutes: **[walkthrough →](https://kevinmalinoski.github.io/intune-preflight/connect/)**
+
+There is also a **[sign-in-free demo](https://kevinmalinoski.github.io/intune-preflight/demo/)** over the same sample tenant, if you want to send someone a link with nothing to decide.
+
+### Or run it on your own machine
+
+No tenant and no app registration required — it ships with a **bundled sample tenant**. Clone the repo, or download the [latest release](https://github.com/kevinmalinoski/intune-preflight/releases/latest):
 
 ```bash
 npm install
@@ -36,11 +44,11 @@ All three run the **same engine** — `packages/engine` is pure and I/O-free, an
 | **Sees** | bundled sample tenant | the tenant, as scoped to **your** Intune RBAC | the **entire** tenant, unfiltered |
 | **Data at rest** | — | nothing; dies with the tab | in-memory cache on your server |
 
-**Browser mode is the quickest way in** — open a page, sign in, read your tenant. Nothing is installed, there is no server, and no secret exists anywhere, because a single-page app is a public client and PKCE replaces it.
+The row that decides it for most people is **Sees**. Browser mode signs you in as yourself, so it reads exactly what you could already read: if your Intune role carries scope tags, the preflight carries them too. For an unscoped admin that is the whole tenant and the two modes agree. For a scoped one, only app-only returns the complete picture — which is the reason self-hosting still exists rather than a leftover from before.
 
-**Self-hosting is always available, and is still the thorough option.** App-only credentials are the only way to get the complete picture: a delegated token is bounded by the signed-in admin's Intune RBAC, so a scoped admin sees their slice rather than the tenant. It is also the fallback for tenants whose Conditional Access won't pass a single-page app. Nothing about it changed in 2.2 — same `.env`, same Docker images, same behaviour.
+Self-hosting is also the answer when Conditional Access won't issue a token to a single-page app. Nothing about it changed in 2.2: same `.env`, same Docker images, same behaviour.
 
-➡️ **[Full setup guide — app registration, browser mode, config, Docker](docs/SETUP.md)**
+➡️ **[Connect your tenant — three-minute walkthrough](https://kevinmalinoski.github.io/intune-preflight/connect/)** · **[Full setup guide — app registration, browser mode, config, Docker](docs/SETUP.md)**
 
 There is also a **browser mode**: a static build with no backend, where an admin signs in with their own account and the page reads the tenant directly from Graph with delegated, read-only permissions and no client secret. ➡️ **[Browser mode setup](docs/SETUP.md#browser-mode--sign-in-as-yourself-no-backend)**
 

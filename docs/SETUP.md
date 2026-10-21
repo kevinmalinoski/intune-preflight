@@ -1,11 +1,24 @@
 # Setup
 
-Everything needed to point Intune Preflight at your own tenant. If you just want to try it, you don't need any of this — see **[demo mode](../README.md#try-it-in-30-seconds-demo-mode)**.
+Everything needed to point Intune Preflight at your own tenant. If you only want to look
+around, you need none of it — the [sample tenant](https://kevinmalinoski.github.io/intune-preflight/demo/)
+needs no sign-in and no app registration.
 
+**There are two setups here, and you only need one.**
+
+| | What it costs you | Read this |
+|---|---|---|
+| **Browser** | one app registration, about 3 minutes. Nothing installed. | [Browser mode](#browser-mode--sign-in-as-yourself-no-backend), or the [walkthrough with a copy-paste script](https://kevinmalinoski.github.io/intune-preflight/connect/) |
+| **Self-hosted** | an app registration with a client secret, plus Docker or Node on a host you run | [Requirements](#requirements) onward |
+
+Browser mode is the faster path and reads your tenant as *you* — scope tags and all.
+Self-hosting uses application credentials and is the only way to see a tenant unfiltered.
+Both run the same engine.
+
+- [Browser mode — sign in as yourself, no backend](#browser-mode--sign-in-as-yourself-no-backend)
 - [Requirements](#requirements)
 - [Who can install this — required Entra roles](#who-can-install-this--required-entra-roles)
 - [1. Create an Entra app registration](#1-create-an-entra-app-registration)
-- [Browser mode — sign in as yourself, no backend](#browser-mode--sign-in-as-yourself-no-backend)
 - [2. Configure](#2-configure)
 - [3. Run](#3-run)
 - [Project layout](#project-layout)
@@ -13,6 +26,9 @@ Everything needed to point Intune Preflight at your own tenant. If you just want
 - [Troubleshooting](#troubleshooting)
 
 ## Requirements
+
+These are the **self-hosted** requirements. Browser mode needs none of them — no Node, no
+Docker, no host.
 
 - **Node.js 20+** (for the npm path), or **Docker** (recommended for a real deployment)
 - An **Entra app registration** with the read-only Graph permissions below

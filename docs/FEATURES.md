@@ -5,7 +5,7 @@ A walkthrough of what Intune Preflight does. Two surfaces: the **Endpoint Prefli
 > Everything here is read-only. The tool never writes to your tenant.
 
 - [Endpoint Preflight — the simulator](#endpoint-preflight--the-simulator)
-- [Assignment Manifest](#assignment-manifest--new-in-v1)
+- [Assignment Manifest](#assignment-manifest)
 
 ---
 

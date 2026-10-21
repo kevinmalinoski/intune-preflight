@@ -6,6 +6,39 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [2.2.1] — 2026-10-21
+
+Follow-up to the same day's 2.2.0. The picker now lets you read any dynamic
+group's membership rule, the site deploys its two app builds together so they
+cannot drift apart, and the docs stop describing the tool as self-hosted.
+
+### Added
+- **Any dynamic group's membership rule can be read**, through a collapsed
+  disclosure under the group name. It was previously shown only when the rule
+  could not be fully decided, and every one of those triggers needs a Group Tag
+  typed in or the Autopilot box ticked — so an untouched picker showed no rules
+  at all. The demo looked more informative than a connected tenant only because
+  its sample data contains more undecidable rules. Rules we cannot decide still
+  open themselves, because there the rule is a warning rather than a detail.
+
+### Fixed
+- **A long membership rule was truncated at the panel edge**, which hid the
+  `and` clauses on exactly the rules worth reading. It wraps now.
+- **Two stale documentation anchors**, one of which predated this release.
+
+### Changed
+- **`/demo` and `/app` now deploy from the same tag, in one commit.** `/demo`
+  has redeployed itself since v2.0.3; `/app` shipped by hand in 2.2.0 with no
+  workflow, so the next tag would have refreshed one and left the other behind —
+  two URLs on one site, the same application, quietly on different code. The
+  workflow also refuses to publish a browser build compiled for the wrong base
+  path, which would otherwise break every visitor's sign-in with `AADSTS50011`
+  while looking perfectly healthy in CI.
+- **The README and setup guide lead with what the browser build removes**, rather
+  than opening on a choice between two ways to run it. Self-hosting is framed as
+  the deliberate option it is: the only mode that sees a tenant unfiltered, and
+  the answer when Conditional Access won't issue a token to a single-page app.
+
 ## [2.2.0] — 2026-10-21
 
 Intune Preflight can now run **entirely in a browser tab**. An admin opens a URL,
