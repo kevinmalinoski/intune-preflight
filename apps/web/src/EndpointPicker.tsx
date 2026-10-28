@@ -7,6 +7,7 @@ import {
   isAutopilotJoinedRule,
 } from "@intune-preflight/shared";
 import type { AssignmentFilter, GroupSummary, Platform } from "@intune-preflight/shared";
+import { isCompact } from "./viewport.ts";
 
 const PLATFORM_OPTIONS: { value: Platform; label: string }[] = [
   { value: "windows", label: "Windows" },
@@ -45,7 +46,11 @@ export function EndpointPicker({
   loading?: boolean;
 }) {
   const [search, setSearch] = useState("");
-  const [collapsed, setCollapsed] = useState(false);
+  // Open on a desktop, folded away on a narrow window -- where expanded it
+  // would take the whole viewport and leave the diagram nothing. Read once, at
+  // mount, so rotating the device (or opening the Split View wider) never
+  // reaches in and undoes a choice the admin has since made here.
+  const [collapsed, setCollapsed] = useState(isCompact);
   /**
    * Per-group overrides for whether the membership rule is visible, keyed by
    * group id. Only groups the admin has actually clicked appear here: everything
@@ -172,19 +177,25 @@ export function EndpointPicker({
         <span className="shrink-0 rounded-md border border-ink-700 px-2.5 py-1 text-xs text-slate-300">Collapse ▴</span>
       </div>
 
-      {/* 3-column control row */}
-      <div className="flex gap-4">
+      {/* 3-column control row on a desktop; one stacked column below `lg`,
+          where the three of them used to overlap each other. The expanded body
+          is capped and scrolls there too, so the picker can never grow past the
+          window and squeeze the diagram out of existence. */}
+      <div className="flex max-h-[45vh] flex-col gap-4 overflow-y-auto lg:max-h-none lg:flex-row lg:overflow-visible">
         {/* Col 1: Platform + Autopilot */}
-        <div className="flex flex-col gap-2 w-48 shrink-0">
+        <div className="flex w-full flex-col gap-2 lg:w-48 lg:shrink-0">
           <div>
             <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-500">Platform</div>
-            <div className="flex flex-col rounded-lg border border-ink-700 bg-ink-800 p-0.5">
+            {/* Two-up below `lg`: four full-width rows is a lot of height to
+                spend on the first control, and "iOS / iPadOS" doesn't fit at a
+                quarter of a phone's width. */}
+            <div className="grid grid-cols-2 gap-1 rounded-lg border border-ink-700 bg-ink-800 p-0.5 lg:flex lg:flex-col lg:gap-0">
               {PLATFORM_OPTIONS.map((opt) => (
                 <button
                   key={opt.value}
                   onClick={() => onTogglePlatform(opt.value)}
                   title={`Show only ${opt.label} policies`}
-                  className={`rounded px-2.5 py-1 text-left text-xs font-medium transition-colors ${
+                  className={`rounded px-2.5 py-2 text-center text-xs font-medium transition-colors lg:py-1 lg:text-left ${
                     platform === opt.value ? "bg-sky-500/20 text-sky-300" : "text-slate-400 hover:text-slate-200"
                   }`}
                 >
@@ -251,7 +262,10 @@ export function EndpointPicker({
             placeholder="Search groups…"
             className="mb-1 w-full rounded-md border border-ink-700 bg-ink-800 px-2.5 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 focus:border-sky-400 focus:outline-none"
           />
-          <div className="overflow-y-auto rounded-md border border-ink-700" style={{ maxHeight: "176px" }}>
+          {/* Taller below `lg`: this list sits inside a scrolling picker there,
+              and two nested scrollers 176px tall is a miserable way to find a
+              group on a phone. */}
+          <div className="max-h-72 overflow-y-auto rounded-md border border-ink-700 lg:max-h-44">
             {sortedGroups.map((g) => {
               const tm = trimmedGroupTag
                 ? classifyGroupTagMatch(g.membershipRule, trimmedGroupTag)
@@ -292,7 +306,7 @@ export function EndpointPicker({
               return (
                 <label
                   key={g.id}
-                  className={`flex items-start gap-2.5 border-b border-l-2 border-ink-800 px-2.5 py-2 text-xs last:border-b-0 transition-colors ${
+                  className={`flex items-start gap-2.5 border-b border-l-2 border-ink-800 px-2.5 py-3 text-xs last:border-b-0 transition-colors lg:py-2 ${
                     highlight ? "border-l-amber-400/60 bg-amber-500/[0.06]" : "border-l-transparent"
                   } ${locked ? "cursor-default" : "cursor-pointer"} hover:bg-ink-800`}
                   title={
@@ -433,8 +447,9 @@ export function EndpointPicker({
           </div>
         </div>
 
-        {/* Col 3: Device Filters -- least-used, pushed to the far right */}
-        <div className="flex flex-col gap-1 w-56 shrink-0">
+        {/* Col 3: Device Filters -- least-used, pushed to the far right (and
+            to the bottom of the stack below `lg`, for the same reason) */}
+        <div className="flex w-full flex-col gap-1 lg:w-56 lg:shrink-0">
           <div
             className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-500"
             title="Which Intune Assignment Filters this device matches. A device can match multiple filters simultaneously (e.g. Kiosk Devices + Corporate Owned). Policies whose assignments include/exclude these filters are resolved accordingly."
@@ -446,11 +461,11 @@ export function EndpointPicker({
               No filters for this platform
             </div>
           ) : (
-            <div className="overflow-y-auto rounded-md border border-ink-700" style={{ maxHeight: "176px" }}>
+            <div className="max-h-72 overflow-y-auto rounded-md border border-ink-700 lg:max-h-44">
               {platformFilters.map((f) => (
                 <label
                   key={f.id}
-                  className="flex cursor-pointer items-start gap-2 border-b border-ink-800 px-2.5 py-1.5 text-xs last:border-b-0 hover:bg-ink-800"
+                  className="flex cursor-pointer items-start gap-2 border-b border-ink-800 px-2.5 py-2.5 text-xs last:border-b-0 hover:bg-ink-800 lg:py-1.5"
                   title={f.rule}
                 >
                   <input

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
   ReactFlow,
   Background,
@@ -12,6 +12,7 @@ import "@xyflow/react/dist/style.css";
 import type { SimulationResult } from "@intune-preflight/shared";
 import type { BaselineScope } from "./SimulationBaselinePanel.tsx";
 import { toggled } from "./collections.ts";
+import { isCompact, subscribeLayout } from "./viewport.ts";
 import { buildGraph } from "./diagram/buildGraph.ts";
 import { EndpointStackNode, GroupNode, PolicyNode, PolicyTypeNode } from "./diagram/nodes.tsx";
 import { AUTOPILOT_COLOR, KIND_COLOR, KIND_LABEL, KIND_ORDER, STATUS_DOT } from "./diagram/theme.ts";
@@ -31,7 +32,7 @@ const nodeTypes = {
 // diagram/buildGraph.ts (the layout engine that turns a simulation into nodes
 // and edges).
 
-function Legend() {
+function Legend({ compact }: { compact: boolean }) {
   // A key for the policy colors only. Group nodes label themselves (Selected /
   // Always applies / Implied / Hidden badges), so they don't belong here.
   // Derived from the same theme the nodes render with, in the same order the
@@ -44,17 +45,46 @@ function Legend() {
     { color: STATUS_DOT.excluded, label: "Excluded" },
     { color: STATUS_DOT.unassigned, label: "Unassigned (Waitlist)" },
   ];
+  const [open, setOpen] = useState(false);
+
+  const chips = (
+    <div className="flex flex-wrap gap-x-3 gap-y-1.5">
+      {items.map((item) => (
+        <div key={item.label} className="flex items-center gap-1.5 text-[10px] text-slate-400">
+          <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
+          {item.label}
+        </div>
+      ))}
+    </div>
+  );
+
+  // Nine chips pinned open cover a third of a phone's canvas, and the canvas is
+  // the whole point. Below `lg` they go behind a button instead.
+  if (compact) {
+    return (
+      <div className="absolute bottom-3 left-3 z-10 flex max-w-[calc(100%-5rem)] flex-col items-start gap-2">
+        {open && (
+          <div className="rounded-lg border border-ink-700 bg-ink-900/95 px-3 py-2 shadow-2xl backdrop-blur">
+            <div className="mb-1 text-[9px] font-medium uppercase tracking-wide text-slate-500">Policy types</div>
+            {chips}
+          </div>
+        )}
+        <button
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          title="What the colours mean"
+          className="rounded-md border border-ink-700 bg-ink-900/90 px-2.5 py-1.5 text-[11px] text-slate-300 backdrop-blur hover:bg-ink-800"
+        >
+          ⌕ Key
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="pointer-events-none absolute bottom-3 left-3 z-10 max-w-xs rounded-lg border border-ink-700 bg-ink-900/90 px-3 py-2 backdrop-blur">
       <div className="mb-1 text-[9px] font-medium uppercase tracking-wide text-slate-500">Policy types</div>
-      <div className="flex flex-wrap gap-x-3 gap-y-1.5">
-        {items.map((item) => (
-          <div key={item.label} className="flex items-center gap-1.5 text-[10px] text-slate-400">
-            <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
-            {item.label}
-          </div>
-        ))}
-      </div>
+      {chips}
     </div>
   );
 }
@@ -63,11 +93,22 @@ export function SimulationDiagram({
   simulation,
   deviceFilterNames = [],
   onOpenBaseline,
+  focus = false,
 }: {
   simulation: SimulationResult;
   deviceFilterNames?: string[];
   onOpenBaseline?: (scope: BaselineScope) => void;
+  /** Focus mode: the diagram has the whole window and the pickers are gone. */
+  focus?: boolean;
 }) {
+  const compact = useSyncExternalStore(subscribeLayout, isCompact, () => false);
+  // Dragging nodes and panning the canvas are the same gesture on a touch
+  // screen, and panning is the one you actually want -- a tap still hides a
+  // group, which is the only thing a node needs to be good for here.
+  const nodesDraggable = !compact && !focus;
+  // A portrait canvas needs more slack than the wide one these numbers were
+  // tuned on, or the graph lands with its edges against the bezel.
+  const fitPadding = compact ? 0.25 : 0.15;
   // Groups the user has toggled off on the diagram. Hiding a group hides the
   // policies that come ONLY through it (policies shared with a still-visible
   // group stay). Works on the All Devices / All Users buckets too.
@@ -178,13 +219,13 @@ export function SimulationDiagram({
     }
     let second = 0;
     const first = requestAnimationFrame(() => {
-      second = requestAnimationFrame(() => void rf.fitView({ padding: 0.15, duration: 260 }));
+      second = requestAnimationFrame(() => void rf.fitView({ padding: fitPadding, duration: 260 }));
     });
     return () => {
       cancelAnimationFrame(first);
       cancelAnimationFrame(second);
     };
-  }, [rf, nodeSignature]);
+  }, [rf, nodeSignature, fitPadding]);
 
   const onNodeClick: NodeMouseHandler = useCallback((_evt, node) => {
     if (node.type !== "entraGroup") return;
@@ -203,16 +244,17 @@ export function SimulationDiagram({
         onNodeClick={onNodeClick}
         onInit={setRf}
         fitView
-        fitViewOptions={{ padding: 0.15 }}
+        fitViewOptions={{ padding: fitPadding }}
         proOptions={{ hideAttribution: true }}
         selectNodesOnDrag={false}
+        nodesDraggable={nodesDraggable}
         minZoom={0.2}
         defaultEdgeOptions={{ type: "default" }}
       >
         <Background color="#1e293b" gap={28} size={1} />
         <Controls showInteractive={false} position="bottom-right" />
       </ReactFlow>
-      <Legend />
+      <Legend compact={compact} />
       <div className="absolute left-3 top-3 z-10 flex flex-col items-start gap-2">
         <button
           onClick={() => setGrouped((g) => !g)}
@@ -231,7 +273,9 @@ export function SimulationDiagram({
             Show all groups ({hiddenGroupIds.size} hidden)
           </button>
         ) : (
-          <div className="pointer-events-none rounded-md border border-ink-700/60 bg-ink-900/70 px-2.5 py-1 text-[10px] text-slate-500 backdrop-blur">
+          // Desktop only: it costs canvas a phone hasn't got, and "click" is
+          // the wrong verb on the device that can least afford the advice.
+          <div className="pointer-events-none hidden rounded-md border border-ink-700/60 bg-ink-900/70 px-2.5 py-1 text-[10px] text-slate-500 backdrop-blur lg:block">
             Tip: click a group to hide its policies
           </div>
         )}

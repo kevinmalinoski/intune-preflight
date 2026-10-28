@@ -1,4 +1,4 @@
-import type { CspSetting, Platform } from "@intune-preflight/shared";
+import type { CspSetting, Platform, ResolutionRule } from "@intune-preflight/shared";
 import { crosswalkTemplateSetting, normalizeCspNode } from "./crosswalk.js";
 
 // Metadata fields present on most Graph device-management resources that aren't
@@ -91,6 +91,46 @@ const ADDITIVE_TYPE_KEYWORDS = [
 function isAdditivePolicyType(odataType: string | undefined): boolean {
   const type = (odataType ?? "").toLowerCase();
   return ADDITIVE_TYPE_KEYWORDS.some((keyword) => type.includes(keyword));
+}
+
+/**
+ * Policy types whose settings DO get compared across policies -- unlike the
+ * additive types above -- but which don't resolve a disagreement by one policy
+ * overriding another. Reporting those as conflicts says "Intune applies neither
+ * value", which is what a conflict means everywhere else in this tool and is
+ * simply false here: each of these resolves under a documented rule instead.
+ * See ResolutionRule for the rule each one follows, with its Learn citation.
+ *
+ * Matched as substrings against the @odata.type, like ADDITIVE_TYPE_KEYWORDS,
+ * because the resolution model follows the Graph resource type and NOT
+ * `PolicyKind` -- Windows Update profiles are all ingested as
+ * `deviceConfiguration` (see fetchWindowsUpdateProfiles), so the kind can't tell
+ * a feature update profile from an update ring.
+ *
+ * Deliberately NOT listed: `windowsUpdateForBusinessConfiguration` (update
+ * rings). Rings are the one Windows Update type that genuinely IS a plain
+ * conflict -- Microsoft documents an alert and that "neither policy will be set
+ * until the conflict is resolved" -- so a blanket "update policies aren't
+ * conflicts" rule would be wrong. None of the keywords below is a substring of
+ * it, which is what keeps rings on the conflict path.
+ */
+const RESOLUTION_TYPE_RULES: { keyword: string; rule: ResolutionRule }[] = [
+  { keyword: "windowsfeatureupdateprofile", rule: "latest-version-wins" },
+  { keyword: "windowsdriverupdateprofile", rule: "approved-wins" },
+  { keyword: "windowsqualityupdateprofile", rule: "undocumented" },
+  // Every platform's variant -- windows10CompliancePolicy, macOSCompliancePolicy,
+  // androidWorkProfileCompliancePolicy, ... Compliance is the one entry
+  // identifiable by PolicyKind too, but keying it here keeps one table.
+  { keyword: "compliancepolicy", rule: "most-restrictive-wins" },
+];
+
+/**
+ * The documented resolution rule for a policy type, or undefined when the type
+ * resolves the ordinary way (one policy overriding another -> a real conflict).
+ */
+export function resolutionRuleFor(odataType: string | undefined): ResolutionRule | undefined {
+  const type = (odataType ?? "").toLowerCase();
+  return RESOLUTION_TYPE_RULES.find((r) => type.includes(r.keyword))?.rule;
 }
 
 /**
@@ -217,6 +257,10 @@ export function flattenToCspSettings(raw: Record<string, unknown>): CspSetting[]
   // unset defaults must be dropped -- otherwise a profile reports settings it
   // never configured (see isUnsetTemplateDefault / isFixedSchemaTemplateType).
   const suppressUnsetDefaults = isFixedSchemaTemplateType(raw["@odata.type"] as string | undefined);
+  // Does this type resolve a cross-policy disagreement by something other than
+  // one policy overriding another? Classified here, once, from the resource type
+  // -- the merge reads it off the setting rather than re-deriving the type.
+  const resolution = resolutionRuleFor(raw["@odata.type"] as string | undefined);
   const policyId = (raw["id"] as string) ?? "";
   const settings: CspSetting[] = [];
   for (const [key, value] of Object.entries(raw)) {
@@ -242,6 +286,7 @@ export function flattenToCspSettings(raw: Record<string, unknown>): CspSetting[]
       value: stringValue,
       cspNode: cw?.cspNode,
       cspNodeValue: cw?.cspNodeValue,
+      resolution,
     });
   }
   return settings;

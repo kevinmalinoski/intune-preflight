@@ -11,6 +11,7 @@ import type {
   GroupSummary,
   IntuneGroup,
   IntunePolicy,
+  LayeredSetting,
   Platform,
   PolicyKind,
   PolicyOverlap,
@@ -20,7 +21,7 @@ import type {
   SimulationResult,
   UnassignedPolicy,
 } from "@intune-preflight/shared";
-import { UNASSIGNED_SOURCE_GROUP } from "@intune-preflight/shared";
+import { resolutionRuleLabel, UNASSIGNED_SOURCE_GROUP } from "@intune-preflight/shared";
 import type { TenantData } from "./tenantData.js";
 import { ruleImplies, VIRTUAL_GROUP_ALL_DEVICES, VIRTUAL_GROUP_ALL_USERS } from "./normalize.js";
 
@@ -56,15 +57,28 @@ function appliesTo(policy: IntunePolicy, groupIds: string[]): boolean {
 }
 
 /**
- * When multiple applied policies set the same CSP setting, only a genuine
- * disagreement (different values) is a Conflict. Multiple policies setting
- * the same value to the same thing is not a conflict -- it's redundant
- * configuration, tracked separately as a Policy Overlap so it doesn't get
- * lost among real conflicts but also isn't reported as a false alarm.
+ * When multiple applied policies set the same CSP setting, the outcome falls
+ * into exactly one of three buckets:
+ *
+ *   Conflict -- they disagree, and the policy type resolves that by one policy
+ *     overriding another, which Intune refuses to do: it reports a conflict and
+ *     applies NEITHER value until an admin resolves it.
+ *   Layered  -- they disagree, but the type resolves it under a documented rule
+ *     instead (feature update profiles take the latest version, compliance
+ *     policies the most restrictive, ...). Calling that a conflict would tell an
+ *     admin the device is stuck when it isn't. See LayeredSetting.
+ *   Overlap  -- they agree. Not a disagreement at all, just redundant
+ *     configuration, tracked separately so it doesn't get lost among real
+ *     conflicts and isn't reported as a false alarm. Agreement is redundancy
+ *     whatever the type's resolution rule, so this arm is reached regardless.
+ *
+ * No bucket computes a winner. A layered finding names the rule and lists every
+ * contributing value with equal standing -- it does not apply the rule.
  */
 function mergeSettings(policies: IntunePolicy[]): {
   settings: BaselineSetting[];
   conflicts: ConflictingSetting[];
+  layered: LayeredSetting[];
   overlaps: PolicyOverlap[];
 } {
   const bySettingId = new Map<string, BaselineSetting[]>();
@@ -85,32 +99,46 @@ function mergeSettings(policies: IntunePolicy[]): {
 
   const settings: BaselineSetting[] = [];
   const conflicts: ConflictingSetting[] = [];
+  const layered: LayeredSetting[] = [];
   const overlaps: PolicyOverlap[] = [];
   for (const [settingId, entries] of bySettingId) {
     const distinctValues = new Set(entries.map((e) => e.value));
+    const disagrees = distinctValues.size > 1;
+    // A setting's resolution rule comes from its policy TYPE, and the settingId
+    // is namespaced by that type (`<typeKey>:<key>`) -- so every entry in a
+    // bucket necessarily carries the same rule. Requiring them to agree makes
+    // that a checked assumption rather than an assumed one: a mixed bucket
+    // falls back to `undefined`, i.e. the conservative "this is a conflict"
+    // reading, rather than silently adopting whichever entry came first.
+    const rules = new Set(entries.map((e) => e.resolution));
+    const rule = rules.size === 1 ? entries[0].resolution : undefined;
     // ONE baseline row per setting. When the contributing policies disagree,
     // that row is the first one reached -- an arbitrary pick, not a computed
-    // winner -- so flag it. The UI and CSV expand the disagreement to a row per
-    // value; `conflicted` is what stops a JSON/API consumer reading this single
-    // `value` as the effective one. See BaselineSetting.conflicted.
-    settings.push(distinctValues.size > 1 ? { ...entries[0], conflicted: true } : entries[0]);
-    if (distinctValues.size > 1) {
-      conflicts.push({
-        settingId,
-        cspArea: entries[0].cspArea,
-        displayName: entries[0].displayName,
-        values: entries.map((e) => ({
-          value: e.value,
-          sourcePolicyId: e.sourcePolicyId,
-          sourcePolicyName: e.sourcePolicyName,
-          sourceKind: e.sourceKind,
-        })),
-      });
+    // winner -- so flag it. That is as true of a layered setting as a conflicted
+    // one: `layered` does NOT mean `value` is what the rule would select. The UI
+    // and CSV expand either kind of disagreement to a row per value; the flags
+    // are what stop a JSON/API consumer reading this single `value` as the
+    // effective one. See BaselineSetting.conflicted / .layered.
+    const flagged: BaselineSetting = !disagrees
+      ? entries[0]
+      : rule
+        ? { ...entries[0], layered: true }
+        : { ...entries[0], conflicted: true };
+    settings.push(flagged);
+    const common = { settingId, cspArea: entries[0].cspArea, displayName: entries[0].displayName };
+    const contributors = entries.map((e) => ({
+      value: e.value,
+      sourcePolicyId: e.sourcePolicyId,
+      sourcePolicyName: e.sourcePolicyName,
+      sourceKind: e.sourceKind,
+    }));
+    if (disagrees && rule) {
+      layered.push({ ...common, rule, values: contributors });
+    } else if (disagrees) {
+      conflicts.push({ ...common, values: contributors });
     } else if (entries.length > 1) {
       overlaps.push({
-        settingId,
-        cspArea: entries[0].cspArea,
-        displayName: entries[0].displayName,
+        ...common,
         value: entries[0].value,
         sourcePolicies: entries.map((e) => ({
           sourcePolicyId: e.sourcePolicyId,
@@ -120,7 +148,7 @@ function mergeSettings(policies: IntunePolicy[]): {
       });
     }
   }
-  return { settings, conflicts, overlaps };
+  return { settings, conflicts, layered, overlaps };
 }
 
 export function listGroupSummaries(data: TenantData): GroupSummary[] {
@@ -528,7 +556,7 @@ export function computeSimulation(
   }
 
   const appliedPolicyObjs = candidatePolicies.filter((p) => policies.some((sp) => sp.id === p.id));
-  const { settings, conflicts, overlaps } = mergeSettings(appliedPolicyObjs);
+  const { settings, conflicts, layered, overlaps } = mergeSettings(appliedPolicyObjs);
 
   // Conflict AND overlap detection is only trustworthy on Windows today. Other
   // platforms share profile metadata (macOS .mobileconfig deploymentChannel,
@@ -540,17 +568,20 @@ export function computeSimulation(
   // (every applied setting) is still shown on all platforms.
   const isWindows = options.platform === "windows";
   const platformConflicts = isWindows ? conflicts : [];
+  const platformLayered = isWindows ? layered : [];
   const platformOverlaps = isWindows ? overlaps : [];
   const crossModel = isWindows ? detectCrossModel(settings) : [];
-  // `conflicted` follows the same platform gate, so the flag on a setting always
-  // pairs with an entry in `conflicts` it can be cross-referenced against. Left
-  // set off Windows it would point at a deliberately empty list.
+  // `conflicted` and `layered` follow the same platform gate, so a flag on a
+  // setting always pairs with an entry in `conflicts` / `layered` it can be
+  // cross-referenced against. Left set off Windows they would point at a
+  // deliberately empty list.
   const platformSettings = isWindows
     ? settings
     : settings.map((s) => {
-        if (!s.conflicted) return s;
-        const { conflicted, ...rest } = s;
+        if (!s.conflicted && !s.layered) return s;
+        const { conflicted, layered: isLayered, ...rest } = s;
         void conflicted;
+        void isLayered;
         return rest;
       });
 
@@ -561,6 +592,7 @@ export function computeSimulation(
     excludedPolicies,
     settings: platformSettings,
     conflicts: platformConflicts,
+    layered: platformLayered,
     overlaps: platformOverlaps,
     crossModel,
   };
@@ -659,8 +691,13 @@ export function simulationToCsv(simulation: SimulationResult): string {
     "Policy Type",
     "Conflict",
     "Policy Overlap",
+    // Blank unless the row is a layered disagreement, where it names the rule
+    // that resolves it. Deliberately the RULE and not a winner: every
+    // contributing value still gets its own row, none of them marked effective.
+    "Resolution",
   ];
   const conflictsBySettingId = new Map(simulation.conflicts.map((c) => [c.settingId, c]));
+  const layeredBySettingId = new Map(simulation.layered.map((l) => [l.settingId, l]));
   const overlapsBySettingId = new Map(simulation.overlaps.map((o) => [o.settingId, o]));
 
   const rows: string[][] = [];
@@ -681,6 +718,27 @@ export function simulationToCsv(simulation: SimulationResult): string {
           v.sourceKind,
           "yes",
           "no",
+          "",
+        ]);
+      }
+      continue;
+    }
+    const layered = layeredBySettingId.get(s.settingId);
+    if (layered) {
+      // A disagreement, like a conflict, so it expands the same way -- but NOT
+      // flagged as one: these resolve on the device under `rule` rather than
+      // being refused, and "Conflict: yes" in a spreadsheet is acted on.
+      for (const v of layered.values) {
+        rows.push([
+          layered.cspArea,
+          layered.displayName,
+          path,
+          v.value,
+          v.sourcePolicyName,
+          v.sourceKind,
+          "no",
+          "no",
+          resolutionRuleLabel(layered.rule),
         ]);
       }
       continue;
@@ -699,11 +757,12 @@ export function simulationToCsv(simulation: SimulationResult): string {
           sp.sourceKind,
           "no",
           "yes",
+          "",
         ]);
       }
       continue;
     }
-    rows.push([s.cspArea, s.displayName, path, s.value, s.sourcePolicyName, s.sourceKind, "no", "no"]);
+    rows.push([s.cspArea, s.displayName, path, s.value, s.sourcePolicyName, s.sourceKind, "no", "no", ""]);
   }
 
   return [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");

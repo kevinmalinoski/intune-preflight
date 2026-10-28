@@ -26,6 +26,84 @@ export interface IntuneGroup {
   membershipRule?: string;
 }
 
+/**
+ * How two or more policies that configure the SAME setting resolve on the
+ * device, when the answer is NOT "one policy overrides another".
+ *
+ * Conflict detection assumes the override model, and for most policy types that
+ * is right: Intune reports a conflict and applies NEITHER value until an admin
+ * resolves it. The rules below are the documented exceptions, where several
+ * policies configuring one setting is resolved rather than refused -- so
+ * reporting a conflict would claim the device is stuck when it isn't.
+ *
+ * Naming the rule is as far as this goes. The tool does NOT apply it and does
+ * NOT compute a winner from it -- see LayeredSetting.
+ */
+export type ResolutionRule =
+  /**
+   * Windows Feature Update profiles. Windows Update evaluates every applicable
+   * policy and offers only one feature update at a time, "always ... the latest
+   * applicable version" -- bounded by the build the device already runs, since a
+   * feature update policy never downgrades a device. NOT cumulative, and not a
+   * refusal to apply.
+   * learn.microsoft.com/intune/device-updates/windows/configure-feature-update-policy#how-feature-update-policies-are-evaluated
+   */
+  | "latest-version-wins"
+  /**
+   * Device compliance policies: "If a compliance policy evaluates against the
+   * same setting in another compliance policy, then the most restrictive
+   * compliance policy setting applies."
+   * learn.microsoft.com/intune/device-configuration/troubleshoot-device-profiles#conflicts
+   */
+  | "most-restrictive-wins"
+  /**
+   * Windows Driver Update profiles, per update: "Because the status of approved
+   * always wins, the driver installs on the device despite any other status for
+   * that update that is set in any other policy."
+   * learn.microsoft.com/intune/device-updates/windows/driver-updates-faq#policy-basics
+   */
+  | "approved-wins"
+  /**
+   * Known NOT to be a plain override, but Microsoft documents no rule for two
+   * policies of the type targeting one device -- Windows Quality Update
+   * (expedite) profiles, whose documented behaviour is per-device applicability
+   * and supersession rather than policy precedence. Reported, never adjudicated.
+   * learn.microsoft.com/intune/device-updates/windows/configure-expedite-policy#identify-the-latest-applicable-update
+   */
+  | "undocumented";
+
+/** Short label for a resolution rule -- a badge, or a CSV cell. */
+export function resolutionRuleLabel(rule: ResolutionRule): string {
+  switch (rule) {
+    case "latest-version-wins":
+      return "latest version";
+    case "most-restrictive-wins":
+      return "most restrictive";
+    case "approved-wins":
+      return "approved wins";
+    case "undocumented":
+      return "not documented";
+  }
+}
+
+/**
+ * What the rule means, for a tooltip. Every one of these ends by saying the tool
+ * doesn't pick, because that is the whole point of reporting these separately
+ * from conflicts: the admin is told the rule and left to apply it.
+ */
+export function resolutionRuleDetail(rule: ResolutionRule): string {
+  switch (rule) {
+    case "latest-version-wins":
+      return "Several policies configure this, and they aren't resolved by one overriding another: Windows Update offers only one feature update at a time and takes the latest applicable version. Every targeted version is listed — this tool doesn't work out which one a given device lands on.";
+    case "most-restrictive-wins":
+      return "Several compliance policies evaluate this setting. Intune applies the most restrictive of them rather than reporting a conflict. Every value is listed — this tool doesn't rank them.";
+    case "approved-wins":
+      return "Several driver update policies cover this. An approved status always wins over any other status for the same update, so these don't resolve by one policy overriding another. Every value is listed — this tool doesn't pick.";
+    case "undocumented":
+      return "Several policies configure this, and Microsoft documents no resolution rule for this policy type. Treat every value as in play and verify on a device — this tool won't guess.";
+  }
+}
+
 export interface CspSetting {
   /** Stable id of the underlying setting/definition, used to detect conflicts across policies */
   settingId: string;
@@ -62,6 +140,17 @@ export interface CspSetting {
    * so cross-model agreement can be judged against a Settings Catalog value.
    */
   cspNodeValue?: string;
+  /**
+   * Set when this setting's policy TYPE resolves multiple configuring policies
+   * by a documented rule other than "one policy overrides another" (see
+   * ResolutionRule). Classified once at normalize time from the policy's
+   * `@odata.type`, so it is present whether or not another policy happens to
+   * configure the same setting -- it describes the type, not the collision.
+   *
+   * The merge consults it only when policies actually DISAGREE, and routes
+   * those to `SimulationResult.layered` instead of `conflicts`.
+   */
+  resolution?: ResolutionRule;
 }
 
 /** An Intune Assignment Filter, used to scope an assignment to devices matching a rule (e.g. "Kiosk Devices"). */
@@ -154,6 +243,35 @@ export interface ConflictingSetting {
   values: { value: string; sourcePolicyId: string; sourcePolicyName: string; sourceKind: PolicyKind }[];
 }
 
+/**
+ * Two or more applied policies set the same CSP setting to DIFFERENT values,
+ * but the policy type does NOT resolve that by one policy overriding another --
+ * so it is not a ConflictingSetting. Windows Feature Update profiles naming
+ * three versions are the motivating case: Windows Update takes the latest
+ * applicable one, it does not refuse to apply any of them.
+ *
+ * The distinction is operational, not cosmetic. A `ConflictingSetting` means
+ * Intune applies NEITHER value until an admin intervenes, which is what an
+ * admin acts on when they see one. These resolve instead, under `rule`.
+ *
+ * `rule` is reported, never applied: `values` lists every contributing policy
+ * with equal standing and nothing here marks one of them as the effective
+ * value. Microsoft's own pages are not always self-consistent about the
+ * tiebreak, and the device's current state (its installed build, for a feature
+ * update) is outside what a tenant-side simulation can see -- so computing a
+ * winner would be a guess dressed as an answer. Same principle as
+ * `BaselineSetting.conflicted`, applied to a second kind of finding.
+ */
+export interface LayeredSetting {
+  settingId: string;
+  cspArea: string;
+  displayName: string;
+  /** The documented resolution rule for this setting's policy type. */
+  rule: ResolutionRule;
+  /** Every contributing policy and its value -- in no significant order. */
+  values: { value: string; sourcePolicyId: string; sourcePolicyName: string; sourceKind: PolicyKind }[];
+}
+
 /** Two or more applied policies set the same CSP setting to the SAME value -- redundant, not a disagreement. */
 export interface PolicyOverlap {
   settingId: string;
@@ -183,8 +301,26 @@ export interface BaselineSetting extends CspSetting {
    * The UI and the CSV export already expand conflicts to one row per value.
    * This flag is for consumers of the JSON export and `GET /api/simulate`, where
    * a single `value` would otherwise read as the effective one.
+   *
+   * Set for a genuine conflict ONLY, so it always has a `SimulationResult.conflicts`
+   * entry to point at. A setting whose policies disagree under a documented
+   * resolution rule carries `layered` below instead.
    */
   conflicted?: boolean;
+  /**
+   * True when two or more applied policies set this setting to DIFFERENT values
+   * AND the policy type resolves that by a documented rule rather than by one
+   * policy overriding another -- see LayeredSetting and ResolutionRule.
+   *
+   * Carries exactly the same warning as `conflicted`: `value` here is the first
+   * contributing policy the tenant load happened to reach, NOT the value the
+   * rule would select. The tool names the rule and lists every value; it does
+   * not apply the rule. The full picture is in `SimulationResult.layered`, keyed
+   * by the same `settingId`.
+   *
+   * Mutually exclusive with `conflicted`.
+   */
+  layered?: boolean;
 }
 
 /**
@@ -350,6 +486,15 @@ export interface SimulationResult {
   excludedPolicies: SimulationPolicy[];
   settings: BaselineSetting[];
   conflicts: ConflictingSetting[];
+  /**
+   * Settings several applied policies disagree on where the policy type does
+   * NOT resolve by one policy overriding another -- Windows Feature Update
+   * profiles, compliance policies, driver update profiles. Reported apart from
+   * `conflicts` because "Intune applies neither value" is false of these, and
+   * that is what a conflict tells an admin. See LayeredSetting. Windows-only,
+   * like conflicts/overlaps.
+   */
+  layered: LayeredSetting[];
   overlaps: PolicyOverlap[];
   /**
    * Cross-MODEL findings: the same CSP configured via different policy models

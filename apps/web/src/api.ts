@@ -7,6 +7,7 @@ import type {
   UnassignedPolicy,
 } from "@intune-preflight/shared";
 import { demoApi } from "./demoApi.ts";
+import type { Download } from "./download.ts";
 import { createLiveApi } from "./liveApi.ts";
 import { ensureReady, ensureSignedIn, getToken, isConfigured, isSignedIn } from "./liveSession.ts";
 
@@ -82,8 +83,12 @@ const serverApi = {
   unassignedPolicies: () => getJson<UnassignedPolicy[]>("/unassigned"),
   assignmentReport: (platform?: Platform) =>
     getJson<AssignmentReport>(`/reports/assignments${platform ? `?platform=${platform}` : ""}`),
-  assignmentReportCsvUrl: (platform?: Platform) =>
-    `/api/reports/assignments/export?format=csv${platform ? `&platform=${platform}` : ""}`,
+  // The backend answers these with a Content-Disposition, so the browser saves
+  // the file itself and there is nothing for `saveDownload` to build.
+  assignmentReportExport: (platform?: Platform): Download => ({
+    kind: "url",
+    url: `/api/reports/assignments/export?format=csv${platform ? `&platform=${platform}` : ""}`,
+  }),
   refresh: async (): Promise<{ warnings: string[] }> => {
     const res = await fetch("/api/refresh", { method: "POST" });
     if (!res.ok) throw new Error(`Refresh failed: ${res.status}`);
@@ -92,8 +97,10 @@ const serverApi = {
   },
   simulate: (inputs: SimulationInputs, signal?: AbortSignal) =>
     getJson<SimulationResult>(`/simulate?${simulationQuery(inputs)}`, signal),
-  simulateExportUrl: (inputs: SimulationInputs, format: "json" | "csv") =>
-    `/api/simulate/export?${simulationQuery(inputs)}&format=${format}`,
+  simulateExport: (inputs: SimulationInputs, format: "json" | "csv"): Download => ({
+    kind: "url",
+    url: `/api/simulate/export?${simulationQuery(inputs)}&format=${format}`,
+  }),
 };
 
 /**

@@ -6,6 +6,73 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [2.3.0] — 2026-10-28
+
+Intune Preflight now works on a phone, and the merged baseline sits beside the
+diagram rather than on top of it. Two fixes to how disagreements between
+policies are reported, one of which was telling admins a device was stuck when
+it wasn't.
+
+### Added
+- **The app works on a small screen.** Opening the site on a phone previously
+  gave you a full-screen "Built for a bigger screen" wall and nothing else — and
+  underneath it the picker's three fixed-width columns overlapped each other at
+  375px and the canvas was left about 180px. There is one breakpoint, 1023px,
+  deliberately Tailwind's `lg` minus one so a component's classes and the
+  JavaScript that branches on width cannot drift apart. The wall is now a thin
+  banner with a **Use desktop layout** escape that lays the full console out at
+  1280px so an iPad can pan and pinch-zoom the diagram.
+- **The merged baseline is on screen with the diagram.** A 24rem rail at `lg`
+  and up, a collapsible sheet below it. The baseline is the answer this tool
+  exists to produce and reading it used to mean covering the thing that produced
+  it — open the drawer, read it, close it, change a group, open it again. Tick a
+  group now and the graph and the conflict count move together. The full panel
+  is still one click away for the five-column grid, the exports and the column
+  picker.
+- **Focus mode**, on the ⛶ button: every picker and the app header hidden, the
+  diagram given the whole window. It keeps exactly one control, the Group Tag,
+  because it is the only one whose effect *is* the diagram — type a tag and the
+  groups scoped to it are re-selected while you watch.
+- **Both data tables have a card renderer below `lg`.** The merged baseline
+  becomes an accordion of CSP areas carrying the counts and the
+  conflict/overlap/legacy badges on the headers; the assignment manifest becomes
+  one card per group with Direct/Inherited/Incl-Excl as a three-up strip, and
+  sorting moves to a dropdown since there are no column headers left to click.
+  Both read the same rows as the desktop renderers, so the two presentations
+  cannot disagree about what is on screen.
+
+### Fixed
+- **Exports never saved on iPadOS.** The prompt appeared, you accepted it, and
+  no file arrived. The browser-only builds have no backend to set a
+  `Content-Disposition`, so both built the file as a `data:` URL on an anchor —
+  and Safari does not honour `download` on a `data:` URL, so the click stopped
+  being a download and became a navigation to a `data:` URL, which Safari blocks
+  outright. Exports are now written from a Blob, and offered to the share sheet
+  where the browser supports sharing files, because "Save to Files" is the path
+  that actually lands a file on iPadOS. The self-hosted build was never
+  affected.
+- **A conflict card named a winner it could not know.** The compact card ranked
+  its values WINS/ALSO, the first in emerald as "the one that applies". It was
+  reading the order of the contributing policies, which is tenant load order and
+  not an ordering at all — the merge has always documented that it "deliberately
+  doesn't claim to know which value wins on the device". Every value now renders
+  identically, with no ranking.
+
+### Changed
+- **A disagreement that Microsoft documents a resolution rule for is now
+  reported as *layered*, not as a conflict.** A conflict in this tool means what
+  Intune means by it: the device applies *neither* value until an admin resolves
+  it. That label was being given to every disagreement whatever the policy type,
+  and for several types it is a false alarm in the dangerous direction. Three
+  Windows Feature Update profiles naming different versions were reported as a
+  conflict, when Windows Update evaluates every applicable policy and offers the
+  latest applicable version — nothing is stuck. The same applies to compliance
+  policies (most restrictive applies), driver update profiles (approved wins)
+  and quality update profiles (no rule documented at all). Update rings are
+  deliberately unchanged: they genuinely *are* a conflict, with neither value set
+  until it is resolved. A layered finding **states** the rule and never applies
+  it — no winner is named, in the UI or in the JSON and API output.
+
 ## [2.2.1] — 2026-10-21
 
 Follow-up to the same day's 2.2.0. The picker now lets you read any dynamic

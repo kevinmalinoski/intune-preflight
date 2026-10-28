@@ -1,15 +1,26 @@
 import { describe, expect, it } from "vitest";
-import type { AutopilotProfile, CspSetting, IntuneGroup, IntunePolicy } from "@intune-preflight/shared";
+import type { AutopilotProfile, CspSetting, IntuneGroup, IntunePolicy, ResolutionRule } from "@intune-preflight/shared";
 import { UNASSIGNED_SOURCE_GROUP } from "@intune-preflight/shared";
-import { assignmentReportToCsv, buildAssignmentReport, computeSimulation, listUnassignedPolicies } from "./baseline.js";
+import {
+  assignmentReportToCsv,
+  buildAssignmentReport,
+  computeSimulation,
+  listUnassignedPolicies,
+  simulationToCsv,
+} from "./baseline.js";
 import { VIRTUAL_GROUP_ALL_DEVICES } from "./normalize.js";
 import type { TenantData } from "./tenantData.js";
 
-const setting = (settingId: string, value: string): CspSetting => ({
+// `resolution` is what the real normalizer stamps on a setting whose policy type
+// doesn't resolve by one policy overriding another (see resolutionRuleFor).
+// Omitted, a setting behaves like an ordinary device-config setting: a
+// disagreement over it is a genuine conflict.
+const setting = (settingId: string, value: string, resolution?: ResolutionRule): CspSetting => ({
   settingId,
   cspArea: "Test",
   displayName: settingId,
   value,
+  resolution,
 });
 
 const policy = (over: Partial<IntunePolicy> & Pick<IntunePolicy, "id">): IntunePolicy => ({
@@ -183,19 +194,153 @@ describe("computeSimulation", () => {
   });
 
   it("reports each policy's own settingsCount even when settings collide", () => {
-    // Two Feature-Update-like policies set the same settingId to different values;
+    // Two Feature Update profiles set the same settingId to different values;
     // the merge keeps one entry, but both must still report their own count.
+    // The settings carry the real feature-update resolution rule, so this stays
+    // the scenario it is named after rather than quietly becoming a
+    // generic-conflict test -- asserted below, where it is NOT a conflict.
+    const fu = (v: string) => setting("windowsFeatureUpdateProfile:featureUpdateVersion", v, "latest-version-wins");
     const data = tenant({
       groups: [group("g1")],
       policies: [
-        policy({ id: "v24h2", assignedGroupIds: ["g1"], settings: [setting("featureupdate.version", "24H2")] }),
-        policy({ id: "v25h2", assignedGroupIds: ["g1"], settings: [setting("featureupdate.version", "25H2")] }),
+        policy({ id: "v24h2", assignedGroupIds: ["g1"], settings: [fu("24H2")] }),
+        policy({ id: "v25h2", assignedGroupIds: ["g1"], settings: [fu("25H2")] }),
       ],
     });
     const sim = computeSimulation(data, { selectedGroupIds: ["g1"], platform: "windows" });
     expect(sim.settings).toHaveLength(1); // merged/deduped
     expect(sim.policies.find((p) => p.id === "v24h2")?.settingsCount).toBe(1);
     expect(sim.policies.find((p) => p.id === "v25h2")?.settingsCount).toBe(1);
+    expect(sim.conflicts).toEqual([]);
+    expect(sim.layered).toHaveLength(1);
+  });
+
+  it("reports several Feature Update profiles as layered, not as a conflict, and names no winner", () => {
+    // The reported case: three profiles targeting one device, naming three
+    // versions. Windows Update evaluates all applicable policies and offers the
+    // latest applicable version -- so "Intune applies neither value", which is
+    // what a conflict means in this tool, is false here.
+    const fu = (v: string) => setting("windowsFeatureUpdateProfile:featureUpdateVersion", v, "latest-version-wins");
+    const data = tenant({
+      groups: [group("g1")],
+      policies: [
+        policy({ id: "fu-24h2", displayName: "FU 24H2", assignedGroupIds: ["g1"], settings: [fu("24H2")] }),
+        policy({ id: "fu-25h2", displayName: "FU 25H2", assignedGroupIds: ["g1"], settings: [fu("25H2")] }),
+        policy({ id: "fu-26h2", displayName: "FU 26H2", assignedGroupIds: ["g1"], settings: [fu("26H2")] }),
+      ],
+    });
+    const sim = computeSimulation(data, { selectedGroupIds: ["g1"], platform: "windows" });
+
+    expect(sim.conflicts).toEqual([]);
+    expect(sim.overlaps).toEqual([]);
+    const layered = sim.layered.find((l) => l.settingId === "windowsFeatureUpdateProfile:featureUpdateVersion");
+    expect(layered?.rule).toBe("latest-version-wins");
+    // Every contributing version is listed, with equal standing.
+    expect(layered?.values.map((v) => v.value).sort()).toEqual(["24H2", "25H2", "26H2"]);
+
+    const row = sim.settings.find((s) => s.settingId === "windowsFeatureUpdateProfile:featureUpdateVersion");
+    expect(row?.layered).toBe(true);
+    expect(row?.conflicted).toBeUndefined();
+    // THE LINE THAT MUST HOLD: the merged row's single value is still the first
+    // contributing policy the load happened to reach -- NOT the value the rule
+    // would select. 26H2 is the latest here, so a merge that quietly started
+    // applying the rule would surface exactly as this assertion failing.
+    expect(row?.value).toBe("24H2");
+    expect(row?.sourcePolicyName).toBe("FU 24H2");
+  });
+
+  it("reports compliance policies that disagree as layered, under the most-restrictive rule", () => {
+    const data = tenant({
+      groups: [group("g1")],
+      policies: [
+        policy({
+          id: "comp-a",
+          kind: "compliancePolicy",
+          assignedGroupIds: ["g1"],
+          settings: [setting("windows10CompliancePolicy:passwordMinimumLength", "8", "most-restrictive-wins")],
+        }),
+        policy({
+          id: "comp-b",
+          kind: "compliancePolicy",
+          assignedGroupIds: ["g1"],
+          settings: [setting("windows10CompliancePolicy:passwordMinimumLength", "14", "most-restrictive-wins")],
+        }),
+      ],
+    });
+    const sim = computeSimulation(data, { selectedGroupIds: ["g1"], platform: "windows" });
+    expect(sim.conflicts).toEqual([]);
+    expect(sim.layered[0]?.rule).toBe("most-restrictive-wins");
+    // 14 is the more restrictive value, and the tool still does not promote it.
+    expect(sim.settings[0]?.value).toBe("8");
+  });
+
+  it("still reports two update rings that disagree as a genuine conflict", () => {
+    // The negative control. Update rings are the one Windows Update type that
+    // really does resolve by one policy overriding another -- Microsoft
+    // documents an alert and that neither policy is set until it's resolved --
+    // so a blanket "update policies aren't conflicts" rule would be wrong, and
+    // this is the test that would catch it.
+    const data = tenant({
+      groups: [group("g1")],
+      policies: [
+        policy({
+          id: "ring-prod",
+          assignedGroupIds: ["g1"],
+          settings: [setting("windowsUpdateForBusinessConfiguration:featureUpdatesDeferralPeriodInDays", "7")],
+        }),
+        policy({
+          id: "ring-pilot",
+          assignedGroupIds: ["g1"],
+          settings: [setting("windowsUpdateForBusinessConfiguration:featureUpdatesDeferralPeriodInDays", "0")],
+        }),
+      ],
+    });
+    const sim = computeSimulation(data, { selectedGroupIds: ["g1"], platform: "windows" });
+    expect(sim.layered).toEqual([]);
+    expect(sim.conflicts).toHaveLength(1);
+    expect(sim.settings[0]?.conflicted).toBe(true);
+    expect(sim.settings[0]?.layered).toBeUndefined();
+  });
+
+  it("exports a layered setting as every value, named by rule and NOT flagged as a conflict", () => {
+    // The CSV is what an admin takes away and acts on, so "Conflict: yes" there
+    // carries the same false claim as the badge would -- that Intune applies
+    // neither value. Each contributing value still gets its own row.
+    const fu = (v: string) => setting("windowsFeatureUpdateProfile:featureUpdateVersion", v, "latest-version-wins");
+    const data = tenant({
+      groups: [group("g1")],
+      policies: [
+        policy({ id: "fu-24h2", displayName: "FU 24H2", assignedGroupIds: ["g1"], settings: [fu("24H2")] }),
+        policy({ id: "fu-25h2", displayName: "FU 25H2", assignedGroupIds: ["g1"], settings: [fu("25H2")] }),
+      ],
+    });
+    const csv = simulationToCsv(computeSimulation(data, { selectedGroupIds: ["g1"], platform: "windows" }));
+    const [header, ...rows] = csv.split("\n");
+    expect(header).toContain("Resolution");
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row).toContain('"latest version"');
+      // The Conflict and Policy Overlap columns, in order, both "no".
+      expect(row).toContain('"no","no","latest version"');
+    }
+    expect(rows.map((r) => (r.includes('"24H2"') ? "24H2" : "25H2")).sort()).toEqual(["24H2", "25H2"]);
+  });
+
+  it("treats agreeing Feature Update profiles as a plain overlap, not a layered finding", () => {
+    // Agreement is redundancy whatever the type's resolution rule -- there is no
+    // disagreement for a rule to resolve.
+    const fu = setting("windowsFeatureUpdateProfile:featureUpdateVersion", "24H2", "latest-version-wins");
+    const data = tenant({
+      groups: [group("g1")],
+      policies: [
+        policy({ id: "fu-a", assignedGroupIds: ["g1"], settings: [fu] }),
+        policy({ id: "fu-b", assignedGroupIds: ["g1"], settings: [fu] }),
+      ],
+    });
+    const sim = computeSimulation(data, { selectedGroupIds: ["g1"], platform: "windows" });
+    expect(sim.layered).toEqual([]);
+    expect(sim.conflicts).toEqual([]);
+    expect(sim.overlaps).toHaveLength(1);
   });
 
   it("injects a manually-added unassigned policy via the synthetic bucket", () => {

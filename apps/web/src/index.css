@@ -8,6 +8,16 @@ body,
   height: 100%;
 }
 
+/* iOS Safari measures `100%` against the LARGE viewport -- the one that assumes
+   the toolbars are collapsed -- so a full-height app layout runs on underneath
+   them and whatever sits at the bottom is unreachable. The dynamic unit tracks
+   what is actually visible instead. */
+@supports (height: 100dvh) {
+  html {
+    height: 100dvh;
+  }
+}
+
 /* Gentle fade-in used to draw the eye to a Group Tag match as it appears. */
 @keyframes fadeInFocus {
   from {
@@ -30,6 +40,39 @@ body,
 
 body {
   @apply bg-ink-950 text-slate-200;
+  /* The diagram does its own panning. Without this, dragging past the edge of
+     it rubber-bands the whole page on iOS instead of stopping. */
+  overscroll-behavior: none;
+}
+
+/* Bottom padding that clears the home indicator, for the bars that sit against
+   the bottom edge. `env()` is 0 everywhere that has no inset, so this is just
+   `py-3`'s bottom padding on a desktop. */
+.pb-safe {
+  padding-bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+}
+
+/* Set from viewport.ts when the admin asks for the full console on a narrow
+   window: lay the app out at the width that layout actually needs, and pan to
+   reach the rest.
+   The width goes on #root with the scrolling on <body>, rather than a
+   min-width on <body> itself: a page whose CONTENT is wider than the viewport
+   makes a mobile browser widen its layout viewport to fit, which scales the
+   whole thing down instead of letting you scroll it -- the opposite of the
+   point. An ordinary element scroll does what it says on every browser. */
+html.desktop-layout {
+  /* <body>'s overflow propagates to the viewport while <html> is `visible`,
+     which hands the scrolling straight back to the page and undoes the whole
+     arrangement. Pinning it here keeps the scroll on <body>, where we want it. */
+  overflow: hidden;
+}
+
+html.desktop-layout body {
+  overflow: auto;
+}
+
+html.desktop-layout #root {
+  min-width: 1280px;
 }
 
 /* --- React Flow: match the dark theme, drop default chrome --- */

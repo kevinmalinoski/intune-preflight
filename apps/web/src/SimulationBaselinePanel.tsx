@@ -1,12 +1,24 @@
-import { type MouseEvent as ReactMouseEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { Platform, PolicyKind, SimulationResult } from "@intune-preflight/shared";
-import { filterExclusionReason } from "@intune-preflight/shared";
+import { filterExclusionReason, resolutionRuleDetail, resolutionRuleLabel } from "@intune-preflight/shared";
 import { api } from "./api.ts";
-import { msLearnCspUrl, splitCspRef } from "./cspDocs.ts";
+import { BaselineSettingList } from "./BaselineSettingList.tsx";
+import { buildRows, cspRef, isLegacyRow, type DisplayRow } from "./baselineRow.ts";
+import { CspRef } from "./CspRef.tsx";
+import { saveDownload } from "./download.ts";
 import { readStored, readStoredJson, writeStored } from "./storage.ts";
 import { toggled } from "./collections.ts";
+import { isCompact, subscribeLayout } from "./viewport.ts";
 
-type ViewFilter = "all" | "conflicts" | "overlaps" | "legacy" | "collision";
+type ViewFilter = "all" | "conflicts" | "layered" | "overlaps" | "legacy" | "collision";
 
 // Render the table in chunks: a 150+ policy tenant can produce thousands of
 // setting rows, and mounting them all at once visibly stalls the panel. Chunks
@@ -42,10 +54,12 @@ function applyScope(simulation: SimulationResult, scope: BaselineScope | null | 
     return { ...simulation, settings: simulation.settings.filter((s) => s.sourceKind === scope.kind) };
   }
   const pid = scope.policyId;
-  // Include settings this policy won, plus any conflict/overlap it takes part in
-  // (where another policy's value won the merge) so its full involvement shows.
+  // Include settings this policy won, plus any conflict/layered/overlap finding
+  // it takes part in (where another policy's value won the merge) so its full
+  // involvement shows.
   const involved = new Set<string>();
   for (const c of simulation.conflicts) if (c.values.some((v) => v.sourcePolicyId === pid)) involved.add(c.settingId);
+  for (const l of simulation.layered) if (l.values.some((v) => v.sourcePolicyId === pid)) involved.add(l.settingId);
   for (const o of simulation.overlaps)
     if (o.sourcePolicies.some((sp) => sp.sourcePolicyId === pid)) involved.add(o.settingId);
   return {
@@ -54,176 +68,12 @@ function applyScope(simulation: SimulationResult, scope: BaselineScope | null | 
   };
 }
 
-// `sourceKinds` is EVERY policy kind that contributes this setting, not just the
-// one whose value landed in the merged row. That distinction is the "Legacy
-// policies" view: a conflicted setting configured by both a Settings Catalog
-// policy and a legacy Endpoint Security intent must appear under it whichever
-// source the merge happened to reach first.
-type DisplayRow =
-  | {
-      kind: "normal";
-      sourceKinds: PolicyKind[];
-      sourceLegacyTemplate?: boolean;
-      settingId: string;
-      cspPath?: string;
-      docUrl?: string;
-      cspArea: string;
-      displayName: string;
-      value: string;
-      sourcePolicyName: string;
-    }
-  | {
-      kind: "conflict";
-      sourceKinds: PolicyKind[];
-      settingId: string;
-      cspPath?: string;
-      docUrl?: string;
-      cspArea: string;
-      displayName: string;
-      values: { value: string; sourcePolicyName: string }[];
-    }
-  | {
-      kind: "overlap";
-      sourceKinds: PolicyKind[];
-      settingId: string;
-      cspPath?: string;
-      docUrl?: string;
-      cspArea: string;
-      displayName: string;
-      value: string;
-      sources: string[];
-    };
-
-/** The real CSP path if we resolved one, else the setting id (OMA-URI / type:key). */
-const cspRef = (r: DisplayRow) => r.cspPath ?? r.settingId;
-
-/**
- * A CSP reference, rendered in full: the value WRAPS instead of truncating (its
- * full path is the entire point of the column -- resize the column to control
- * how much it wraps). Boilerplate prefix dimmed, meaningful tail linked to its
- * Microsoft Learn CSP reference when one exists, with a copy button.
- * stopPropagation everywhere -- these live inside clickable rows.
- */
-function CspRef({ refValue, docUrl }: { refValue: string; docUrl?: string }) {
-  const [copied, setCopied] = useState(false);
-  const { prefix, tail } = splitCspRef(refValue);
-  // Prefer an explicit documentation URL (legacy intents carry one) over the
-  // best-effort link derived from the CSP ref.
-  const url = docUrl ?? msLearnCspUrl(refValue);
-
-  const copy = (e: ReactMouseEvent) => {
-    e.stopPropagation();
-    navigator.clipboard?.writeText(refValue).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  };
-
-  return (
-    <span className="break-all font-mono text-[11px] leading-relaxed">
-      {prefix && <span className="text-slate-600">{prefix}</span>}
-      {url ? (
-        <a
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(e) => e.stopPropagation()}
-          title="Open this setting's CSP reference on Microsoft Learn"
-          className="text-sky-400/90 decoration-sky-400/40 hover:text-sky-300 hover:underline"
-        >
-          {tail}
-          <span className="ml-0.5 text-[9px] opacity-70" aria-hidden>
-            ↗
-          </span>
-        </a>
-      ) : (
-        <span className="text-slate-400">{tail}</span>
-      )}
-      <button
-        onClick={copy}
-        title="Copy the full path"
-        className={`ml-1 rounded px-1 text-[10px] align-middle ${
-          copied ? "text-emerald-400" : "text-slate-600 hover:bg-ink-800 hover:text-slate-300"
-        }`}
-      >
-        {copied ? "✓" : "⧉"}
-      </button>
-    </span>
-  );
-}
-
-/**
- * One display row per setting. Conflicts (genuine value disagreements) stay
- * expanded so both sides are visible. Overlaps (same value across multiple
- * policies) collapse into a single row that can be expanded to reveal the
- * overlapping policies -- otherwise a layered baseline drowns the table in
- * redundant rows.
- */
-function buildRows(simulation: SimulationResult): DisplayRow[] {
-  const conflictsBySettingId = new Map(simulation.conflicts.map((c) => [c.settingId, c]));
-  const overlapsBySettingId = new Map(simulation.overlaps.map((o) => [o.settingId, o]));
-  const rows: DisplayRow[] = [];
-
-  for (const s of simulation.settings) {
-    const conflict = conflictsBySettingId.get(s.settingId);
-    if (conflict) {
-      rows.push({
-        kind: "conflict",
-        sourceKinds: [...new Set(conflict.values.map((v) => v.sourceKind))],
-        settingId: s.settingId,
-        cspPath: s.cspPath,
-        docUrl: s.docUrl,
-        cspArea: conflict.cspArea,
-        displayName: conflict.displayName,
-        values: conflict.values.map((v) => ({ value: v.value, sourcePolicyName: v.sourcePolicyName })),
-      });
-      continue;
-    }
-    const overlap = overlapsBySettingId.get(s.settingId);
-    if (overlap) {
-      rows.push({
-        kind: "overlap",
-        sourceKinds: [...new Set(overlap.sourcePolicies.map((sp) => sp.sourceKind))],
-        settingId: s.settingId,
-        cspPath: s.cspPath,
-        docUrl: s.docUrl,
-        cspArea: overlap.cspArea,
-        displayName: overlap.displayName,
-        value: overlap.value,
-        sources: overlap.sourcePolicies.map((sp) => sp.sourcePolicyName),
-      });
-      continue;
-    }
-    rows.push({
-      kind: "normal",
-      sourceKinds: [s.sourceKind],
-      sourceLegacyTemplate: s.sourceLegacyTemplate,
-      settingId: s.settingId,
-      cspPath: s.cspPath,
-      docUrl: s.docUrl,
-      cspArea: s.cspArea,
-      displayName: s.displayName,
-      value: s.value,
-      sourcePolicyName: s.sourcePolicyName,
-    });
-  }
-  return rows;
-}
-
-/**
- * Does any policy contributing this setting come from the legacy intents-based
- * Endpoint Security model? Keyed on every contributing source, so a setting a
- * legacy intent only CO-configures (with a Settings Catalog policy, say) still
- * counts -- it's exactly the setting a migration needs to look at.
- */
-function isLegacyRow(row: DisplayRow): boolean {
-  return row.sourceKinds.includes("endpointSecurity");
-}
-
 function rowMatchesText(row: DisplayRow, needle: string): boolean {
   const hay = [row.cspArea, row.displayName];
   if (row.kind === "normal") hay.push(row.sourcePolicyName, row.value);
-  if (row.kind === "conflict") for (const v of row.values) hay.push(v.value, v.sourcePolicyName);
+  if (row.kind === "conflict" || row.kind === "layered")
+    for (const v of row.values) hay.push(v.value, v.sourcePolicyName);
+  if (row.kind === "layered") hay.push(resolutionRuleLabel(row.rule));
   if (row.kind === "overlap") hay.push(row.value, ...row.sources);
   return hay.some((h) => h.toLowerCase().includes(needle));
 }
@@ -249,6 +99,19 @@ export function SimulationBaselinePanel({
 }) {
   const [filter, setFilter] = useState("");
   const [view, setView] = useState<ViewFilter>("all");
+  // Live, not read-once: resizing the window has to swap the renderer, because
+  // the two are different DOM for the same rows rather than a different state.
+  const compact = useSyncExternalStore(subscribeLayout, isCompact, () => false);
+
+  // Built here, in the click, with nothing awaited before `saveDownload` -- iOS
+  // only opens the share sheet inside the click's own task. The export always
+  // covers the WHOLE baseline, never the on-screen filter or scope; that is what
+  // the "filters and exports always cover everything" row promises.
+  const exportBaseline = (format: "json" | "csv") =>
+    saveDownload(
+      api.simulateExport({ groupIds, platform, deviceFilterIds, unassignedPolicyIds }, format),
+      `endpoint-baseline.${format}`
+    );
   const [expandedOverlaps, setExpandedOverlaps] = useState<Set<string>>(new Set());
 
   // Resizable panel width (docked to the right edge, so width = viewport - cursorX).
@@ -322,6 +185,7 @@ export function SimulationBaselinePanel({
     (r) =>
       (view === "all" ||
         (view === "conflicts" && r.kind === "conflict") ||
+        (view === "layered" && r.kind === "layered") ||
         (view === "overlaps" && r.kind === "overlap") ||
         (view === "legacy" && isLegacyRow(r))) &&
       (!filter || rowMatchesText(r, needle))
@@ -390,6 +254,52 @@ export function SimulationBaselinePanel({
       </td>
     );
 
+  /**
+   * A layered setting: the same row shape as a conflict -- one row per
+   * contributing value, none of them marked as the one that applies -- because
+   * it is the same disagreement. Indigo rather than amber, and a rule badge in
+   * place of the ⚠, because the reading differs: the device resolves this under
+   * a documented rule, it isn't stuck on it.
+   *
+   * Nothing here ranks the values or applies the rule. Naming a winner is what
+   * started all this; see LayeredSetting in the shared types.
+   */
+  const renderLayered = (r: Extract<DisplayRow, { kind: "layered" }>) =>
+    r.values.map((v, i) => (
+      <tr key={`${r.settingId}-l-${i}`} className="border-t border-ink-800 bg-indigo-500/10">
+        {cell("cspArea", "px-3 py-2 align-top text-slate-400", i === 0 ? r.cspArea : "")}
+        {cell(
+          "setting",
+          "px-3 py-2 align-top text-slate-200",
+          i === 0 ? (
+            <span className="inline-flex flex-wrap items-center gap-1">
+              {r.displayName}
+              <span
+                className="rounded bg-indigo-500/20 px-1 py-0.5 text-[9px] font-medium text-indigo-300"
+                title={resolutionRuleDetail(r.rule)}
+              >
+                {resolutionRuleLabel(r.rule)}
+              </span>
+            </span>
+          ) : (
+            ""
+          )
+        )}
+        {cell("value", "truncate px-3 py-2 align-top text-slate-300", <span title={v.value}>{v.value}</span>)}
+        {cell(
+          "source",
+          "px-3 py-2 align-top text-slate-400",
+          <>
+            {v.sourcePolicyName}
+            <span className="ml-1.5 text-indigo-400" title={resolutionRuleDetail(r.rule)}>
+              ⧫
+            </span>
+          </>
+        )}
+        {cell("cspPath", "px-3 py-2 align-top", i === 0 ? <CspRef refValue={cspRef(r)} docUrl={r.docUrl} /> : "")}
+      </tr>
+    ));
+
   const renderRow = (r: DisplayRow) => {
     if (r.kind === "normal") {
       return [
@@ -434,6 +344,7 @@ export function SimulationBaselinePanel({
         </tr>
       ));
     }
+    if (r.kind === "layered") return renderLayered(r);
     // overlap -- collapsible
     const isExpanded = expandedOverlaps.has(r.settingId);
     const out = [
@@ -541,7 +452,9 @@ export function SimulationBaselinePanel({
       <div
         onMouseDown={startResize}
         title="Drag to resize"
-        className="group absolute inset-y-0 left-0 z-30 w-1.5 cursor-col-resize hover:bg-sky-500/40 active:bg-sky-500/60"
+        // Mouse-only, and below `lg` the panel is the full width of the window
+        // anyway -- so there is nothing to drag and nowhere to drag it to.
+        className="group absolute inset-y-0 left-0 z-30 hidden w-1.5 cursor-col-resize hover:bg-sky-500/40 active:bg-sky-500/60 lg:block"
       >
         <div className="absolute inset-y-0 -left-1 w-3" />
       </div>
@@ -556,6 +469,17 @@ export function SimulationBaselinePanel({
             <span className={simulation.conflicts.length ? "text-amber-400" : "text-emerald-400"}>
               {simulation.conflicts.length} conflicts
             </span>
+            {simulation.layered.length > 0 && (
+              <>
+                {" · "}
+                <span
+                  className="text-indigo-300"
+                  title="Settings more than one policy configures differently, where the policy type resolves that under a documented rule rather than refusing to apply anything — so not conflicts."
+                >
+                  {simulation.layered.length} layered
+                </span>
+              </>
+            )}
             {" · "}
             <span className={simulation.overlaps.length ? "text-sky-400" : "text-emerald-400"}>
               {simulation.overlaps.length} overlaps
@@ -667,6 +591,9 @@ export function SimulationBaselinePanel({
           <option value="conflicts" disabled={simulation.conflicts.length === 0}>
             Conflicts only ({simulation.conflicts.length})
           </option>
+          <option value="layered" disabled={simulation.layered.length === 0}>
+            Layered (rule-resolved) only ({simulation.layered.length})
+          </option>
           <option value="overlaps" disabled={simulation.overlaps.length === 0}>
             Policy overlap only ({simulation.overlaps.length})
           </option>
@@ -677,21 +604,24 @@ export function SimulationBaselinePanel({
             Legacy collisions ({simulation.crossModel.length})
           </option>
         </select>
-        <a
-          href={api.simulateExportUrl({ groupIds, platform, deviceFilterIds, unassignedPolicyIds }, "json")}
-          download="endpoint-baseline.json"
+        {/* Buttons rather than anchors: in the browser-only builds the export is
+            bytes, not a URL, and building it on click is also what stops the
+            whole simulation being re-serialised on every render of this panel. */}
+        <button
+          onClick={() => exportBaseline("json")}
           className="rounded-md border border-ink-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-ink-800"
         >
           Export JSON
-        </a>
-        <a
-          href={api.simulateExportUrl({ groupIds, platform, deviceFilterIds, unassignedPolicyIds }, "csv")}
-          download="endpoint-baseline.csv"
+        </button>
+        <button
+          onClick={() => exportBaseline("csv")}
           className="rounded-md border border-ink-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-ink-800"
         >
           Export CSV
-        </a>
-        <div className="relative">
+        </button>
+        {/* Nothing to pick when there are no columns: the compact layout renders
+            the baseline as cards, and every field is already on them. */}
+        <div className="relative hidden lg:block">
           <button
             onClick={() => setShowColumnPicker((v) => !v)}
             title="Choose which columns to show"
@@ -741,63 +671,77 @@ export function SimulationBaselinePanel({
         </div>
       </div>
 
-      {/* Both axes scroll: fixed column widths can exceed the panel, and that's
+      {/* Compact: the same rows as a collapsed accordion of CSP areas. It takes
+          the FULL row set rather than the chunked `visibleRows`, because a
+          collapsed area renders nothing -- the accordion bounds the DOM by
+          itself, and that keeps the count on each header honest. The legacy-
+          collision view keeps the table either way: it has its own row shape
+          and is a niche diagnostic, not something to read on a phone. */}
+      {compact && view !== "collision" ? (
+        <div className="flex-1 overflow-y-auto">
+          <BaselineSettingList rows={rows} />
+        </div>
+      ) : (
+        <>
+          {/* Both axes scroll: fixed column widths can exceed the panel, and that's
           the point -- widen a column to read it, scroll to reach the rest. */}
-      <div className="flex-1 overflow-auto">
-        <table className="text-left text-xs" style={{ tableLayout: "fixed", width: totalWidth, minWidth: "100%" }}>
-          <colgroup>
-            {visibleDefs.map((d) => (
-              <col key={d.id} style={{ width: colWidths[d.id] }} />
-            ))}
-          </colgroup>
-          <thead className="sticky top-0 z-10 bg-ink-900 text-slate-400">
-            <tr>
-              {visibleDefs.map((d) => (
-                <th
-                  key={d.id}
-                  className="relative border-b border-ink-700 px-3 py-2 font-medium"
-                  title={
-                    d.id === "cspPath"
-                      ? "The CSP OMA-URI path (Settings Catalog: baseUri + offsetUri), falling back to the raw setting id where no path exists. Windows CSP paths link to their Microsoft Learn reference."
-                      : undefined
-                  }
-                >
-                  <span className="block truncate">{d.label}</span>
-                  {/* Drag handle on the column's right edge */}
-                  <span
-                    onMouseDown={startColResize(d.id)}
-                    title="Drag to resize column"
-                    className="absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize hover:bg-sky-500/50 active:bg-sky-500/70"
-                  />
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {view === "collision" ? collisionFindings.flatMap(renderCollision) : visibleRows.flatMap(renderRow)}
-            {view !== "collision" && remaining > 0 && (
-              <tr className="border-t border-ink-800">
-                <td colSpan={visibleDefs.length} className="p-0">
-                  <button
-                    onClick={() => setRenderLimit((n) => n + ROW_RENDER_CHUNK)}
-                    className="w-full px-3 py-2.5 text-center text-xs font-medium text-sky-300 transition-colors hover:bg-ink-800"
-                  >
-                    Show {Math.min(ROW_RENDER_CHUNK, remaining)} more ({remaining} remaining — filters and exports
-                    always cover everything)
-                  </button>
-                </td>
-              </tr>
-            )}
-            {(view === "collision" ? collisionFindings.length === 0 : rows.length === 0) && (
-              <tr>
-                <td colSpan={visibleDefs.length} className="px-3 py-6 text-center text-slate-500">
-                  {view === "collision" ? "No legacy collisions match." : "No settings match."}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+          <div className="flex-1 overflow-auto">
+            <table className="text-left text-xs" style={{ tableLayout: "fixed", width: totalWidth, minWidth: "100%" }}>
+              <colgroup>
+                {visibleDefs.map((d) => (
+                  <col key={d.id} style={{ width: colWidths[d.id] }} />
+                ))}
+              </colgroup>
+              <thead className="sticky top-0 z-10 bg-ink-900 text-slate-400">
+                <tr>
+                  {visibleDefs.map((d) => (
+                    <th
+                      key={d.id}
+                      className="relative border-b border-ink-700 px-3 py-2 font-medium"
+                      title={
+                        d.id === "cspPath"
+                          ? "The CSP OMA-URI path (Settings Catalog: baseUri + offsetUri), falling back to the raw setting id where no path exists. Windows CSP paths link to their Microsoft Learn reference."
+                          : undefined
+                      }
+                    >
+                      <span className="block truncate">{d.label}</span>
+                      {/* Drag handle on the column's right edge */}
+                      <span
+                        onMouseDown={startColResize(d.id)}
+                        title="Drag to resize column"
+                        className="absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize hover:bg-sky-500/50 active:bg-sky-500/70"
+                      />
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {view === "collision" ? collisionFindings.flatMap(renderCollision) : visibleRows.flatMap(renderRow)}
+                {view !== "collision" && remaining > 0 && (
+                  <tr className="border-t border-ink-800">
+                    <td colSpan={visibleDefs.length} className="p-0">
+                      <button
+                        onClick={() => setRenderLimit((n) => n + ROW_RENDER_CHUNK)}
+                        className="w-full px-3 py-2.5 text-center text-xs font-medium text-sky-300 transition-colors hover:bg-ink-800"
+                      >
+                        Show {Math.min(ROW_RENDER_CHUNK, remaining)} more ({remaining} remaining — filters and exports
+                        always cover everything)
+                      </button>
+                    </td>
+                  </tr>
+                )}
+                {(view === "collision" ? collisionFindings.length === 0 : rows.length === 0) && (
+                  <tr>
+                    <td colSpan={visibleDefs.length} className="px-3 py-6 text-center text-slate-500">
+                      {view === "collision" ? "No legacy collisions match." : "No settings match."}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
     </div>
   );
 }

@@ -30,6 +30,7 @@ import {
 } from "@intune-preflight/engine";
 import { createGraphClient, loadTenantData, type TenantMode, TtlCache } from "@intune-preflight/graph";
 import type { ServerStatus, SimulationInputs } from "./api.ts";
+import type { Download } from "./download.ts";
 import { setLoadProgress } from "./loadProgress.ts";
 import { readSession, removeSession, writeSession } from "./storage.ts";
 
@@ -91,9 +92,9 @@ const toInputs = (i: SimulationInputs) => ({
   unassignedPolicyIds: i.unassignedPolicyIds ?? [],
 });
 
-// Same trick as demoApi: a data: URL so a `download` anchor saves a real file
-// with no backend Content-Disposition.
-const fileUrl = (mime: string, text: string) => `data:${mime};charset=utf-8,${encodeURIComponent(text)}`;
+// Same as demoApi: no backend, so the bytes go to `saveDownload` rather than
+// onto an anchor as a `data:` URL, which Safari will not save.
+const textFile = (mime: string, text: string): Download => ({ kind: "text", text, mime });
 
 export function createLiveApi(deps: LiveApiDeps) {
   const client = createGraphClient({ getToken: deps.getToken, concurrency: BROWSER_CONCURRENCY });
@@ -167,11 +168,14 @@ export function createLiveApi(deps: LiveApiDeps) {
   }
 
   /**
-   * The tenant as it stands, WITHOUT fetching. Only the two export-URL helpers
-   * use it, because `serverApi` returns a URL from them synchronously -- the
-   * server can, it just builds an `/api/...` path. They are rendered inside
-   * panels that already hold a loaded report, so in practice the tenant is
-   * always here; the empty fallback is so a race can't throw inside a render.
+   * The tenant as it stands, WITHOUT fetching. Only the two export helpers use
+   * it, because they are the only synchronous members of the surface -- and
+   * they have to be. `serverApi` returns from them synchronously (it just
+   * builds an `/api/...` path), and on iOS `saveDownload` can only open the
+   * share sheet inside the click's own task, so there is nowhere to put an
+   * await. They are reached from a button in a panel that already holds a
+   * loaded report, so in practice the tenant is always here; the empty fallback
+   * is so a race can't throw out of a click handler.
    */
   const tenantNow = () => loaded ?? EMPTY_TENANT;
 
@@ -218,8 +222,8 @@ export function createLiveApi(deps: LiveApiDeps) {
     filters: async () => listAssignmentFilters(await tenant()),
     unassignedPolicies: async () => listUnassignedPolicies(await tenant()),
     assignmentReport: async (platform?: Platform) => buildAssignmentReport(await tenant(), platform),
-    assignmentReportCsvUrl: (platform?: Platform) =>
-      fileUrl("text/csv", assignmentReportToCsv(buildAssignmentReport(tenantNow(), platform))),
+    assignmentReportExport: (platform?: Platform) =>
+      textFile("text/csv", assignmentReportToCsv(buildAssignmentReport(tenantNow(), platform))),
 
     refresh: async (): Promise<{ warnings: string[] }> => {
       drop();
@@ -228,11 +232,11 @@ export function createLiveApi(deps: LiveApiDeps) {
     },
 
     simulate: async (inputs: SimulationInputs) => computeSimulation(await tenant(), toInputs(inputs)),
-    simulateExportUrl: (inputs: SimulationInputs, format: "json" | "csv") => {
+    simulateExport: (inputs: SimulationInputs, format: "json" | "csv") => {
       const sim = computeSimulation(tenantNow(), toInputs(inputs));
       return format === "csv"
-        ? fileUrl("text/csv", simulationToCsv(sim))
-        : fileUrl("application/json", JSON.stringify(sim, null, 2));
+        ? textFile("text/csv", simulationToCsv(sim))
+        : textFile("application/json", JSON.stringify(sim, null, 2));
     },
   };
 }

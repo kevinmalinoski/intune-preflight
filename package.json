@@ -1,7 +1,7 @@
 {
   "name": "intune-preflight",
   "private": true,
-  "version": "2.2.1",
+  "version": "2.3.0",
   "workspaces": [
     "apps/server",
     "apps/web",

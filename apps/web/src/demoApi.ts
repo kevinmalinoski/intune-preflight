@@ -15,6 +15,7 @@ import {
   simulationToCsv,
 } from "@intune-preflight/engine";
 import type { SimulationInputs } from "./api.ts";
+import type { Download } from "./download.ts";
 
 const data = () => demoTenantData();
 const ok = <T>(v: T) => Promise.resolve(v);
@@ -26,9 +27,11 @@ const toInputs = (i: SimulationInputs) => ({
   unassignedPolicyIds: i.unassignedPolicyIds ?? [],
 });
 
-// A data: URL so the download anchors (which carry a `download` attribute) save a
-// real file client-side, no backend Content-Disposition needed.
-const fileUrl = (mime: string, text: string) => `data:${mime};charset=utf-8,${encodeURIComponent(text)}`;
+// There is no backend to set a Content-Disposition, so hand the bytes straight
+// to `saveDownload` and let it write the file client-side. This used to be a
+// `data:` URL on the download anchor, which Safari refuses outright -- see
+// download.ts for what that looked like on iPadOS.
+const textFile = (mime: string, text: string): Download => ({ kind: "text", text, mime });
 
 export const demoApi = {
   health: () => ok({ status: "ok", demo: true, hasCredentials: false, loadWarnings: [] as string[] }),
@@ -37,14 +40,14 @@ export const demoApi = {
   filters: () => ok(listAssignmentFilters(data())),
   unassignedPolicies: () => ok(listUnassignedPolicies(data())),
   assignmentReport: (platform?: Platform) => ok(buildAssignmentReport(data(), platform)),
-  assignmentReportCsvUrl: (platform?: Platform) =>
-    fileUrl("text/csv", assignmentReportToCsv(buildAssignmentReport(data(), platform))),
+  assignmentReportExport: (platform?: Platform) =>
+    textFile("text/csv", assignmentReportToCsv(buildAssignmentReport(data(), platform))),
   refresh: () => ok({ warnings: [] as string[] }),
   simulate: (inputs: SimulationInputs) => ok(computeSimulation(data(), toInputs(inputs))),
-  simulateExportUrl: (inputs: SimulationInputs, format: "json" | "csv") => {
+  simulateExport: (inputs: SimulationInputs, format: "json" | "csv") => {
     const sim = computeSimulation(data(), toInputs(inputs));
     return format === "csv"
-      ? fileUrl("text/csv", simulationToCsv(sim))
-      : fileUrl("application/json", JSON.stringify(sim, null, 2));
+      ? textFile("text/csv", simulationToCsv(sim))
+      : textFile("application/json", JSON.stringify(sim, null, 2));
   },
 };

@@ -403,6 +403,54 @@ const policies: IntunePolicy[] = [
     ],
   },
 
+  // ---- Windows feature updates: two profiles reaching the same device ----
+  // The case that motivated LayeredSetting. Both reach a corporate device (one
+  // via All Devices, one via the pilot ring), and they name different versions.
+  // That is NOT a conflict: Windows Update evaluates every applicable policy and
+  // offers the LATEST applicable version, so the tool reports it as layered,
+  // names the rule, and lists both versions without picking one.
+  //
+  // Their settingIds and `resolution` are exactly what the real normalizer
+  // produces for a `windowsFeatureUpdateProfile` (see resolutionRuleFor), so the
+  // invariant suite exercises the layered path over the demo tenant rather than
+  // only over hand-built fixtures.
+  {
+    id: "pol-win-featureupdate-23h2",
+    kind: "deviceConfiguration",
+    displayName: "Win - Feature Update - Windows 11 23H2 - Production",
+    platform: "windows",
+    assignedGroupIds: [ALL_DEVICES],
+    excludedGroupIds: [],
+    assignmentFilters: [],
+    settings: [
+      {
+        settingId: "windowsFeatureUpdateProfile:featureUpdateVersion",
+        cspArea: "Windows Feature Update Profile",
+        displayName: "Feature Update Version",
+        value: "Windows 11, version 23H2",
+        resolution: "latest-version-wins",
+      },
+    ],
+  },
+  {
+    id: "pol-win-featureupdate-24h2",
+    kind: "deviceConfiguration",
+    displayName: "Win - Feature Update - Windows 11 24H2 - Pilot",
+    platform: "windows",
+    assignedGroupIds: ["grp-ring-pilot"],
+    excludedGroupIds: [],
+    assignmentFilters: [],
+    settings: [
+      {
+        settingId: "windowsFeatureUpdateProfile:featureUpdateVersion",
+        cspArea: "Windows Feature Update Profile",
+        displayName: "Feature Update Version",
+        value: "Windows 11, version 24H2",
+        resolution: "latest-version-wins",
+      },
+    ],
+  },
+
   // ---- Compliance (OIB assigns these to users -> All Users virtual scope) ----
   {
     id: "pol-oib-compliance-devhealth",

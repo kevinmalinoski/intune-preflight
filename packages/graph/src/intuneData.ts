@@ -597,8 +597,15 @@ async function fetchAssignmentFilters(ctx: LoadContext): Promise<AssignmentFilte
  * namespaces the settingId per update-profile kind (and derives a sensible CSP
  * area), then treat them as Windows device configurations for the baseline.
  * These are genuine baseline inputs -- e.g. which feature update version a
- * device is targeted to -- and two profiles targeting different versions are a
- * real conflict.
+ * device is targeted to.
+ *
+ * The synthetic @odata.type matters for more than the settingId: it is also what
+ * `resolutionRuleFor` keys on, and feature/driver/quality update profiles do NOT
+ * resolve a disagreement by one policy overriding another, so they must not be
+ * reported as conflicts. Two feature update profiles naming different versions
+ * are a LAYERED finding (Windows Update takes the latest applicable version),
+ * not a conflict. Update rings, which arrive via `fetchDeviceConfigurations`
+ * with their own real @odata.type, remain genuine conflicts. See ResolutionRule.
  */
 async function fetchWindowsUpdateProfiles(ctx: LoadContext): Promise<IntunePolicy[]> {
   const sources = [

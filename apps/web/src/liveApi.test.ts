@@ -191,30 +191,45 @@ describe("refresh", () => {
   });
 });
 
-describe("export URLs", () => {
-  it("are data: URLs, so a download needs no backend", async () => {
+describe("exports", () => {
+  it("carry the bytes, not a URL, so a download needs no backend", async () => {
     const api = createLiveApi(deps());
     await api.assignmentReport();
-    expect(api.assignmentReportCsvUrl()).toMatch(/^data:text\/csv;charset=utf-8,/);
-    expect(api.simulateExportUrl({ groupIds: [] }, "csv")).toMatch(/^data:text\/csv;charset=utf-8,/);
-    expect(api.simulateExportUrl({ groupIds: [] }, "json")).toMatch(/^data:application\/json;charset=utf-8,/);
+    expect(api.assignmentReportExport()).toMatchObject({ kind: "text", mime: "text/csv" });
+    expect(api.simulateExport({ groupIds: [] }, "csv")).toMatchObject({ kind: "text", mime: "text/csv" });
+    expect(api.simulateExport({ groupIds: [] }, "json")).toMatchObject({ kind: "text", mime: "application/json" });
+  });
+
+  it("are never a data: URL", async () => {
+    // The whole point of the descriptor. Safari does not honour an anchor's
+    // `download` attribute on a data: URL, so a data: export is one that
+    // silently fails to save on every Apple device -- see download.ts.
+    const api = createLiveApi(deps());
+    await api.assignmentReport();
+    for (const d of [api.assignmentReportExport(), api.simulateExport({ groupIds: [] }, "json")]) {
+      expect(d.kind).toBe("text");
+      if (d.kind === "text") expect(d.text.startsWith("data:")).toBe(false);
+    }
   });
 
   it("do not throw before anything has loaded", () => {
-    // They are called during render, where a throw blanks the page. The panels
-    // that render them already hold loaded data, but a race must not be fatal.
+    // They are reached from a click handler, where a throw would take out the
+    // panel. The panels that render the buttons already hold loaded data, but a
+    // race must not be fatal.
     const api = createLiveApi(deps());
-    expect(() => api.assignmentReportCsvUrl()).not.toThrow();
-    expect(() => api.simulateExportUrl({ groupIds: [] }, "csv")).not.toThrow();
+    expect(() => api.assignmentReportExport()).not.toThrow();
+    expect(() => api.simulateExport({ groupIds: [] }, "csv")).not.toThrow();
   });
 
   it("carry the loaded tenant once there is one", async () => {
     const api = createLiveApi(deps());
     const groups = await api.groups();
     expect(groups.length).toBeGreaterThan(0);
-    const csv = decodeURIComponent(api.assignmentReportCsvUrl().replace(/^data:text\/csv;charset=utf-8,/, ""));
-    expect(csv.length).toBeGreaterThan(0);
+    const report = api.assignmentReportExport();
+    expect(report.kind).toBe("text");
+    if (report.kind !== "text") return;
+    expect(report.text.length).toBeGreaterThan(0);
     // Sanity: it is the sample tenant's report, not an empty one.
-    expect(csv.split("\n").length).toBeGreaterThan(1);
+    expect(report.text.split("\n").length).toBeGreaterThan(1);
   });
 });

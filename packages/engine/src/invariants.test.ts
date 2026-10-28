@@ -47,30 +47,57 @@ describe("simulation invariants", () => {
       const settingIds = new Set(sim.settings.map((s) => s.settingId));
       expect(sim.settings.length).toBe(settingIds.size);
 
-      // `conflicted` is set on exactly the settings that have a conflict entry,
-      // so the flag always has something to point the reader at.
+      // `conflicted` and `layered` are each set on exactly the settings that
+      // have a matching finding entry, so a flag always has something to point
+      // the reader at -- and the two flags never both appear on one setting.
       const conflictIds = new Set(sim.conflicts.map((c) => c.settingId));
-      for (const s of sim.settings) expect(Boolean(s.conflicted)).toBe(conflictIds.has(s.settingId));
+      const layeredIds = new Set(sim.layered.map((l) => l.settingId));
+      for (const s of sim.settings) {
+        expect(Boolean(s.conflicted)).toBe(conflictIds.has(s.settingId));
+        expect(Boolean(s.layered)).toBe(layeredIds.has(s.settingId));
+        expect(Boolean(s.conflicted) && Boolean(s.layered)).toBe(false);
+      }
 
-      // Conflicts and overlaps describe settings that are actually in the baseline.
+      // Every finding describes a setting that is actually in the baseline.
       for (const c of sim.conflicts) expect(settingIds.has(c.settingId)).toBe(true);
+      for (const l of sim.layered) expect(settingIds.has(l.settingId)).toBe(true);
       for (const o of sim.overlaps) expect(settingIds.has(o.settingId)).toBe(true);
 
-      // A disagreement and a redundancy are mutually exclusive by definition.
-      for (const o of sim.overlaps) expect(conflictIds.has(o.settingId)).toBe(false);
+      // The three buckets partition the settings that more than one policy
+      // touches: a refused disagreement, a disagreement resolved by a rule, and
+      // a redundancy are mutually exclusive by definition.
+      for (const id of layeredIds) expect(conflictIds.has(id)).toBe(false);
+      for (const o of sim.overlaps) {
+        expect(conflictIds.has(o.settingId)).toBe(false);
+        expect(layeredIds.has(o.settingId)).toBe(false);
+      }
       for (const c of sim.conflicts) expect(new Set(c.values.map((v) => v.value)).size).toBeGreaterThan(1);
+      // A layered finding is a real disagreement too -- policies that agree are
+      // an overlap, whatever their type's resolution rule.
+      for (const l of sim.layered) expect(new Set(l.values.map((v) => v.value)).size).toBeGreaterThan(1);
       for (const o of sim.overlaps) expect(o.sourcePolicies.length).toBeGreaterThan(1);
+
+      // A layered finding never promotes one value: the merged row's `value` is
+      // still just the first contributing policy reached, exactly as for a
+      // conflict. This is the property that would catch the engine quietly
+      // starting to apply a resolution rule it only claims to report.
+      for (const l of sim.layered) {
+        const row = sim.settings.find((s) => s.settingId === l.settingId);
+        expect(l.values.some((v) => v.value === row?.value && v.sourcePolicyId === row?.sourcePolicyId)).toBe(true);
+      }
 
       // Exclude wins: nothing is reported as both applied and excluded.
       const applied = new Set(sim.policies.map((p) => p.id));
       for (const ex of sim.excludedPolicies) expect(applied.has(ex.id)).toBe(false);
 
-      // Conflict/overlap/cross-model detection is Windows-only by design.
+      // Conflict/layered/overlap/cross-model detection is Windows-only by design.
       if (platform !== "windows") {
         expect(sim.conflicts).toEqual([]);
+        expect(sim.layered).toEqual([]);
         expect(sim.overlaps).toEqual([]);
         expect(sim.crossModel).toEqual([]);
         expect(sim.settings.some((s) => s.conflicted)).toBe(false);
+        expect(sim.settings.some((s) => s.layered)).toBe(false);
       }
 
       // The CSV stays rectangular whatever the data -- a ragged row would

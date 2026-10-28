@@ -1,7 +1,11 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import type { AssignmentReport as Report, AssignmentReportRow, Platform, PolicyKind } from "@intune-preflight/shared";
+import { Fragment, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import type { AssignmentReport as Report, AssignmentReportRow, Platform } from "@intune-preflight/shared";
 import { api } from "./api.ts";
+import { saveDownload } from "./download.ts";
 import { GroupHeatCluster } from "./GroupHeatCluster.tsx";
+import { ManifestGroupCards, PolicyDetailRow } from "./ManifestGroupCards.tsx";
+import { GROUP_KIND_STYLE } from "./manifestRow.ts";
+import { isCompact, subscribeLayout } from "./viewport.ts";
 import type { ClusterPolicy } from "./policyHeat.ts";
 import { GroupPolicyList } from "./GroupPolicyList.tsx";
 import { toggled } from "./collections.ts";
@@ -15,24 +19,15 @@ const OS_FILTERS: { value: Platform; label: string }[] = [
   { value: "android", label: "Android" },
 ];
 
-// Color-coded type chips, matching the diagram's kind palette, so the policy
-// type reads as a uniform labeled column instead of loose grey text.
-const KIND_STYLE: Record<PolicyKind, { label: string; cls: string }> = {
-  deviceConfiguration: { label: "Device Config", cls: "bg-sky-500/15 text-sky-300" },
-  settingsCatalog: { label: "Settings Catalog", cls: "bg-violet-500/15 text-violet-300" },
-  compliancePolicy: { label: "Compliance", cls: "bg-orange-500/15 text-orange-300" },
-  adminTemplate: { label: "Admin Template", cls: "bg-yellow-500/15 text-yellow-300" },
-  platformScript: { label: "Script", cls: "bg-emerald-500/15 text-emerald-300" },
-  endpointSecurity: { label: "Endpoint Security (Legacy)", cls: "bg-rose-500/15 text-rose-300" },
-};
-
-const GROUP_KIND_STYLE: Record<string, string> = {
-  virtual: "bg-slate-500/20 text-slate-300",
-  dynamic: "bg-violet-500/20 text-violet-300",
-  assigned: "bg-sky-500/20 text-sky-300",
-};
-
 type SortKey = "group" | "direct" | "inherited" | "excl";
+
+/** The sort options, for the compact layout's select — the table sorts by header click. */
+const SORT_OPTIONS: { key: SortKey; dir: "asc" | "desc"; label: string }[] = [
+  { key: "direct", dir: "desc", label: "Most direct" },
+  { key: "inherited", dir: "desc", label: "Most inherited" },
+  { key: "excl", dir: "desc", label: "Most excluded" },
+  { key: "group", dir: "asc", label: "Group A→Z" },
+];
 
 /** A clickable column header that shows the active sort direction. */
 function SortTh({
@@ -87,6 +82,9 @@ export function AssignmentReport({
   // The group whose seating chart is expanded into the full chip list, if any.
   const [openCluster, setOpenCluster] = useState<{ id: string; name: string } | null>(null);
   const canSimulate = !!onSimulateGroups;
+  // Live, not read-once: resizing has to swap table <-> cards, since the two
+  // are different DOM over the same rows rather than a different state.
+  const compact = useSyncExternalStore(subscribeLayout, isCompact, () => false);
   const colCount = canSimulate ? 7 : 6;
   const [showInherited, setShowInherited] = useState(true);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -440,17 +438,19 @@ export function AssignmentReport({
           <span className="rounded bg-orange-500/15 px-2 py-1 text-orange-300">{totals.unassigned} unassigned</span>
           <span className="rounded bg-ink-800 px-2 py-1">{totals.groupsTargeted} groups targeted</span>
         </div>
-        <a
-          href={api.assignmentReportCsvUrl(os)}
-          download="policy-group-assignments.csv"
+        {/* A button, not an anchor: in the browser-only builds the export is
+            bytes rather than a URL, and the CSV is now built on click instead
+            of on every render of this toolbar. */}
+        <button
+          onClick={() => saveDownload(api.assignmentReportExport(os), "policy-group-assignments.csv")}
           className="rounded-md border border-emerald-400/50 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20"
         >
           Download CSV
-        </a>
+        </button>
       </div>
 
       {/* OS filter */}
-      <div className="flex items-center gap-1 border-b border-ink-800 bg-ink-900/60 px-4 py-1.5">
+      <div className="flex flex-wrap items-center gap-x-1 gap-y-1.5 border-b border-ink-800 bg-ink-900/60 px-4 py-1.5">
         <span className="mr-1 text-[10px] font-medium uppercase tracking-wide text-slate-500">Platform</span>
         {OS_FILTERS.map((f) => (
           <button
@@ -486,7 +486,25 @@ export function AssignmentReport({
             placeholder="Search groups…"
             className="w-full max-w-xs rounded-md border border-ink-700 bg-ink-800 px-2.5 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 focus:border-sky-400 focus:outline-none"
           />
-          <span className="text-[10px] text-slate-500">Click a column header to sort · click a row to expand</span>
+          {compact ? (
+            <select
+              value={`${sort.key}:${sort.dir}`}
+              onChange={(e) => {
+                const [key, dir] = e.target.value.split(":");
+                setSort({ key: key as SortKey, dir: dir as "asc" | "desc" });
+              }}
+              title="There are no column headers to click at this width, so sorting lives here."
+              className="rounded-md border border-ink-700 bg-ink-800 px-2 py-1.5 text-xs text-slate-300 focus:border-sky-400 focus:outline-none"
+            >
+              {SORT_OPTIONS.map((o) => (
+                <option key={`${o.key}:${o.dir}`} value={`${o.key}:${o.dir}`}>
+                  Sort: {o.label}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="text-[10px] text-slate-500">Click a column header to sort · click a row to expand</span>
+          )}
           {filtersInPlay.length > 0 && (
             <div
               className="ml-auto flex items-center gap-1.5"
@@ -517,210 +535,150 @@ export function AssignmentReport({
           )}
         </div>
 
-        <div className="overflow-hidden rounded-lg border border-ink-700">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-ink-900 text-[10px] uppercase tracking-wide text-slate-500">
-              <tr>
-                {canSimulate && <th className="w-9 px-2 py-2" title="Select groups to send to the Simulator" />}
-                <SortTh label="Group" col="group" sort={sort} onSort={sortBy} />
-                <th className="px-3 py-2 font-medium">Type</th>
-                <SortTh
-                  label="Direct"
-                  col="direct"
-                  sort={sort}
-                  onSort={sortBy}
-                  align="right"
-                  title="Policies assigned directly to this group that apply (after Intune's exclude-wins)."
-                />
-                <SortTh
-                  label="Inherited"
-                  col="inherited"
-                  sort={sort}
-                  onSort={sortBy}
-                  align="right"
-                  title="Policies this group additionally receives from All Devices / All Users and implied memberships. Roughly the same for every group — the tenant-wide baseline."
-                />
-                <SortTh
-                  label="Incl / Excl"
-                  col="excl"
-                  sort={sort}
-                  onSort={sortBy}
-                  align="right"
-                  title="Raw direct assignment edges configured in Intune (before exclude-wins). Sorts by exclude count — find the groups carved out of the most policies."
-                />
-                <th className="px-3 py-2 font-medium">Platforms</th>
-              </tr>
-            </thead>
-            <tbody>
-              {overlaps.map((o) => {
-                const open = expanded.has(o.groupId);
-                const detail = details.get(o.groupId) ?? [];
-                const { direct, inherited } = meta.get(o.groupId) ?? { direct: 0, inherited: 0 };
-                return (
-                  <Fragment key={o.groupId}>
-                    <tr
-                      onClick={() => toggle(o.groupId)}
-                      className="cursor-pointer border-t border-ink-800 hover:bg-ink-800/60"
-                    >
-                      {canSimulate && (
-                        <td className="px-2 py-2" onClick={(e) => e.stopPropagation()}>
-                          {o.groupKind === "virtual" ? (
-                            <input
-                              type="checkbox"
-                              checked
-                              disabled
-                              title="Always applies — every device inherits All Devices / All Users, so there's nothing to select"
-                              className="cursor-not-allowed opacity-40 accent-sky-400"
-                            />
-                          ) : (
-                            <input
-                              type="checkbox"
-                              checked={checked.has(o.groupId)}
-                              onChange={() => toggleChecked(o.groupId)}
-                              title={`Add “${o.groupName}” to the device to simulate`}
-                              className="cursor-pointer accent-sky-400"
-                            />
-                          )}
-                        </td>
-                      )}
-                      <td className="px-3 py-2">
-                        <div className="flex items-center gap-1.5">
-                          <span className="text-slate-500">{open ? "▾" : "▸"}</span>
-                          <span className="font-medium text-slate-200">{o.groupName}</span>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2">
-                        <span
-                          className={`rounded px-1.5 py-0.5 text-[9px] uppercase ${GROUP_KIND_STYLE[o.groupKind] ?? ""}`}
-                        >
-                          {o.groupKind}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums">
-                        <span className={direct > 0 ? "font-medium text-slate-100" : "text-slate-600"}>{direct}</span>
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums">
-                        <span className={inherited > 0 ? "text-slate-300" : "text-slate-600"}>{inherited}</span>
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums text-slate-400">
-                        <span className="text-emerald-300">{o.includeCount}</span>
-                        {" / "}
-                        <span className={o.excludeCount > 0 ? "text-rose-300" : "text-slate-600"}>
-                          {o.excludeCount}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2">
-                        <span className="text-slate-400">{o.platforms.join(", ")}</span>
-                      </td>
-                    </tr>
-                    {open && (
-                      <tr className="border-t border-ink-800 bg-ink-950/40">
-                        <td colSpan={colCount} className="px-3 py-2">
-                          <div className="flex flex-col gap-1">
-                            {detail.map(({ row: r, inheritedFrom, implied, filteredOut }, i) => {
-                              const kind = KIND_STYLE[r.kind] ?? {
-                                label: r.kind,
-                                cls: "bg-slate-500/15 text-slate-400",
-                              };
-                              return (
-                                <div
-                                  key={`${r.policyId}-${r.assignment}-${i}`}
-                                  className={`grid grid-cols-[4rem_8.5rem_minmax(0,1fr)_auto] items-center gap-2 text-[11px] ${
-                                    filteredOut ? "opacity-60" : inheritedFrom ? "opacity-70" : ""
-                                  }`}
-                                >
-                                  <span
-                                    className={`rounded px-1 py-0.5 text-center text-[9px] font-medium uppercase ${
-                                      filteredOut
-                                        ? "bg-violet-500/15 text-violet-300"
-                                        : r.assignment === "Include"
-                                          ? "bg-emerald-500/15 text-emerald-300"
-                                          : "bg-rose-500/15 text-rose-300"
-                                    }`}
-                                  >
-                                    {filteredOut ? "Filtered" : r.assignment}
-                                  </span>
-                                  <span
-                                    className={`justify-self-start rounded px-1.5 py-0.5 text-[9px] font-medium uppercase ${kind.cls}`}
-                                  >
-                                    {kind.label}
-                                  </span>
-                                  <span
-                                    className={`min-w-0 truncate ${filteredOut ? "text-slate-400 line-through" : "text-slate-200"}`}
-                                  >
-                                    {r.policyName}
-                                  </span>
-                                  <div className="flex shrink-0 items-center justify-end gap-1.5">
-                                    {r.legacyTemplate && (
-                                      <span
-                                        className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] text-amber-300"
-                                        title="Legacy device-configuration template — Microsoft is migrating these to the Settings Catalog and deprecating new template creation. Consider rebuilding it as a Settings Catalog policy. Note: its settings aren't cross-detected for conflicts/overlaps against Settings Catalog policies."
-                                      >
-                                        Legacy template
-                                      </span>
-                                    )}
-                                    {inheritedFrom && (
-                                      <span
-                                        className={`rounded px-1.5 py-0.5 text-[9px] ${
-                                          implied ? "bg-amber-500/15 text-amber-300" : "bg-slate-500/15 text-slate-400"
-                                        }`}
-                                        title={
-                                          implied
-                                            ? `Inherited via implied membership — this group's rule implies membership in "${inheritedFrom}". Best-effort; verify in Entra.`
-                                            : `Inherited — assigned to ${inheritedFrom}, which every member of this group also belongs to`
-                                        }
-                                      >
-                                        via {inheritedFrom}
-                                        {implied ? " (implied)" : ""}
-                                      </span>
-                                    )}
-                                    {r.filterId && r.filterName && (
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          toggleFilter(r.filterId!);
-                                        }}
-                                        className={`rounded px-1.5 py-0.5 text-[9px] transition-colors ${
-                                          matched.has(r.filterId)
-                                            ? "bg-violet-500/30 text-violet-100 ring-1 ring-violet-400/60"
-                                            : "bg-violet-500/15 text-violet-300 hover:bg-violet-500/25"
-                                        }`}
-                                        title={
-                                          r.filterType === "include"
-                                            ? matched.has(r.filterId)
-                                              ? `Include filter “${r.filterName}”: the device matches it, so this policy applies. Click to simulate a non-matching device (drops it).`
-                                              : `Include filter “${r.filterName}”: this policy only targets devices that match it, and the simulated device doesn’t — so it isn’t applied. Click to simulate a matching device.`
-                                            : matched.has(r.filterId)
-                                              ? `Exclude filter “${r.filterName}”: the device matches it, so this policy is dropped. Click to stop matching.`
-                                              : `Exclude filter “${r.filterName}”: this policy applies now. Click to simulate the device matching it (drops it).`
-                                        }
-                                      >
-                                        ⛃ {r.filterName}
-                                        {r.filterType ? ` (${r.filterType})` : ""}
-                                        {matched.has(r.filterId) ? " ✓" : ""}
-                                      </button>
-                                    )}
-                                  </div>
-                                </div>
-                              );
-                            })}
+        {/* Seven columns do not fit a phone, so below `lg` each group becomes a
+            card. Both read the same `overlaps` / `details` / `meta`, and both
+            render their policy lists with the same `PolicyDetailRow`. */}
+        {compact ? (
+          <ManifestGroupCards
+            groups={overlaps}
+            details={details}
+            meta={meta}
+            expanded={expanded}
+            onToggleExpanded={toggle}
+            canSimulate={canSimulate}
+            checked={checked}
+            onToggleChecked={toggleChecked}
+            matched={matched}
+            onToggleFilter={toggleFilter}
+            emptyMessage={search ? `No groups match “${search}”.` : "No policy assignments for this platform."}
+          />
+        ) : (
+          <div className="overflow-hidden rounded-lg border border-ink-700">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-ink-900 text-[10px] uppercase tracking-wide text-slate-500">
+                <tr>
+                  {canSimulate && <th className="w-9 px-2 py-2" title="Select groups to send to the Simulator" />}
+                  <SortTh label="Group" col="group" sort={sort} onSort={sortBy} />
+                  <th className="px-3 py-2 font-medium">Type</th>
+                  <SortTh
+                    label="Direct"
+                    col="direct"
+                    sort={sort}
+                    onSort={sortBy}
+                    align="right"
+                    title="Policies assigned directly to this group that apply (after Intune's exclude-wins)."
+                  />
+                  <SortTh
+                    label="Inherited"
+                    col="inherited"
+                    sort={sort}
+                    onSort={sortBy}
+                    align="right"
+                    title="Policies this group additionally receives from All Devices / All Users and implied memberships. Roughly the same for every group — the tenant-wide baseline."
+                  />
+                  <SortTh
+                    label="Incl / Excl"
+                    col="excl"
+                    sort={sort}
+                    onSort={sortBy}
+                    align="right"
+                    title="Raw direct assignment edges configured in Intune (before exclude-wins). Sorts by exclude count — find the groups carved out of the most policies."
+                  />
+                  <th className="px-3 py-2 font-medium">Platforms</th>
+                </tr>
+              </thead>
+              <tbody>
+                {overlaps.map((o) => {
+                  const open = expanded.has(o.groupId);
+                  const detail = details.get(o.groupId) ?? [];
+                  const { direct, inherited } = meta.get(o.groupId) ?? { direct: 0, inherited: 0 };
+                  return (
+                    <Fragment key={o.groupId}>
+                      <tr
+                        onClick={() => toggle(o.groupId)}
+                        className="cursor-pointer border-t border-ink-800 hover:bg-ink-800/60"
+                      >
+                        {canSimulate && (
+                          <td className="px-2 py-2" onClick={(e) => e.stopPropagation()}>
+                            {o.groupKind === "virtual" ? (
+                              <input
+                                type="checkbox"
+                                checked
+                                disabled
+                                title="Always applies — every device inherits All Devices / All Users, so there's nothing to select"
+                                className="cursor-not-allowed opacity-40 accent-sky-400"
+                              />
+                            ) : (
+                              <input
+                                type="checkbox"
+                                checked={checked.has(o.groupId)}
+                                onChange={() => toggleChecked(o.groupId)}
+                                title={`Add “${o.groupName}” to the device to simulate`}
+                                className="cursor-pointer accent-sky-400"
+                              />
+                            )}
+                          </td>
+                        )}
+                        <td className="px-3 py-2">
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-slate-500">{open ? "▾" : "▸"}</span>
+                            <span className="font-medium text-slate-200">{o.groupName}</span>
                           </div>
                         </td>
+                        <td className="px-3 py-2">
+                          <span
+                            className={`rounded px-1.5 py-0.5 text-[9px] uppercase ${GROUP_KIND_STYLE[o.groupKind] ?? ""}`}
+                          >
+                            {o.groupKind}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums">
+                          <span className={direct > 0 ? "font-medium text-slate-100" : "text-slate-600"}>{direct}</span>
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums">
+                          <span className={inherited > 0 ? "text-slate-300" : "text-slate-600"}>{inherited}</span>
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-slate-400">
+                          <span className="text-emerald-300">{o.includeCount}</span>
+                          {" / "}
+                          <span className={o.excludeCount > 0 ? "text-rose-300" : "text-slate-600"}>
+                            {o.excludeCount}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2">
+                          <span className="text-slate-400">{o.platforms.join(", ")}</span>
+                        </td>
                       </tr>
-                    )}
-                  </Fragment>
-                );
-              })}
-              {overlaps.length === 0 && (
-                <tr>
-                  <td colSpan={colCount} className="px-3 py-6 text-center text-slate-500">
-                    {search ? `No groups match “${search}”.` : "No policy assignments for this platform."}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+                      {open && (
+                        <tr className="border-t border-ink-800 bg-ink-950/40">
+                          <td colSpan={colCount} className="px-3 py-2">
+                            <div className="flex flex-col gap-1">
+                              {detail.map(({ row: r, inheritedFrom, implied, filteredOut }, i) => (
+                                <PolicyDetailRow
+                                  key={`${r.policyId}-${r.assignment}-${i}`}
+                                  item={{ row: r, inheritedFrom, implied, filteredOut }}
+                                  matched={matched}
+                                  onToggleFilter={toggleFilter}
+                                />
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
+                {overlaps.length === 0 && (
+                  <tr>
+                    <td colSpan={colCount} className="px-3 py-6 text-center text-slate-500">
+                      {search ? `No groups match “${search}”.` : "No policy assignments for this platform."}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         {/* Reading key — labeled, scannable, replacing the old run-on paragraph. */}
         <div className="mt-3 space-y-2 text-[11px] leading-snug text-slate-500">
@@ -768,7 +726,7 @@ export function AssignmentReport({
           the checked groups to the Simulator as a fresh, ground-up device. */}
       {canSimulate && (
         <div
-          className={`absolute inset-x-0 bottom-0 z-20 border-t border-ink-700 bg-ink-900/95 px-4 py-3 shadow-[0_-8px_24px_rgba(0,0,0,0.35)] backdrop-blur transition-transform duration-200 ${
+          className={`pb-safe absolute inset-x-0 bottom-0 z-20 border-t border-ink-700 bg-ink-900/95 px-4 py-3 shadow-[0_-8px_24px_rgba(0,0,0,0.35)] backdrop-blur transition-transform duration-200 ${
             checked.size > 0 ? "translate-y-0" : "pointer-events-none translate-y-full"
           }`}
         >
@@ -789,7 +747,7 @@ export function AssignmentReport({
               })}
             </div>
           )}
-          <div className="mx-auto flex max-w-5xl items-center gap-3">
+          <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-3 gap-y-2">
             <span className="text-xs text-slate-300">
               <span className="font-semibold text-slate-100">{checked.size}</span> group{checked.size === 1 ? "" : "s"}{" "}
               selected

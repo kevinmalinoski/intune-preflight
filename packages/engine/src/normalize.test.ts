@@ -9,6 +9,7 @@ import {
   parseAssignmentTarget,
   platformFromIntentTemplate,
   platformFromOdataType,
+  resolutionRuleFor,
   ruleImplies,
 } from "./normalize.js";
 
@@ -351,6 +352,59 @@ describe("flattenToCspSettings (compliance default suppression)", () => {
       allowWindows11Upgrade: false,
     };
     expect(flattenToCspSettings(updateRing).map((s) => s.value)).toContain("false");
+  });
+});
+
+describe("resolutionRuleFor (policy types that don't resolve by override)", () => {
+  it.each([
+    ["#microsoft.graph.windowsFeatureUpdateProfile", "latest-version-wins"],
+    ["#microsoft.graph.windowsDriverUpdateProfile", "approved-wins"],
+    ["#microsoft.graph.windowsQualityUpdateProfile", "undocumented"],
+    ["#microsoft.graph.windows10CompliancePolicy", "most-restrictive-wins"],
+    ["#microsoft.graph.macOSCompliancePolicy", "most-restrictive-wins"],
+    ["#microsoft.graph.androidWorkProfileCompliancePolicy", "most-restrictive-wins"],
+  ])("%s resolves by rule, not override", (odataType, rule) => {
+    expect(resolutionRuleFor(odataType)).toBe(rule);
+  });
+
+  it.each([
+    // THE negative control, and the reason this is keyed on @odata.type rather
+    // than on PolicyKind: update rings arrive as `deviceConfiguration` exactly
+    // like feature update profiles, but they ARE a genuine conflict -- Intune
+    // raises an alert and sets neither value until an admin resolves it. A
+    // keyword matching too broadly would quietly swallow them.
+    "#microsoft.graph.windowsUpdateForBusinessConfiguration",
+    "#microsoft.graph.windows10GeneralConfiguration",
+    "#microsoft.graph.windows10EndpointProtectionConfiguration",
+    "#microsoft.graph.windowsIdentityProtectionConfiguration",
+  ])("%s stays on the conflict path", (odataType) => {
+    expect(resolutionRuleFor(odataType)).toBeUndefined();
+  });
+
+  it("classifies nothing when the type is missing", () => {
+    expect(resolutionRuleFor(undefined)).toBeUndefined();
+  });
+
+  it("stamps the rule onto every setting it flattens", () => {
+    // The merge reads `resolution` off the setting rather than re-deriving the
+    // policy type, so the classification has to survive flattening.
+    const settings = flattenToCspSettings({
+      id: "fu1",
+      "@odata.type": "#microsoft.graph.windowsFeatureUpdateProfile",
+      featureUpdateVersion: "Windows 11, version 24H2",
+    });
+    expect(settings).toHaveLength(1);
+    expect(settings[0].resolution).toBe("latest-version-wins");
+    expect(settings[0].settingId).toBe("windowsFeatureUpdateProfile:featureUpdateVersion");
+  });
+
+  it("leaves an update ring's settings unclassified", () => {
+    const settings = flattenToCspSettings({
+      id: "ring1",
+      "@odata.type": "#microsoft.graph.windowsUpdateForBusinessConfiguration",
+      featureUpdatesDeferralPeriodInDays: 7,
+    });
+    expect(settings[0].resolution).toBeUndefined();
   });
 });
 
