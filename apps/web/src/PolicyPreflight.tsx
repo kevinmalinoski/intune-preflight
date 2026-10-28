@@ -44,7 +44,9 @@ export function PolicyPreflight({
         .sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" })),
     [forPlatform, search]
   );
-  const selectedCount = selectedIds.filter((id) => forPlatform.some((p) => p.id === id)).length;
+  const selectedForPlatform = forPlatform.filter((p) => selectedIds.includes(p.id));
+  const selectedCount = selectedForPlatform.length;
+  const selectedNames = selectedForPlatform.map((p) => p.displayName).join(", ");
   const none = forPlatform.length === 0;
 
   // Bulk controls operate on the currently-visible (search-filtered) rows:
@@ -89,8 +91,20 @@ export function PolicyPreflight({
                 {selectedCount} added
               </span>
             )}
+            {/* Once something is added, WHICH policies beats the pitch -- the
+                bar is collapsed by default, so this line is the only place the
+                selection is visible without opening it. The pitch is dropped
+                below `lg` rather than shortened: at 375px even "add one to
+                simulate it" truncated mid-word, and half a hint is worse than
+                the title attribute it duplicates. */}
             <span className="min-w-0 flex-1 truncate text-xs text-slate-500">
-              — unassigned policies waiting to board; add one to simulate “what if I assigned this?”
+              {selectedCount > 0 ? (
+                <>— {selectedNames}</>
+              ) : (
+                <span className="hidden lg:inline">
+                  — unassigned policies waiting to board; add one to simulate “what if I assigned this?”
+                </span>
+              )}
             </span>
           </>
         )}
@@ -103,7 +117,7 @@ export function PolicyPreflight({
 
       {open && !none && (
         <div className="mt-2">
-          <div className="mb-1 flex items-center gap-2">
+          <div className="mb-1 flex flex-wrap items-center gap-2">
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -127,14 +141,11 @@ export function PolicyPreflight({
               Clear
             </button>
           </div>
-          <div
-            className="grid grid-cols-1 gap-x-4 overflow-y-auto rounded-md border border-ink-700 sm:grid-cols-2 lg:grid-cols-3"
-            style={{ maxHeight: "160px" }}
-          >
+          <div className="grid max-h-[45vh] grid-cols-1 gap-x-4 overflow-y-auto rounded-md border border-ink-700 sm:grid-cols-2 lg:max-h-40 lg:grid-cols-3">
             {filtered.map((p) => (
               <label
                 key={p.id}
-                className="flex cursor-pointer items-start gap-2 border-b border-ink-800 px-2.5 py-1.5 text-xs hover:bg-ink-800"
+                className="flex cursor-pointer items-start gap-2 border-b border-ink-800 px-2.5 py-3 text-xs hover:bg-ink-800 lg:py-1.5"
                 title={`${p.displayName} — ${KIND_SHORT[p.kind] ?? p.kind}, ${p.settingsCount} setting${p.settingsCount === 1 ? "" : "s"} (no group assignment)`}
               >
                 <input

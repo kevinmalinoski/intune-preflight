@@ -148,16 +148,26 @@ function LiveSetupPanel({ onUseSampleTenant }: { onUseSampleTenant: () => void }
 }
 
 /**
- * Says who is signed in, which tenant, and that the tool is read-only -- and
+ * Says that a tenant is authenticated and that the tool is read-only -- and
  * carries the progress counter for a load that runs ~12s on a medium tenant and
  * longer on a large one. Silence for that long reads as a hung page, and the
  * Graph request count is the honest thing to show: it is the work actually being
  * done, not an invented percentage.
+ *
+ * WHO is signed in is concealed behind the lock rather than printed. This bar
+ * sits at the top of the browser build, so it is in every screenshot, every
+ * demo and every screen-share of it -- and a UPN and a tenant GUID are the two
+ * things least wanted in a published image. Neither is a secret and both are
+ * one click away; the point is that publishing them becomes a decision instead
+ * of the default.
  */
 export function LiveSessionBanner() {
   const progress = useSyncExternalStore(subscribeLoadProgress, getLoadProgress);
   const identity = signedInIdentity();
   const [ending, setEnding] = useState(false);
+  // Deliberately not persisted: concealed again on every load, because the
+  // screenshot it protects is usually taken on a freshly opened page.
+  const [revealed, setRevealed] = useState(false);
 
   if (!identity) return null;
 
@@ -169,15 +179,18 @@ export function LiveSessionBanner() {
 
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-emerald-500/20 bg-emerald-500/10 px-4 py-1 text-[11px] text-emerald-300">
-      <span aria-hidden>🔐</span>
-      <span>
-        Signed in as <span className="font-medium">{identity.name ?? identity.username}</span>
-        {identity.name && <span className="text-emerald-300/70"> ({identity.username})</span>}
-      </span>
-      <span className="text-emerald-300/50">·</span>
-      <span>
-        tenant <code className="font-mono">{identity.tenantId}</code>
-      </span>
+      <button
+        onClick={() => setRevealed((v) => !v)}
+        aria-expanded={revealed}
+        title={revealed ? "Hide the signed-in account and tenant" : "Show the signed-in account and tenant"}
+        className="-mx-1 flex items-center gap-1.5 rounded px-1 py-0.5 font-medium transition-colors hover:bg-emerald-500/20"
+      >
+        <span aria-hidden>{revealed ? "🔓" : "🔒"}</span>
+        Authenticated to tenant
+        <span className="text-[9px] opacity-70" aria-hidden>
+          {revealed ? "▴" : "▾"}
+        </span>
+      </button>
       <span className="text-emerald-300/50">·</span>
       <span>read-only — this tool never writes to a tenant</span>
 
@@ -200,6 +213,19 @@ export function LiveSessionBanner() {
       >
         {ending ? "Ending…" : "End session"}
       </button>
+
+      {/* `w-full` puts this on its own line of the wrapping row, so revealing it
+          never reflows the controls above. */}
+      {revealed && (
+        <div className="flex w-full flex-wrap items-center gap-x-2 gap-y-0.5 pt-0.5 text-emerald-300/80">
+          <span className="font-medium text-emerald-200">{identity.name ?? identity.username}</span>
+          {identity.name && <span>({identity.username})</span>}
+          <span className="text-emerald-300/50">·</span>
+          <span>
+            tenant <code className="break-all font-mono">{identity.tenantId}</code>
+          </span>
+        </div>
+      )}
     </div>
   );
 }

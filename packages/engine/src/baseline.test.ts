@@ -315,7 +315,7 @@ describe("computeSimulation", () => {
       ],
     });
     const csv = simulationToCsv(computeSimulation(data, { selectedGroupIds: ["g1"], platform: "windows" }));
-    const [header, ...rows] = csv.split("\n");
+    const [header, ...rows] = csv.split("\r\n");
     expect(header).toContain("Resolution");
     expect(rows).toHaveLength(2);
     for (const row of rows) {
@@ -419,6 +419,32 @@ describe("assignmentReportToCsv (formula-injection safe)", () => {
     expect(csv).toContain("\"'=HYPERLINK");
     // A benign value is not altered.
     expect(csv).toContain('"g1"');
+  });
+});
+
+describe("CSV is shaped for the thing that opens it", () => {
+  // Excel on iPadOS rejected these outright as corrupt, while Quick Look
+  // rendered the same bytes perfectly -- the file was valid CSV and invalid
+  // Excel input. Both halves of the fix are invisible on screen, so nothing but
+  // a test stops them being tidied away again.
+  const data = tenant({
+    groups: [group("g1")],
+    policies: [policy({ id: "p1", assignedGroupIds: ["g1"] })],
+  });
+
+  it("starts with a UTF-8 BOM, so Excel does not have to guess the encoding", () => {
+    expect(assignmentReportToCsv(buildAssignmentReport(data, "windows")).charCodeAt(0)).toBe(0xfeff);
+    expect(
+      simulationToCsv(computeSimulation(data, { selectedGroupIds: ["g1"], platform: "windows" })).charCodeAt(0)
+    ).toBe(0xfeff);
+  });
+
+  it("separates records with CRLF, as RFC 4180 specifies", () => {
+    const csv = assignmentReportToCsv(buildAssignmentReport(data, "windows"));
+    expect(csv).toContain("\r\n");
+    // No bare LF anywhere: every newline is part of a CRLF pair. A lone \n is
+    // what desktop Excel forgives and mobile Excel does not.
+    expect(csv.replace(/\r\n/g, "")).not.toContain("\n");
   });
 });
 

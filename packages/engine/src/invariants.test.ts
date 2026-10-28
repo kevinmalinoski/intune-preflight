@@ -102,7 +102,7 @@ describe("simulation invariants", () => {
 
       // The CSV stays rectangular whatever the data -- a ragged row would
       // silently shift columns in Excel.
-      const lines = simulationToCsv(sim).split("\n").filter(Boolean);
+      const lines = simulationToCsv(sim).split("\r\n").filter(Boolean);
       const header = columnCount(lines[0]);
       for (const l of lines) expect(columnCount(l)).toBe(header);
     }

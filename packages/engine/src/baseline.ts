@@ -348,6 +348,25 @@ function csvCell(value: string): string {
   return `"${guarded.replace(/"/g, '""')}"`;
 }
 
+/**
+ * Rows to CSV text, with a UTF-8 BOM and CRLF between records.
+ *
+ * Excel is where these files are going and it is stricter than the format they
+ * are in. Without the BOM it guesses the encoding, and Excel on iPadOS refuses
+ * the file outright as corrupt rather than guessing wrong visibly. RFC 4180
+ * specifies CRLF between records; desktop Excel forgives LF and mobile Excel
+ * does not. Quick Look renders the same bytes perfectly either way, which is
+ * what makes this present as a mystery rather than as a format problem.
+ *
+ * It lives here, not at the download, so the self-hosted, demo and browser
+ * builds cannot emit different bytes for the same export -- the server streams
+ * this string straight out of /api/.../export and the browser builds wrap it in
+ * a Blob, and those two have drifted before.
+ */
+function toCsv(rows: string[][]): string {
+  return "\ufeff" + rows.map((row) => row.map(csvCell).join(",")).join("\r\n");
+}
+
 export function assignmentReportToCsv(report: AssignmentReport): string {
   const header = ["Policy", "Policy Type", "Platform", "Assignment", "Group", "Group Type", "Assignment Filter"];
   const kindLabel = (k: PolicyKind) => k;
@@ -360,7 +379,7 @@ export function assignmentReportToCsv(report: AssignmentReport): string {
     r.groupKind,
     r.filterName ? `${r.filterName}${r.filterType ? ` (${r.filterType})` : ""}` : "",
   ]);
-  return [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
+  return toCsv([header, ...rows]);
 }
 
 /**
@@ -765,5 +784,5 @@ export function simulationToCsv(simulation: SimulationResult): string {
     rows.push([s.cspArea, s.displayName, path, s.value, s.sourcePolicyName, s.sourceKind, "no", "no", ""]);
   }
 
-  return [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
+  return toCsv([header, ...rows]);
 }

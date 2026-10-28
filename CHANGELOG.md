@@ -6,6 +6,40 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [2.3.1] — 2026-10-28
+
+Follow-up to the same day's 2.3.0. Exports can be opened in Excel again, the
+Policy Waitlist works at phone width, and the browser build no longer prints
+who is signed in.
+
+### Fixed
+- **CSV exports could not be opened in Excel**, which reported them as
+  corrupted while Quick Look displayed the same file perfectly. Nothing was
+  wrong with the content — it was valid CSV and invalid Excel input. Two things
+  were missing around it: a UTF-8 BOM, without which Excel guesses the encoding
+  and the iPadOS version declines the file rather than guessing wrong visibly;
+  and CRLF between records, which is what RFC 4180 specifies and which desktop
+  Excel forgives but mobile Excel does not. Both now live in the engine, so the
+  self-hosted, demo and browser builds cannot emit different bytes for the same
+  export.
+- **The Policy Waitlist was still built for a mouse.** Its expanded list was
+  capped at 160px — about four rows on a phone — with tap targets under 30px,
+  on a list whose entire purpose is ticking things. The cap is now 45vh below
+  the breakpoint, the rows match the endpoint picker's, and the toolbar wraps so
+  the search field gets its own row. Its summary line also says *which*
+  policies are on the waitlist once any are, rather than only how many; the bar
+  is collapsed by default, so that line is the only place the selection shows.
+
+### Changed
+- **The browser build no longer prints who is signed in.** The session bar used
+  to read "Signed in as «name» («upn») · tenant «guid»", and it sits at the top
+  of the window — so it appeared in every screenshot, demo and screen-share of
+  that build. It now reads **Authenticated to tenant** behind a lock that opens
+  to reveal the account and tenant id. Neither was ever a secret and both are
+  one click away; what changes is that publishing them is a decision rather than
+  the default. Ending the session, the read-only note and the Graph progress
+  counter are unchanged.
+
 ## [2.3.0] — 2026-10-28
 
 Intune Preflight now works on a phone, and the merged baseline sits beside the

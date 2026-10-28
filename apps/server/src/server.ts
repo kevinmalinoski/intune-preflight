@@ -112,7 +112,7 @@ export async function buildServer({ logger = true }: { logger?: boolean } = {}) 
         const data = await loadTenantData();
         const report = buildAssignmentReport(data, parsePlatform(req.query.platform));
         if (req.query.format === "csv") {
-          reply.header("Content-Type", "text/csv");
+          reply.header("Content-Type", "text/csv; charset=utf-8");
           reply.header("Content-Disposition", `attachment; filename="policy-group-assignments.csv"`);
           return assignmentReportToCsv(report);
         }
@@ -168,7 +168,7 @@ export async function buildServer({ logger = true }: { logger?: boolean } = {}) 
       const simulation = computeSimulation(data, parseSimulationQuery(req.query));
 
       if (req.query.format === "csv") {
-        reply.header("Content-Type", "text/csv");
+        reply.header("Content-Type", "text/csv; charset=utf-8");
         reply.header("Content-Disposition", `attachment; filename="endpoint-baseline.csv"`);
         return simulationToCsv(simulation);
       }
