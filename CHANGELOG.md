@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [2.3.2] — 2026-10-28
+
+A one-fix release. Exports download again on Windows.
+
+### Fixed
+- **On Windows, the CSV export opened the share dialog instead of downloading**,
+  while the JSON export beside it downloaded normally. The code asked
+  `navigator.canShare({ files })` — whether sharing a file is *possible* — and
+  treated the answer as meaning the device could not download. Those coincide on
+  iOS and diverge everywhere else: Windows has a native share sheet and Chrome
+  and Edge expose it, so a desktop user clicking **Download CSV** got a share
+  dialog. The split between the two formats is what made the cause legible —
+  Chrome permits only certain file types to be shared, `text/csv` is on that
+  list and `application/json` is not, so one export shared and the other
+  downloaded on the same machine. The share sheet is now used on iOS and iPadOS
+  only, which is the condition it was always meant to detect; everywhere else,
+  including Windows machines with a touchscreen, gets an ordinary download.
+  Introduced in 2.3.0.
+
 ## [2.3.1] — 2026-10-28
 
 Follow-up to the same day's 2.3.0. Exports can be opened in Excel again, the

@@ -39,10 +39,8 @@ export function saveDownload(download: Download, filename: string): void {
   const blob = new Blob([download.text], { type: `${download.mime};charset=utf-8` });
 
   // iPadOS has no filesystem to speak of, and "Save to Files" from the share
-  // sheet is what a tablet user is actually reaching for. Feature-detected, so
-  // desktop browsers -- where sharing a file is the wrong gesture entirely --
-  // fall straight through to the anchor below.
-  const file = asFile(blob, filename, download.mime);
+  // sheet is what a tablet user is actually reaching for.
+  const file = prefersShareSheet(navigator) ? asFile(blob, filename, download.mime) : null;
   if (file && canShareFile(file)) {
     // Not awaited, on purpose. Awaiting would hand the rest of this function to
     // a later task, and a cancelled share rejects with AbortError -- so an
@@ -75,6 +73,29 @@ function clickAnchor(href: string, filename: string): void {
   document.body.append(a);
   a.click();
   a.remove();
+}
+
+/**
+ * Is this a device where a download does not really work, so the share sheet is
+ * how a file gets saved?
+ *
+ * iOS and iPadOS, and nothing else. `navigator.canShare({ files })` is NOT this
+ * test, which is what the first version of this got wrong: Windows Chrome and
+ * Edge support sharing files too, so an export there stopped downloading and
+ * started opening the Windows share dialog. It showed up as CSV and JSON
+ * behaving differently on one machine -- Chrome will only share certain file
+ * types, and `text/csv` is on that list while `application/json` is not, so one
+ * format shared and the other downloaded. Two formats diverging on one platform
+ * is what gave it away; the real fault was treating a capability as a proxy for
+ * a platform.
+ *
+ * iPadOS reports itself as "MacIntel" and is otherwise indistinguishable from a
+ * Mac here, so the touch-point count is what separates them. Takes the
+ * navigator rather than reading the global, so it can be tested without one.
+ */
+export function prefersShareSheet(nav: { userAgent?: string; platform?: string; maxTouchPoints?: number }): boolean {
+  if (/iPad|iPhone|iPod/.test(nav.userAgent ?? "")) return true;
+  return nav.platform === "MacIntel" && (nav.maxTouchPoints ?? 0) > 1;
 }
 
 function asFile(blob: Blob, filename: string, mime: string): File | null {
