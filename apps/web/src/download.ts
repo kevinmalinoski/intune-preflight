@@ -25,33 +25,31 @@ export type Download = { kind: "url"; url: string } | { kind: "text"; text: stri
 /**
  * Saves an export under `filename`.
  *
- * Call this straight from a click handler and do nothing asynchronous first:
- * iOS only allows the share sheet below to open inside the click's own task,
- * and rejects it as non-user-initiated otherwise. That constraint is also why
- * the API's export helpers stay synchronous.
+ * One path for every platform: a Blob on an anchor carrying `download`. That
+ * works on iOS and iPadOS too -- Safari shows its own download prompt and the
+ * file lands in Files > Downloads, verified in the simulator. The original bug
+ * was specific to `data:` URLs, which Safari will not save; a Blob was the
+ * whole fix.
+ *
+ * v2.3.0 to v2.3.2 also routed iOS through `navigator.share({ files })`, on the
+ * assumption that a download would not work there. It does, and the share sheet
+ * was worse: it asks the user to choose a destination rather than using
+ * Downloads, and it gated on a capability that is also true on Windows, which
+ * is how a desktop CSV export started opening the Windows share dialog. Three
+ * releases of churn for a branch that was never needed. Do not reintroduce it
+ * without first checking that a plain download actually fails on the device in
+ * question.
+ *
+ * Still call this straight from a click handler with nothing awaited first: the
+ * API's export helpers are synchronous for the same reason, and a download
+ * started a task later is treated as non-user-initiated.
  */
 export function saveDownload(download: Download, filename: string): void {
   if (download.kind === "url") {
     clickAnchor(download.url, filename);
     return;
   }
-
-  const blob = new Blob([download.text], { type: `${download.mime};charset=utf-8` });
-
-  // iPadOS has no filesystem to speak of, and "Save to Files" from the share
-  // sheet is what a tablet user is actually reaching for.
-  const file = prefersShareSheet(navigator) ? asFile(blob, filename, download.mime) : null;
-  if (file && canShareFile(file)) {
-    // Not awaited, on purpose. Awaiting would hand the rest of this function to
-    // a later task, and a cancelled share rejects with AbortError -- so an
-    // awaited fallback would download the file the admin just declined to save.
-    void navigator.share({ files: [file] }).catch((err: Error) => {
-      if (err.name !== "AbortError") saveBlob(blob, filename);
-    });
-    return;
-  }
-
-  saveBlob(blob, filename);
+  saveBlob(new Blob([download.text], { type: `${download.mime};charset=utf-8` }), filename);
 }
 
 function saveBlob(blob: Blob, filename: string): void {
@@ -73,44 +71,4 @@ function clickAnchor(href: string, filename: string): void {
   document.body.append(a);
   a.click();
   a.remove();
-}
-
-/**
- * Is this a device where a download does not really work, so the share sheet is
- * how a file gets saved?
- *
- * iOS and iPadOS, and nothing else. `navigator.canShare({ files })` is NOT this
- * test, which is what the first version of this got wrong: Windows Chrome and
- * Edge support sharing files too, so an export there stopped downloading and
- * started opening the Windows share dialog. It showed up as CSV and JSON
- * behaving differently on one machine -- Chrome will only share certain file
- * types, and `text/csv` is on that list while `application/json` is not, so one
- * format shared and the other downloaded. Two formats diverging on one platform
- * is what gave it away; the real fault was treating a capability as a proxy for
- * a platform.
- *
- * iPadOS reports itself as "MacIntel" and is otherwise indistinguishable from a
- * Mac here, so the touch-point count is what separates them. Takes the
- * navigator rather than reading the global, so it can be tested without one.
- */
-export function prefersShareSheet(nav: { userAgent?: string; platform?: string; maxTouchPoints?: number }): boolean {
-  if (/iPad|iPhone|iPod/.test(nav.userAgent ?? "")) return true;
-  return nav.platform === "MacIntel" && (nav.maxTouchPoints ?? 0) > 1;
-}
-
-function asFile(blob: Blob, filename: string, mime: string): File | null {
-  try {
-    return new File([blob], filename, { type: mime });
-  } catch {
-    return null;
-  }
-}
-
-function canShareFile(file: File): boolean {
-  try {
-    return typeof navigator.canShare === "function" && navigator.canShare({ files: [file] });
-  } catch {
-    // Some browsers throw rather than answering false for a files payload.
-    return false;
-  }
 }

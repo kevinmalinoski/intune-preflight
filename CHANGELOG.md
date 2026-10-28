@@ -6,6 +6,31 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [2.3.3] — 2026-10-28
+
+Exports download the same way everywhere, including on iPhone and iPad, where
+they now land in Files › Downloads.
+
+### Changed
+- **Exports no longer use the iOS share sheet.** A Blob on a download link turns
+  out to work on iOS and iPadOS perfectly well — Safari shows its own download
+  prompt and the file goes to **Files › Downloads** — which makes the share
+  sheet unnecessary, and worse than the thing it replaced: it asked where to put
+  the file, so there was no predictable place to look for it afterwards. The
+  original fault in 2.3.0 was specific to `data:` URLs, which Safari refuses to
+  save; moving to a Blob was the whole fix, and routing iOS through
+  `navigator.share` was a second change on top of a solved problem. That branch
+  then leaked onto Windows, where sharing files is also supported, which is what
+  2.3.2 had to patch. There is now one code path for every build and every
+  platform, and no platform detection left to get wrong.
+
+### Note
+- Excel for iPadOS still refuses to open the CSV exports. The file is correct —
+  it carries a UTF-8 BOM and CRLF endings, and opens in Excel on both macOS and
+  Windows — so this is a limitation of Excel on that platform rather than a
+  problem with the export. A native `.xlsx` export is the fix and is not in this
+  release.
+
 ## [2.3.2] — 2026-10-28
 
 A one-fix release. Exports download again on Windows.
