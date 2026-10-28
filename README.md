@@ -68,10 +68,10 @@ The normal loop is deploy-and-pray: assign a policy, wait for devices to check i
 - ⚔️ **Conflicts, overlaps & cross-model collisions** — genuine value disagreements vs redundant duplicates, surfaced separately (Windows) — plus **"legacy policy collisions"**: the same CSP configured through *different* policy models (a legacy template *and* a Settings Catalog policy) that per-model detection can't see, with a migrate-to-Settings-Catalog nudge.
 - 🛡️ **Legacy Endpoint Security & template flags** — intents-based BitLocker, Defender Antivirus, Firewall and ASR policies read and merged with their **real names, value labels and doc links**; deprecated device-config **templates are flagged for migration** to the Settings Catalog.
 - 🏷️ **Group Tag transparency** — dynamic groups are classified against the entered Group Tag (confident match, *+ conditions*, or *conditional*) with each group's `[OrderID]` scope shown inline — surfaced honestly rather than pretending to be Entra's evaluator.
-- 📋 **Assignment Manifest** — a tenant-wide map of which groups carry which policies, with filter simulation and CSV export.
+- 📋 **Assignment Manifest** — a tenant-wide map of which groups carry which policies, with filter simulation and Excel/CSV export.
 - 🔗 **Manifest ↔ Simulator** — check groups in the Manifest and *simulate a device in exactly those groups*; per-group **"seating charts"** reveal at a glance whether a group's policies are its own or shared across the tenant.
 - 🌐 **Four platforms** — Windows, macOS, iOS/iPadOS, and Android, scoped separately.
-- 📤 **Export** — JSON or CSV from both the simulator and the Manifest.
+- 📤 **Export** — an Excel workbook (`.xlsx`), CSV or JSON from the simulator, workbook or CSV from the Manifest. The workbook is the one mobile Excel will open.
 
 ➡️ **[Full feature walkthrough with screenshots](docs/FEATURES.md)**
 

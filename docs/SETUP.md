@@ -298,9 +298,9 @@ The server authenticates to Microsoft Graph using the app registration (client-c
 | `GET /api/filters` | Intune Assignment Filters available in the tenant |
 | `GET /api/unassigned?platform=windows` | Policies with no assignment (the Policy Waitlist) |
 | `GET /api/simulate?groups=id1,id2&platform=windows&deviceFilterIds=id1,id2&unassigned=id3` | Simulated endpoint baseline |
-| `GET /api/simulate/export?…&format=json\|csv` | Download the simulated baseline |
+| `GET /api/simulate/export?…&format=json\|csv\|xlsx` | Download the simulated baseline |
 | `GET /api/reports/assignments?platform=windows` | Assignment Manifest data |
-| `GET /api/reports/assignments/export?platform=windows&format=csv` | Download the manifest as CSV |
+| `GET /api/reports/assignments/export?platform=windows&format=csv\|xlsx` | Download the manifest as CSV or as an Excel workbook |
 | `POST /api/mode` | Switch between `demo` and `connected` |
 | `POST /api/refresh` | Clear the cache, re-fetch from Graph, and report any load warnings |
 

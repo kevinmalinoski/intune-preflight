@@ -113,7 +113,7 @@ _Every setting from every applied policy, merged, filterable, and traceable back
 - **Resizable columns and a column picker** — show and hide columns Intune-style; your layout persists.
 - **Source tracing** — every setting shows which policy set it.
 - **Human-readable names and values** — Settings Catalog settings resolve to their real display names and option labels (e.g. "Enabled") rather than raw definition IDs.
-- **Export** — JSON or CSV of the full merged baseline.
+- **Export** — an Excel workbook, CSV or JSON of the full merged baseline, from one **Export ▾** menu.
 
 ## CSP paths & OMA-URIs
 
@@ -250,11 +250,13 @@ _Each checked group's policies as a heat cluster; click through to the named chi
 
 ## Export
 
-Download the full manifest as CSV — the raw per-assignment detail, ready to pivot by Group or Policy in Excel.
+Download the full manifest from the **Export ▾** menu, as an Excel workbook (`.xlsx`) or CSV — the raw per-assignment detail, ready to pivot by Group or Policy.
+
+The workbook is there because Excel for iPadOS refuses a `.csv` outright, however correct the file is: mobile Excel has no Text Import wizard, so it declines a format whose delimiter, encoding and column types have to be inferred. An `.xlsx` declares all three. It also means values like `=SUM(A1)` and `2026-10-28` arrive as the text they are, with none of the quote-prefixing a CSV needs to stay safe.
 
 ![Export](img/15-manifest-export.png)
 
-_CSV export of every policy → group assignment for the selected platform._
+_Export of every policy → group assignment for the selected platform._
 
 > **Shared use is now visible** through the per-group seating charts above — where the *same policy* is assigned across multiple Entra groups. Surfacing group *pairs* whose combined assignment produces conflicts is parked under *Under consideration* in [ROADMAP.md](../ROADMAP.md).
 

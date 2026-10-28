@@ -6,6 +6,28 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [2.4.0] — 2026-10-28
+
+Exports can now be an Excel workbook, which is what finally opens on an iPad —
+and the formats moved behind one menu rather than a button each.
+
+### Added
+- **Excel (`.xlsx`) export, alongside CSV and JSON.** Excel for iPadOS refuses
+  the CSV exports as corrupted however correct the file is — mobile Excel has no
+  Text Import wizard, so it declines a format whose delimiter, encoding and
+  column types have to be inferred, and Microsoft's own compatibility table
+  lists `.csv` on iOS as read-only at best. An `.xlsx` declares all three in a
+  schema. Because the cells carry their type, values like `=SUM(A1)` and
+  `2026-10-28` arrive as the text they are, without the quote prefix a CSV needs
+  to stay safe from formula injection. Written in the engine with no new
+  dependency, so the self-hosted, demo and live builds all produce the same
+  bytes.
+
+### Changed
+- **One "Export ▾" menu in place of a button per format.** The merged baseline
+  offers Excel, CSV and JSON; the Assignment Manifest offers Excel and CSV.
+  Three buttons crowded a toolbar that already wraps at phone width.
+
 ## [2.3.3] — 2026-10-28
 
 Exports download the same way everywhere, including on iPhone and iPad, where

@@ -32,7 +32,7 @@ Roughly **1600px wide** is plenty (docs scale to page width). Delete any line in
 | `12-manifest-overview.png` | The Manifest table sorted by **Direct** descending, showing the hotspot groups at the top. |
 | `13-manifest-expanded.png` | A group row expanded — the effective policy set with "via All Devices" tags, implied flags, and excludes at the bottom. |
 | `14-manifest-filter-simulation.png` | A **⛃ filter chip** toggled on, showing the struck-through **Filtered** rows and the changed counts. |
-| `15-manifest-export.png` | The **Download CSV** button, or the exported CSV opened in Excel. |
+| `15-manifest-export.png` | The **Export ▾** menu open on its formats, or the exported workbook opened in Excel. |
 
 ---
 

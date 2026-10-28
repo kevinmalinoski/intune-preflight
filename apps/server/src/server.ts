@@ -6,12 +6,15 @@ import { getMode, setMode, type TenantMode } from "./mode.js";
 import { loadTenantData, clearTenantDataCache, getLastLoadWarnings } from "./tenantData.js";
 import {
   assignmentReportToCsv,
+  assignmentReportToXlsx,
   buildAssignmentReport,
   computeSimulation,
   listAssignmentFilters,
   listGroupSummaries,
   listUnassignedPolicies,
   simulationToCsv,
+  simulationToXlsx,
+  XLSX_MIME,
 } from "@intune-preflight/engine";
 
 /**
@@ -111,6 +114,14 @@ export async function buildServer({ logger = true }: { logger?: boolean } = {}) 
       try {
         const data = await loadTenantData();
         const report = buildAssignmentReport(data, parsePlatform(req.query.platform));
+        if (req.query.format === "xlsx") {
+          reply.header("Content-Type", XLSX_MIME);
+          reply.header("Content-Disposition", `attachment; filename="policy-group-assignments.xlsx"`);
+          // A Buffer, so Fastify sends the bytes as they are rather than
+          // serialising them -- a Uint8Array would go out as a JSON object of
+          // numbered keys, which is a corrupt download and not an error.
+          return Buffer.from(assignmentReportToXlsx(report));
+        }
         if (req.query.format === "csv") {
           reply.header("Content-Type", "text/csv; charset=utf-8");
           reply.header("Content-Disposition", `attachment; filename="policy-group-assignments.csv"`);
@@ -166,6 +177,12 @@ export async function buildServer({ logger = true }: { logger?: boolean } = {}) 
     try {
       const data = await loadTenantData();
       const simulation = computeSimulation(data, parseSimulationQuery(req.query));
+
+      if (req.query.format === "xlsx") {
+        reply.header("Content-Type", XLSX_MIME);
+        reply.header("Content-Disposition", `attachment; filename="endpoint-baseline.xlsx"`);
+        return Buffer.from(simulationToXlsx(simulation));
+      }
 
       if (req.query.format === "csv") {
         reply.header("Content-Type", "text/csv; charset=utf-8");

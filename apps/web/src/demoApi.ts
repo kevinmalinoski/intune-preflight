@@ -6,6 +6,7 @@
 import type { Platform } from "@intune-preflight/shared";
 import {
   assignmentReportToCsv,
+  assignmentReportToXlsx,
   buildAssignmentReport,
   computeSimulation,
   demoTenantData,
@@ -13,8 +14,10 @@ import {
   listGroupSummaries,
   listUnassignedPolicies,
   simulationToCsv,
+  simulationToXlsx,
+  XLSX_MIME,
 } from "@intune-preflight/engine";
-import type { SimulationInputs } from "./api.ts";
+import type { BaselineExportFormat, ManifestExportFormat, SimulationInputs } from "./api.ts";
 import type { Download } from "./download.ts";
 
 const data = () => demoTenantData();
@@ -32,6 +35,8 @@ const toInputs = (i: SimulationInputs) => ({
 // `data:` URL on the download anchor, which Safari refuses outright -- see
 // download.ts for what that looked like on iPadOS.
 const textFile = (mime: string, text: string): Download => ({ kind: "text", text, mime });
+/** The xlsx export is a ZIP, so it goes to the Blob as bytes rather than text. */
+const xlsxFile = (bytes: Uint8Array): Download => ({ kind: "bytes", bytes, mime: XLSX_MIME });
 
 export const demoApi = {
   health: () => ok({ status: "ok", demo: true, hasCredentials: false, loadWarnings: [] as string[] }),
@@ -40,12 +45,17 @@ export const demoApi = {
   filters: () => ok(listAssignmentFilters(data())),
   unassignedPolicies: () => ok(listUnassignedPolicies(data())),
   assignmentReport: (platform?: Platform) => ok(buildAssignmentReport(data(), platform)),
-  assignmentReportExport: (platform?: Platform) =>
-    textFile("text/csv", assignmentReportToCsv(buildAssignmentReport(data(), platform))),
+  assignmentReportExport: (platform?: Platform, format: ManifestExportFormat = "csv") => {
+    const report = buildAssignmentReport(data(), platform);
+    return format === "xlsx"
+      ? xlsxFile(assignmentReportToXlsx(report))
+      : textFile("text/csv", assignmentReportToCsv(report));
+  },
   refresh: () => ok({ warnings: [] as string[] }),
   simulate: (inputs: SimulationInputs) => ok(computeSimulation(data(), toInputs(inputs))),
-  simulateExport: (inputs: SimulationInputs, format: "json" | "csv") => {
+  simulateExport: (inputs: SimulationInputs, format: BaselineExportFormat) => {
     const sim = computeSimulation(data(), toInputs(inputs));
+    if (format === "xlsx") return xlsxFile(simulationToXlsx(sim));
     return format === "csv"
       ? textFile("text/csv", simulationToCsv(sim))
       : textFile("application/json", JSON.stringify(sim, null, 2));

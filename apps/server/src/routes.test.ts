@@ -166,6 +166,18 @@ describe("GET /api/simulate/export", () => {
     expect(res.body.split("\n")[0]).toContain("CSP Area");
   });
 
+  it("serves an xlsx workbook, as bytes rather than JSON", async () => {
+    // The route returns a Buffer so Fastify sends the ZIP as it is. Returned as
+    // a Uint8Array it would be serialised to `{"0":80,"1":75,...}` -- a 200 with
+    // a corrupt download and nothing in the log.
+    const res = await get("/api/simulate/export?platform=windows&format=xlsx");
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/spreadsheetml\.sheet/);
+    expect(res.headers["content-disposition"]).toMatch(/endpoint-baseline\.xlsx/);
+    // "PK": the ZIP local file header signature every .xlsx starts with.
+    expect(res.rawPayload.subarray(0, 2)).toEqual(Buffer.from("PK"));
+  });
+
   it("defaults to JSON when no format is given", async () => {
     const res = await get("/api/simulate/export?platform=windows");
     expect(res.statusCode).toBe(200);
@@ -189,6 +201,14 @@ describe("GET /api/reports/assignments", () => {
     expect(res.statusCode).toBe(200);
     expect(res.headers["content-type"]).toMatch(/text\/csv/);
     expect(res.headers["content-disposition"]).toMatch(/policy-group-assignments\.csv/);
+  });
+
+  it("exports an xlsx workbook with a download filename", async () => {
+    const res = await get("/api/reports/assignments/export?platform=windows&format=xlsx");
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/spreadsheetml\.sheet/);
+    expect(res.headers["content-disposition"]).toMatch(/policy-group-assignments\.xlsx/);
+    expect(res.rawPayload.subarray(0, 2)).toEqual(Buffer.from("PK"));
   });
 });
 

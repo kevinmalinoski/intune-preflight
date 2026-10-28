@@ -1,7 +1,8 @@
 import { Fragment, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { AssignmentReport as Report, AssignmentReportRow, Platform } from "@intune-preflight/shared";
-import { api } from "./api.ts";
+import { api, type ManifestExportFormat } from "./api.ts";
 import { saveDownload } from "./download.ts";
+import { ExportMenu } from "./ExportMenu.tsx";
 import { GroupHeatCluster } from "./GroupHeatCluster.tsx";
 import { ManifestGroupCards, PolicyDetailRow } from "./ManifestGroupCards.tsx";
 import { GROUP_KIND_STYLE } from "./manifestRow.ts";
@@ -94,6 +95,12 @@ export function AssignmentReport({
   // Assignment filters the simulated device is treated as matching. Empty (the
   // default) = the broadest view, matching no filter -- exactly as before.
   const [matched, setMatched] = useState<Set<string>>(new Set());
+  const [showExportMenu, setShowExportMenu] = useState(false);
+
+  // Built inside the click with nothing awaited first, as the API's synchronous
+  // export helpers require -- see download.ts.
+  const exportManifest = (format: ManifestExportFormat) =>
+    saveDownload(api.assignmentReportExport(os, format), `policy-group-assignments.${format}`);
 
   // Refetch when the OS filter changes -- the server recomputes rows, the group
   // rollup, AND the totals (incl. the per-OS unassigned count, which can't be
@@ -438,15 +445,20 @@ export function AssignmentReport({
           <span className="rounded bg-orange-500/15 px-2 py-1 text-orange-300">{totals.unassigned} unassigned</span>
           <span className="rounded bg-ink-800 px-2 py-1">{totals.groupsTargeted} groups targeted</span>
         </div>
-        {/* A button, not an anchor: in the browser-only builds the export is
-            bytes rather than a URL, and the CSV is now built on click instead
-            of on every render of this toolbar. */}
-        <button
-          onClick={() => saveDownload(api.assignmentReportExport(os), "policy-group-assignments.csv")}
+        {/* A menu, not a button per format -- and buttons rather than anchors
+            inside it: in the browser-only builds the export is bytes rather
+            than a URL, and it is built on click instead of on every render of
+            this toolbar. */}
+        <ExportMenu
+          open={showExportMenu}
+          onOpenChange={setShowExportMenu}
+          onExport={exportManifest}
           className="rounded-md border border-emerald-400/50 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20"
-        >
-          Download CSV
-        </button>
+          options={[
+            { format: "xlsx", label: "Excel workbook (.xlsx)", hint: "Opens everywhere, iPad included" },
+            { format: "csv", label: "CSV (.csv)", hint: "For scripts and other spreadsheets" },
+          ]}
+        />
       </div>
 
       {/* OS filter */}
@@ -717,7 +729,7 @@ export function AssignmentReport({
           )}
 
           <p className="text-slate-600">
-            Export the CSV for the raw per-assignment detail — pivot by Group or Policy in Excel.
+            Export the raw per-assignment detail — an Excel workbook to pivot by Group or Policy, or CSV.
           </p>
         </div>
       </div>

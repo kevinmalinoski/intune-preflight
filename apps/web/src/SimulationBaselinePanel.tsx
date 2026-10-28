@@ -9,11 +9,12 @@ import {
 } from "react";
 import type { Platform, PolicyKind, SimulationResult } from "@intune-preflight/shared";
 import { filterExclusionReason, resolutionRuleDetail, resolutionRuleLabel } from "@intune-preflight/shared";
-import { api } from "./api.ts";
+import { api, type BaselineExportFormat } from "./api.ts";
 import { BaselineSettingList } from "./BaselineSettingList.tsx";
 import { buildRows, cspRef, isLegacyRow, type DisplayRow } from "./baselineRow.ts";
 import { CspRef } from "./CspRef.tsx";
 import { saveDownload } from "./download.ts";
+import { ExportMenu } from "./ExportMenu.tsx";
 import { readStored, readStoredJson, writeStored } from "./storage.ts";
 import { toggled } from "./collections.ts";
 import { isCompact, subscribeLayout } from "./viewport.ts";
@@ -107,11 +108,16 @@ export function SimulationBaselinePanel({
   // only opens the share sheet inside the click's own task. The export always
   // covers the WHOLE baseline, never the on-screen filter or scope; that is what
   // the "filters and exports always cover everything" row promises.
-  const exportBaseline = (format: "json" | "csv") =>
+  const exportBaseline = (format: BaselineExportFormat) =>
     saveDownload(
       api.simulateExport({ groupIds, platform, deviceFilterIds, unassignedPolicyIds }, format),
       `endpoint-baseline.${format}`
     );
+  // The toolbar's two popovers. Declared together, and above the Escape handler
+  // that backs out of them, because a dependency array is read during render --
+  // a flag declared further down would be in its temporal dead zone there.
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const [showColumnPicker, setShowColumnPicker] = useState(false);
   const [expandedOverlaps, setExpandedOverlaps] = useState<Set<string>>(new Set());
 
   // Resizable panel width (docked to the right edge, so width = viewport - cursorX).
@@ -130,13 +136,21 @@ export function SimulationBaselinePanel({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      // An open popover is the outermost level, so it goes first. The export
+      // menu dismisses itself on Escape; this only has to stay out of its way,
+      // or the panel would close under an open menu.
+      if (showExportMenu) return;
+      if (showColumnPicker) {
+        setShowColumnPicker(false);
+        return;
+      }
       // Optional handler: with no way to clear the scope, Escape just closes.
       if (scope && onClearScope) onClearScope();
       else onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [scope, onClearScope, onClose]);
+  }, [scope, onClearScope, onClose, showExportMenu, showColumnPicker]);
 
   // Move focus into the panel when it opens and hand it back to whatever opened
   // it on close -- the "View merged baseline" button, or a node in the diagram.
@@ -209,7 +223,6 @@ export function SimulationBaselinePanel({
   const [hiddenCols, setHiddenCols] = useState<Set<ColumnId>>(
     () => new Set(readStoredJson<ColumnId[]>(HIDDEN_COLS_KEY, []))
   );
-  const [showColumnPicker, setShowColumnPicker] = useState(false);
   useEffect(() => {
     writeStored(COL_WIDTHS_KEY, JSON.stringify(colWidths));
   }, [colWidths]);
@@ -604,21 +617,26 @@ export function SimulationBaselinePanel({
             Legacy collisions ({simulation.crossModel.length})
           </option>
         </select>
-        {/* Buttons rather than anchors: in the browser-only builds the export is
-            bytes, not a URL, and building it on click is also what stops the
-            whole simulation being re-serialised on every render of this panel. */}
-        <button
-          onClick={() => exportBaseline("json")}
-          className="rounded-md border border-ink-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-ink-800"
-        >
-          Export JSON
-        </button>
-        <button
-          onClick={() => exportBaseline("csv")}
-          className="rounded-md border border-ink-700 px-3 py-1.5 text-xs text-slate-300 hover:bg-ink-800"
-        >
-          Export CSV
-        </button>
+        {/* A menu rather than a button per format: three of them crowd this
+            toolbar, and below lg it already wraps. Buttons rather than anchors,
+            as before -- in the browser-only builds the export is bytes, not a
+            URL, and building it on click is also what stops the whole
+            simulation being re-serialised on every render of this panel. */}
+        <ExportMenu
+          open={showExportMenu}
+          onOpenChange={setShowExportMenu}
+          onExport={exportBaseline}
+          className={`rounded-md border px-3 py-1.5 text-xs ${
+            showExportMenu
+              ? "border-sky-400/50 bg-sky-500/10 text-sky-300"
+              : "border-ink-700 text-slate-300 hover:bg-ink-800"
+          }`}
+          options={[
+            { format: "xlsx", label: "Excel workbook (.xlsx)", hint: "Opens everywhere, iPad included" },
+            { format: "csv", label: "CSV (.csv)", hint: "For scripts and other spreadsheets" },
+            { format: "json", label: "JSON (.json)", hint: "The raw simulation result" },
+          ]}
+        />
         {/* Nothing to pick when there are no columns: the compact layout renders
             the baseline as cards, and every field is already on them. */}
         <div className="relative hidden lg:block">

@@ -20,7 +20,17 @@
  * render of the panel, for both buttons, before anyone had clicked anything. A
  * descriptor is built in the click handler instead.
  */
-export type Download = { kind: "url"; url: string } | { kind: "text"; text: string; mime: string };
+export type Download =
+  | { kind: "url"; url: string }
+  | { kind: "text"; text: string; mime: string }
+  /**
+   * Bytes rather than a string: the .xlsx export is a ZIP, and putting it
+   * through the `text` variant would mean a `charset=utf-8` on a binary blob
+   * and a string round-trip that mangles every byte above 0x7f. The engine
+   * hands over a `Uint8Array`; `ArrayBuffer` is accepted too so a caller that
+   * has one does not have to wrap it.
+   */
+  | { kind: "bytes"; bytes: Uint8Array | ArrayBuffer; mime: string };
 
 /**
  * Saves an export under `filename`.
@@ -47,6 +57,18 @@ export type Download = { kind: "url"; url: string } | { kind: "text"; text: stri
 export function saveDownload(download: Download, filename: string): void {
   if (download.kind === "url") {
     clickAnchor(download.url, filename);
+    return;
+  }
+  if (download.kind === "bytes") {
+    // No charset: it would be a lie on a ZIP, and some readers take it as one.
+    //
+    // The cast closes a gap in the DOM types rather than papering over
+    // anything: since TypeScript 5.7 a bare `Uint8Array` may be backed by a
+    // `SharedArrayBuffer`, which `BlobPart` does not accept, and there is no
+    // way to say "not shared" that also holds in the TypeScript this package
+    // declares as its minimum. These bytes come from the engine's own
+    // allocation, so they are never shared.
+    saveBlob(new Blob([download.bytes as BlobPart], { type: download.mime }), filename);
     return;
   }
   saveBlob(new Blob([download.text], { type: `${download.mime};charset=utf-8` }), filename);

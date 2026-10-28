@@ -14,16 +14,23 @@
 export type { TenantData } from "./tenantData.js";
 
 // Assignment resolution, merged baseline, conflict/overlap/cross-model
-// detection, the assignment report, and the CSV exports.
+// detection, the assignment report, and the CSV and xlsx exports.
 export {
   assignmentReportToCsv,
+  assignmentReportToXlsx,
   buildAssignmentReport,
   computeSimulation,
   listAssignmentFilters,
   listGroupSummaries,
   listUnassignedPolicies,
   simulationToCsv,
+  simulationToXlsx,
 } from "./baseline.js";
+
+// The minimal .xlsx writer behind those two, and the media type its bytes are
+// served and saved under -- one constant so the server's Content-Type and the
+// browser builds' Blob cannot drift apart.
+export { rowsToXlsx, XLSX_MIME } from "./xlsx.js";
 
 // Graph -> CSP-setting normalizers, platform classification, assignment-target
 // parsing, and the flat dynamic-membership-rule helpers.

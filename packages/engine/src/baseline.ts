@@ -24,6 +24,7 @@ import type {
 import { resolutionRuleLabel, UNASSIGNED_SOURCE_GROUP } from "@intune-preflight/shared";
 import type { TenantData } from "./tenantData.js";
 import { ruleImplies, VIRTUAL_GROUP_ALL_DEVICES, VIRTUAL_GROUP_ALL_USERS } from "./normalize.js";
+import { rowsToXlsx } from "./xlsx.js";
 
 /** A policy with no include assignment is deployed nowhere -- not to any group, nor All Devices/All Users. */
 function isUnassigned(policy: IntunePolicy): boolean {
@@ -367,7 +368,15 @@ function toCsv(rows: string[][]): string {
   return "\ufeff" + rows.map((row) => row.map(csvCell).join(",")).join("\r\n");
 }
 
-export function assignmentReportToCsv(report: AssignmentReport): string {
+/**
+ * The assignment report as a header row plus one row per assignment -- the one
+ * description of the export's content, shared by every format it is offered in.
+ *
+ * Split out from the CSV producer when xlsx joined it: two exporters each
+ * building their own rows is two places for a column to be added, and the
+ * formats would eventually have disagreed about what the report says.
+ */
+function assignmentReportRows(report: AssignmentReport): string[][] {
   const header = ["Policy", "Policy Type", "Platform", "Assignment", "Group", "Group Type", "Assignment Filter"];
   const kindLabel = (k: PolicyKind) => k;
   const rows = report.rows.map((r) => [
@@ -379,7 +388,22 @@ export function assignmentReportToCsv(report: AssignmentReport): string {
     r.groupKind,
     r.filterName ? `${r.filterName}${r.filterType ? ` (${r.filterType})` : ""}` : "",
   ]);
-  return toCsv([header, ...rows]);
+  return [header, ...rows];
+}
+
+export function assignmentReportToCsv(report: AssignmentReport): string {
+  return toCsv(assignmentReportRows(report));
+}
+
+/**
+ * The same report as an .xlsx workbook.
+ *
+ * Offered alongside the CSV because Excel for iPadOS will not open the CSV at
+ * all, however correct it is -- see xlsx.ts for why that is the format's
+ * problem and not the file's.
+ */
+export function assignmentReportToXlsx(report: AssignmentReport): Uint8Array {
+  return rowsToXlsx(assignmentReportRows(report), { sheetName: "Assignments" });
 }
 
 /**
@@ -700,7 +724,12 @@ function detectCrossModel(settings: BaselineSetting[]): CrossModelFinding[] {
   return findings.sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" }));
 }
 
-export function simulationToCsv(simulation: SimulationResult): string {
+/**
+ * The merged baseline as a header row plus one row per contributing value --
+ * the single description of the export's content, whatever format it is asked
+ * for. See `assignmentReportRows` for why this is not inside a formatter.
+ */
+function simulationRows(simulation: SimulationResult): string[][] {
   const header = [
     "CSP Area",
     "Setting",
@@ -784,5 +813,14 @@ export function simulationToCsv(simulation: SimulationResult): string {
     rows.push([s.cspArea, s.displayName, path, s.value, s.sourcePolicyName, s.sourceKind, "no", "no", ""]);
   }
 
-  return toCsv([header, ...rows]);
+  return [header, ...rows];
+}
+
+export function simulationToCsv(simulation: SimulationResult): string {
+  return toCsv(simulationRows(simulation));
+}
+
+/** The same baseline as an .xlsx workbook -- the format mobile Excel will open. */
+export function simulationToXlsx(simulation: SimulationResult): Uint8Array {
+  return rowsToXlsx(simulationRows(simulation), { sheetName: "Endpoint baseline" });
 }

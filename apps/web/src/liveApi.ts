@@ -20,16 +20,19 @@
 import type { Platform } from "@intune-preflight/shared";
 import {
   assignmentReportToCsv,
+  assignmentReportToXlsx,
   buildAssignmentReport,
   computeSimulation,
   listAssignmentFilters,
   listGroupSummaries,
   listUnassignedPolicies,
   simulationToCsv,
+  simulationToXlsx,
   type TenantData,
+  XLSX_MIME,
 } from "@intune-preflight/engine";
 import { createGraphClient, loadTenantData, type TenantMode, TtlCache } from "@intune-preflight/graph";
-import type { ServerStatus, SimulationInputs } from "./api.ts";
+import type { BaselineExportFormat, ManifestExportFormat, ServerStatus, SimulationInputs } from "./api.ts";
 import type { Download } from "./download.ts";
 import { setLoadProgress } from "./loadProgress.ts";
 import { readSession, removeSession, writeSession } from "./storage.ts";
@@ -95,6 +98,8 @@ const toInputs = (i: SimulationInputs) => ({
 // Same as demoApi: no backend, so the bytes go to `saveDownload` rather than
 // onto an anchor as a `data:` URL, which Safari will not save.
 const textFile = (mime: string, text: string): Download => ({ kind: "text", text, mime });
+/** The xlsx export is a ZIP, so it goes to the Blob as bytes rather than text. */
+const xlsxFile = (bytes: Uint8Array): Download => ({ kind: "bytes", bytes, mime: XLSX_MIME });
 
 export function createLiveApi(deps: LiveApiDeps) {
   const client = createGraphClient({ getToken: deps.getToken, concurrency: BROWSER_CONCURRENCY });
@@ -222,8 +227,12 @@ export function createLiveApi(deps: LiveApiDeps) {
     filters: async () => listAssignmentFilters(await tenant()),
     unassignedPolicies: async () => listUnassignedPolicies(await tenant()),
     assignmentReport: async (platform?: Platform) => buildAssignmentReport(await tenant(), platform),
-    assignmentReportExport: (platform?: Platform) =>
-      textFile("text/csv", assignmentReportToCsv(buildAssignmentReport(tenantNow(), platform))),
+    assignmentReportExport: (platform?: Platform, format: ManifestExportFormat = "csv") => {
+      const report = buildAssignmentReport(tenantNow(), platform);
+      return format === "xlsx"
+        ? xlsxFile(assignmentReportToXlsx(report))
+        : textFile("text/csv", assignmentReportToCsv(report));
+    },
 
     refresh: async (): Promise<{ warnings: string[] }> => {
       drop();
@@ -232,8 +241,9 @@ export function createLiveApi(deps: LiveApiDeps) {
     },
 
     simulate: async (inputs: SimulationInputs) => computeSimulation(await tenant(), toInputs(inputs)),
-    simulateExport: (inputs: SimulationInputs, format: "json" | "csv") => {
+    simulateExport: (inputs: SimulationInputs, format: BaselineExportFormat) => {
       const sim = computeSimulation(tenantNow(), toInputs(inputs));
+      if (format === "xlsx") return xlsxFile(simulationToXlsx(sim));
       return format === "csv"
         ? textFile("text/csv", simulationToCsv(sim))
         : textFile("application/json", JSON.stringify(sim, null, 2));

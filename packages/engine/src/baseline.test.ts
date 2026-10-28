@@ -3,10 +3,12 @@ import type { AutopilotProfile, CspSetting, IntuneGroup, IntunePolicy, Resolutio
 import { UNASSIGNED_SOURCE_GROUP } from "@intune-preflight/shared";
 import {
   assignmentReportToCsv,
+  assignmentReportToXlsx,
   buildAssignmentReport,
   computeSimulation,
   listUnassignedPolicies,
   simulationToCsv,
+  simulationToXlsx,
 } from "./baseline.js";
 import { VIRTUAL_GROUP_ALL_DEVICES } from "./normalize.js";
 import type { TenantData } from "./tenantData.js";
@@ -602,5 +604,56 @@ describe("detectCrossModel (cross-model conflict/overlap)", () => {
     });
     // Two "catalog"-model policies -> not cross-MODEL (would be a same-model concern).
     expect(computeSimulation(data, { selectedGroupIds: [], platform: "windows" }).crossModel).toHaveLength(0);
+  });
+});
+
+describe("the xlsx and CSV exports describe the same report", () => {
+  // Both formats come off one row builder per report. This is what says so: a
+  // column added to the CSV and not the workbook (or the reverse) is how the
+  // two exports of one report start telling an admin different things.
+  //
+  // The parts of an .xlsx are STORED, not deflated, so the sheet XML sits in
+  // the bytes verbatim and can be read without unzipping. xlsx.test.ts does the
+  // real round-trip; this only compares content.
+  const sheetBytesAsText = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+
+  const data = tenant({
+    groups: [group("g1")],
+    policies: [
+      policy({
+        id: "p1",
+        displayName: "Windows — Encryption & Keys",
+        assignedGroupIds: ["g1"],
+        settings: [setting("BitLocker/Require", "enabled")],
+      }),
+    ],
+  });
+
+  /** Every cell of the CSV's header row, unquoted. */
+  const csvHeader = (csv: string) =>
+    csv
+      .replace(/^\ufeff/, "")
+      .split("\r\n")[0]
+      .split(",")
+      .map((cell) => cell.replace(/^"|"$/g, ""));
+
+  it("carries the same columns in the assignment report", () => {
+    const report = buildAssignmentReport(data, "windows");
+    const sheet = sheetBytesAsText(assignmentReportToXlsx(report));
+    for (const column of csvHeader(assignmentReportToCsv(report))) {
+      expect(sheet).toContain(`>${column}<`);
+    }
+    // The em-dash survives as itself and the ampersand is escaped: a policy
+    // name is where both of those reach the sheet from.
+    expect(sheet).toContain(">Windows \u2014 Encryption &amp; Keys<");
+  });
+
+  it("carries the same columns in the merged baseline", () => {
+    const simulation = computeSimulation(data, { selectedGroupIds: ["g1"], platform: "windows" });
+    const sheet = sheetBytesAsText(simulationToXlsx(simulation));
+    for (const column of csvHeader(simulationToCsv(simulation))) {
+      expect(sheet).toContain(`>${column}<`);
+    }
+    expect(sheet).toContain(">enabled<");
   });
 });
