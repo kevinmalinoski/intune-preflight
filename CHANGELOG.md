@@ -6,6 +6,53 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [2.5.1] — 2026-10-28
+
+The merged baseline's CSP areas say what they are. They are sorted, they carry
+their real capitalisation, a mislabelled bucket of Microsoft Edge settings is
+now called Microsoft Edge, and templates an admin uploaded are marked as such.
+
+### Fixed
+- **34 Microsoft Edge settings were filed under "Microsoft".** An ADMX setting
+  carries its namespace before a literal `~policy~`, and that namespace can
+  contain underscores — `microsoft_edge`. The area was read by splitting on `_`
+  and taking the first segment, which stopped at `microsoft`: a vendor rather
+  than a product, and a bucket any other `microsoft_*` namespace would have
+  shared. Searching the baseline for what touches Edge would not have found it
+  under E.
+- **One product was scattered across five areas.** The same rule left
+  OneDrive's namespace intact because it has no underscore, so `v2`,
+  `v2.updates`, `v3`, `v4` and `v6` each became an area of their own — while
+  thirteen Edge namespaces were being crushed into one. Vendors ship a new ADMX
+  namespace per release rather than versioning in place, so the version suffix
+  is now dropped and a product is one area.
+- **Settings whose category Graph leaves empty are no longer dumped in a
+  generic bucket.** Graph returns a null `categoryPath` on some uploaded-ADMX
+  definitions — in one tenant, three of the six settings in a single Chrome
+  policy, while the other three carried a full path. Those three sat under
+  "Administrative Templates", saying nothing about what they configure. The
+  category is resolved by id instead and reads "Google Chrome". If it cannot be
+  read, the load records a warning and the old label is kept: a missing category
+  is a worse name, not a missing setting.
+
+### Changed
+- **CSP areas are sorted A–Z.** They came out in the order the policies
+  happened to be merged, which is an implementation detail rather than
+  something a reader can use. Settings within an area keep their policy's own
+  order, and the sort runs after the merge, so no finding changes.
+- **Areas carry their real capitalisation.** `Applicationmanagement` reads
+  "Application Management", `localusersandgroups` "Local Users And Groups",
+  `sharedpc` "Shared PC", `onedrivengsc` "OneDriveNGSC". The name comes from
+  the setting's own CSP path, which spells the area as Microsoft does — not
+  from a list of friendlier names this project chose, which could claim an area
+  is something it isn't. Where the path gives nothing clean, the old name is
+  kept rather than guessed at.
+- **Templates uploaded to the tenant are marked.** Third-party ADMX now reads
+  "ADMX (Imported) Mozilla\\Firefox". An imported ADMX is a file somebody chose
+  to add, so a setting under it that looks wrong may be fixed by re-uploading
+  or removing the template — which is not true of anything Intune ships.
+  Built-in templates are unprefixed.
+
 ## [2.5.0] — 2026-10-28
 
 The diagram is readable on a phone. A policy type is a chip you tap to get its

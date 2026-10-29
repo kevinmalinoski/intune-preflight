@@ -279,11 +279,81 @@ async function fetchSettingsCatalogPolicies(ctx: LoadContext): Promise<IntunePol
   );
 }
 
-async function fetchAdminTemplates(ctx: LoadContext): Promise<IntunePolicy[]> {
+/**
+ * Marks an area that came from a third-party ADMX an admin uploaded, rather
+ * than one of the templates Intune ships.
+ *
+ * Graph tells these apart on every definition: `policyType` is `admxIngested`
+ * for an uploaded ADMX and `admxBacked` for a built-in one. Worth saying out
+ * loud in the baseline, because an imported ADMX is a file somebody in the
+ * tenant chose to add -- if a setting under it looks wrong, the fix may be to
+ * re-upload or remove the template, which is not true of anything built in.
+ */
+const ADMX_IMPORTED_PREFIX = "ADMX (Imported) ";
+
+/** Shared empty map, so the common path allocates nothing. */
+const EMPTY_CATEGORIES: ReadonlyMap<string, string> = new Map();
+
+/** The category path Graph gave for a definition, de-slashed, or "" if absent. */
+function admxCategoryPath(def: Record<string, unknown>): string {
+  return ((def.categoryPath as string) ?? "").replace(/^\\+/, "").trim();
+}
+
+/**
+ * id -> displayName for every Group Policy category in the tenant.
+ *
+ * Needed because Graph returns a null `categoryPath` on some `admxIngested`
+ * definitions -- in the tenant this was found in, three of the six settings in
+ * one Chrome policy, while the other three carried a full path. Those three
+ * then fell into the generic "Administrative Templates" bucket, which says
+ * nothing about what they configure. Each one does carry a
+ * `groupPolicyCategoryId`, and resolving it gives "Google Chrome".
+ *
+ * Fetched as one collection rather than per definition: the whole set came back
+ * in a single page (~1500 categories) and a per-setting call would be one round
+ * trip per uncategorised setting. The caller only asks for it when a null
+ * actually turns up, so a tenant whose categoryPaths are all present pays
+ * nothing.
+ *
+ * A failure here degrades to the old generic label rather than failing the
+ * load: a missing category is a worse name, not a missing setting.
+ */
+async function loadAdmxCategories(ctx: LoadContext, useBeta: boolean): Promise<Map<string, string>> {
+  try {
+    const categories = await ctx.client.graphGetCollection<Record<string, unknown>>(
+      "/deviceManagement/groupPolicyCategories?$select=id,displayName",
+      useBeta
+    );
+    const byId = new Map<string, string>();
+    for (const c of categories) {
+      const id = c.id as string | undefined;
+      const name = (c.displayName as string | undefined)?.trim();
+      if (id && name) byId.set(id, name);
+    }
+    return byId;
+  } catch (err) {
+    ctx.recordWarning(
+      `Could not read Administrative Template categories — settings whose category Graph left empty fall back to a generic area label: ${skipReason(
+        err as Error,
+        "If this is a 403, grant DeviceManagementConfiguration.Read.All."
+      )}`
+    );
+    return new Map();
+  }
+}
+
+export async function fetchAdminTemplates(ctx: LoadContext): Promise<IntunePolicy[]> {
   const { items, useBeta } = await getCollectionWithBetaFallback<Record<string, unknown>>(
     ctx,
     "/deviceManagement/groupPolicyConfigurations?$expand=assignments"
   );
+  // One index for the whole load, built on first use. Policies are mapped
+  // concurrently, so this is the promise rather than the map -- otherwise every
+  // policy with a null categoryPath would start its own fetch of the same
+  // ~1500 categories.
+  let categoryIndex: Promise<Map<string, string>> | null = null;
+  const getCategoryIndex = () => (categoryIndex ??= loadAdmxCategories(ctx, useBeta));
+
   return mapItems(ctx, items, "administrative template", async (item): Promise<IntunePolicy> => {
     const id = item.id as string;
     const displayName = (item.displayName as string) ?? "Untitled";
@@ -297,13 +367,28 @@ async function fetchAdminTemplates(ctx: LoadContext): Promise<IntunePolicy[]> {
       `/deviceManagement/groupPolicyConfigurations/${id}/definitionValues?$expand=definition`,
       useBeta
     );
+    // Only pay for the category index if this policy actually needs it.
+    const needsCategories = definitionValues.some(
+      (dv) => !admxCategoryPath((dv.definition as Record<string, unknown> | undefined) ?? {})
+    );
+    const categories = needsCategories ? await getCategoryIndex() : EMPTY_CATEGORIES;
+
     const settings = definitionValues.map((dv, idx) => {
       const def = (dv.definition as Record<string, unknown> | undefined) ?? {};
       const defId = (def.id as string) ?? (dv.id as string) ?? `${id}-${idx}`;
-      const category = ((def.categoryPath as string) ?? "").replace(/^\\+/, "").trim();
+      // The full path when Graph gives one; otherwise the category's own name,
+      // looked up by id. That name is a leaf ("Google Chrome") rather than a
+      // path, because Graph exposes no parent chain for these -- `parentId` is
+      // null even where `isRoot` is false -- and inventing the ancestors would
+      // be making up structure that was not returned.
+      const category = admxCategoryPath(def) || categories.get((def.groupPolicyCategoryId as string) ?? "") || "";
+      const imported = def.policyType === "admxIngested";
       return {
         settingId: `adminTemplate:${defId}`,
-        cspArea: category || "Administrative Templates",
+        // No category at all leaves the generic label unprefixed: "ADMX
+        // (Imported)" in front of "Administrative Templates" would be noise
+        // attached to the one case where we know the least.
+        cspArea: category ? `${imported ? ADMX_IMPORTED_PREFIX : ""}${category}` : "Administrative Templates",
         displayName: (def.displayName as string) ?? `Policy setting ${idx + 1}`,
         value: dv.enabled ? "Enabled" : "Disabled",
       };

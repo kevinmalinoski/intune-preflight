@@ -21,8 +21,9 @@ import { CspRef } from "./CspRef.tsx";
  * presentations cannot disagree about what is on screen. See `DisplayRow`.
  */
 export function BaselineSettingList({ rows }: { rows: DisplayRow[] }) {
-  // Group in row order, so areas appear in the order the engine merged them
-  // rather than alphabetically -- the same order the grid shows.
+  // Group in row order, which the engine now sorts by CSP area A-Z -- so the
+  // areas come out alphabetical here, in the grid and in the exports without
+  // any of the three sorting for itself. See mergeSettings.
   const areas = useMemo(() => {
     const byArea = new Map<string, DisplayRow[]>();
     for (const row of rows) {

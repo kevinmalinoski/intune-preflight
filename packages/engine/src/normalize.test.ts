@@ -241,6 +241,215 @@ describe("isLegacyTemplateType (deprecated device-config templates)", () => {
   });
 });
 
+describe("flattenSettingsCatalogEntries (ADMX namespace casing)", () => {
+  const areaOf = (definitionId: string, baseUri?: string, offsetUri?: string) =>
+    flattenSettingsCatalogEntries([
+      {
+        settingInstance: { settingDefinitionId: definitionId, simpleSettingValue: { value: "1" } },
+        settingDefinitions: [{ id: definitionId, baseUri, offsetUri }],
+      },
+    ])[0]?.cspArea;
+
+  it("takes the namespace's casing from the path, which the id flattened", () => {
+    expect(
+      areaOf(
+        "device_vendor_msft_policy_config_onedrivengscv2~policy~onedrivengsc_blocktenantlist",
+        "./Device/Vendor/MSFT/Policy/Config/OneDriveNGSCv2~Policy~OneDriveNGSC",
+        "/BlockTenantList"
+      )
+    ).toBe("OneDriveNGSC");
+    expect(
+      areaOf(
+        "device_vendor_msft_policy_config_visualstudiov1~policy~visualstudio~installandupdatesettings_a",
+        "./Device/Vendor/MSFT/Policy/Config/VisualStudiov1~Policy~VisualStudio~InstallandUpdateSettings",
+        "/AdministratorUpdatesEnabled"
+      )
+    ).toBe("VisualStudio");
+  });
+
+  it("still groups a product's releases into one area", () => {
+    // The whole point of stripping the version. If the path's casing were used
+    // without it, every release would be an area of its own again.
+    const onedrive = [
+      ["device_vendor_msft_policy_config_onedrivengscv2~policy~onedrivengsc_a", "OneDriveNGSCv2~Policy~OneDriveNGSC"],
+      [
+        "device_vendor_msft_policy_config_onedrivengscv2.updates~policy~onedrivengsc_b",
+        "OneDriveNGSCv2.Updates~Policy~OneDriveNGSC",
+      ],
+      ["device_vendor_msft_policy_config_onedrivengscv6~policy~onedrivengsc_c", "OneDriveNGSCv6~Policy~OneDriveNGSC"],
+    ].map(([id, seg]) => areaOf(id, `./Device/Vendor/MSFT/Policy/Config/${seg}`, "/X"));
+    expect(new Set(onedrive)).toEqual(new Set(["OneDriveNGSC"]));
+  });
+
+  it("title-cases a namespace the path spells in lowercase, and keeps it one area", () => {
+    const edge = [
+      [
+        "device_vendor_msft_policy_config_microsoft_edge~policy~microsoft_edge_a",
+        "microsoft_edge~Policy~microsoft_edge",
+      ],
+      [
+        "device_vendor_msft_policy_config_microsoft_edgev141~policy~microsoft_edge_b",
+        "microsoft_edgev141~Policy~microsoft_edge",
+      ],
+    ].map(([id, seg]) => areaOf(id, `./Device/Vendor/MSFT/Policy/Config/${seg}`, "/X"));
+    expect(new Set(edge)).toEqual(new Set(["Microsoft Edge"]));
+  });
+
+  it("falls back to the id's lowercase namespace when there is no path", () => {
+    expect(areaOf("device_vendor_msft_policy_config_onedrivengscv2~policy~onedrivengsc_blocktenantlist")).toBe(
+      "Onedrivengsc"
+    );
+  });
+});
+
+describe("flattenSettingsCatalogEntries (CSP area from the CSP path)", () => {
+  // Definition id and path pairs are real, taken from a live tenant. The id is
+  // flat lowercase; the path carries Microsoft's casing for the same area.
+  const areaOf = (definitionId: string, baseUri?: string, offsetUri?: string) =>
+    flattenSettingsCatalogEntries([
+      {
+        settingInstance: { settingDefinitionId: definitionId, simpleSettingValue: { value: "1" } },
+        settingDefinitions: [{ id: definitionId, baseUri, offsetUri }],
+      },
+    ])[0]?.cspArea;
+
+  it("restores the casing the definition id had flattened away", () => {
+    expect(
+      areaOf(
+        "device_vendor_msft_policy_config_applicationmanagement_removedefaultmicrosofts",
+        "./Device/Vendor/MSFT/Policy/Config/ApplicationManagement",
+        "/RemoveDefaultMicrosoftStorePackages"
+      )
+    ).toBe("Application Management");
+    expect(
+      areaOf(
+        "device_vendor_msft_policy_config_userrights_changetimezone",
+        "./Device/Vendor/MSFT/Policy/Config/UserRights",
+        "/ChangeTimeZone"
+      )
+    ).toBe("User Rights");
+  });
+
+  it("reads areas that sit directly under the vendor, not under Policy/Config", () => {
+    expect(areaOf("vendor_msft_sharedpc_enablesharedpcmode", "./Vendor/MSFT/SharedPC", "/EnableSharedPCMode")).toBe(
+      "Shared PC"
+    );
+    expect(
+      areaOf(
+        "device_vendor_msft_laps_policies_backupdirectory",
+        "./Device/Vendor/MSFT/LAPS",
+        "/Policies/BackupDirectory"
+      )
+    ).toBe("LAPS");
+  });
+
+  it("drops the ADMX_ prefix, which names the mechanism rather than the area", () => {
+    expect(
+      areaOf(
+        "device_vendor_msft_policy_config_admx_w32time_w32time_policy_configure_ntpclient",
+        "./Device/Vendor/MSFT/Policy/Config/ADMX_W32Time",
+        "/W32TIME_POLICY_CONFIGURE_NTPCLIENT"
+      )
+    ).toBe("W32 Time");
+  });
+
+  it("keeps the id-derived area when the path yields a structural word", () => {
+    // WinRE is reached through Policy/OpenExtensibilitySettings -- `Policy`
+    // without `Config` after it. Taking the first segment would file it under
+    // an area called "Policy".
+    expect(
+      areaOf(
+        "device_vendor_msft_policy_config_winre_enablewinre",
+        "./Device/Vendor/MSFT/Policy/OpenExtensibilitySettings/IntunePolicyAdaptor",
+        "/Device_Vendor_MSFT_Policy_Config_WinRE_EnableWinRE"
+      )
+    ).toBe("Winre");
+  });
+
+  it("keeps the id-derived area when there is no path at all", () => {
+    expect(areaOf("device_vendor_msft_policy_config_power_hibernatetimeoutpluggedin")).toBe("Power");
+  });
+
+  it("leaves an ADMX namespace to the id parser's grouping, not the plain-area rule", () => {
+    // The plain-area rule would take the whole segment,
+    // "OneDriveNGSCv2~Policy~OneDriveNGSC", and split the product into one area
+    // per release. catalogArea handles it instead -- see the ADMX casing tests.
+    expect(
+      areaOf(
+        "device_vendor_msft_policy_config_onedrivengscv2~policy~onedrivengsc_blocktenantlist",
+        "./Device/Vendor/MSFT/Policy/Config/OneDriveNGSCv2~Policy~OneDriveNGSC",
+        "/BlockTenantList"
+      )
+    ).toBe("OneDriveNGSC");
+  });
+});
+
+describe("flattenSettingsCatalogEntries (CSP area from the definition id)", () => {
+  // Every id here is real, taken from a live tenant.
+  const areaOf = (definitionId: string) =>
+    flattenSettingsCatalogEntries([
+      {
+        settingInstance: {
+          settingDefinitionId: definitionId,
+          simpleSettingValue: { value: "1" },
+        },
+      },
+    ])[0]?.cspArea;
+
+  it("reads a plain Policy CSP area from the first segment", () => {
+    expect(areaOf("device_vendor_msft_policy_config_applicationmanagement_removedefaultmicrosofts")).toBe(
+      "Applicationmanagement"
+    );
+    expect(areaOf("device_vendor_msft_policy_config_power_hibernatetimeoutpluggedin")).toBe("Power");
+  });
+
+  it("reads the whole ADMX namespace, not just up to its first underscore", () => {
+    // Was "Microsoft" -- a vendor, and a bucket every other microsoft_* ADMX
+    // namespace would have shared.
+    expect(areaOf("device_vendor_msft_policy_config_microsoft_edge~policy~microsoft_edge_relaunchnotification")).toBe(
+      "Microsoft Edge"
+    );
+  });
+
+  it("files every version of one ADMX namespace under the same area", () => {
+    const edge = [
+      "device_vendor_msft_policy_config_microsoft_edge~policy~microsoft_edge_relaunchnotification",
+      "device_vendor_msft_policy_config_microsoft_edgev141~policy~microsoft_edge_relaunchfastifoutdated",
+      "device_vendor_msft_policy_config_microsoft_edgev128.1~policy~microsoft_edge_a",
+      "device_vendor_msft_policy_config_microsoft_edgev80diff~policy~microsoft_edge_b",
+    ].map(areaOf);
+    expect(new Set(edge)).toEqual(new Set(["Microsoft Edge"]));
+  });
+
+  it("collapses OneDrive's five namespaces into one area", () => {
+    const onedrive = [
+      "device_vendor_msft_policy_config_onedrivengscv2~policy~onedrivengsc_blocktenantlist",
+      "device_vendor_msft_policy_config_onedrivengscv2.updates~policy~onedrivengsc_kfmoptinnowizard",
+      "device_vendor_msft_policy_config_onedrivengscv3~policy~onedrivengsc_a",
+      "device_vendor_msft_policy_config_onedrivengscv6~policy~onedrivengsc_b",
+    ].map(areaOf);
+    expect(new Set(onedrive)).toEqual(new Set(["Onedrivengsc"]));
+  });
+
+  it("drops the category path that followed the namespace", () => {
+    expect(
+      areaOf(
+        "device_vendor_msft_policy_config_visualstudiov1~policy~visualstudio~installandupdatesettings_administratorupdatesenabled"
+      )
+    ).toBe("Visualstudio");
+    expect(
+      areaOf(
+        "user_vendor_msft_policy_config_office16v2~policy~l_microsoftofficesystem~l_miscellaneous437_l_onlinestoragefilter"
+      )
+    ).toBe("Office16");
+  });
+
+  it("does not strip a version from a plain CSP area, where it is part of the name", () => {
+    // ApplicationControlV2 is the area's real name, not a versioned ADMX file.
+    expect(areaOf("device_vendor_msft_policy_config_applicationcontrolv2_buildoptions")).toBe("Applicationcontrolv2");
+  });
+});
+
 describe("flattenSettingsCatalogEntries (definition enrichment)", () => {
   const defId = "device_vendor_msft_bitlocker_requiredeviceencryption";
   const entry = {

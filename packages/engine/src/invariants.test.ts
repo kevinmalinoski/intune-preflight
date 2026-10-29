@@ -86,6 +86,17 @@ describe("simulation invariants", () => {
         expect(l.values.some((v) => v.value === row?.value && v.sourcePolicyId === row?.sourcePolicyId)).toBe(true);
       }
 
+      // The baseline is ordered by CSP area, A-Z, with unnamed areas last --
+      // the property the UI and both exports rely on instead of each sorting
+      // for itself.
+      const areas = sim.settings.map((s) => s.cspArea);
+      const named = areas.filter(Boolean);
+      const sortedNamed = [...named].sort((x, y) => x.localeCompare(y, undefined, { sensitivity: "base" }));
+      expect(named).toEqual(sortedNamed);
+      // Every unnamed area sits after every named one.
+      const firstUnnamed = areas.findIndex((a) => !a);
+      if (firstUnnamed !== -1) expect(areas.slice(firstUnnamed).every((a) => !a)).toBe(true);
+
       // Exclude wins: nothing is reported as both applied and excluded.
       const applied = new Set(sim.policies.map((p) => p.id));
       for (const ex of sim.excludedPolicies) expect(applied.has(ex.id)).toBe(false);

@@ -302,16 +302,158 @@ function titleCase(s: string): string {
  *   device_vendor_msft_policy_config_update_configuredeadlineforqualityupdates
  * -> { area: "Update", name: "configuredeadlineforqualityupdates" }.
  * The boilerplate scope/vendor tokens are dropped; the first remaining segment
- * is the CSP area and the rest is the setting name. The setting names in these
+ * is the CSP area (see `catalogArea`, which reads ADMX ids differently) and the
+ * rest is the setting name. The setting names in these
  * ids are lowercase-concatenated with no word boundaries, so `name` can't be
  * perfectly prettified -- but it's accurate and, together with the full
  * definitionId used as settingId, uniquely identifies the setting.
  */
-function parseCatalogDefinitionId(definitionId: string): { area: string; name: string } {
-  const boilerplate = new Set(["device", "user", "vendor", "msft", "policy", "config", "admx"]);
-  const parts = definitionId.split("_").filter((p) => p && !boilerplate.has(p.toLowerCase()));
+const CATALOG_BOILERPLATE = new Set(["device", "user", "vendor", "msft", "policy", "config", "admx"]);
+
+/** The literal that separates an ADMX namespace from its category path. */
+const ADMX_SEPARATOR = "~policy~";
+
+/**
+ * A trailing ADMX version suffix: `v141`, `v2.updates`, `v128.1`, `v80diff`.
+ *
+ * Microsoft and Google ship a new ADMX namespace per product release rather
+ * than versioning in place, so one product accumulates dozens of them. They are
+ * the same product and belong in the same area.
+ */
+const ADMX_VERSION_SUFFIX = /v\d[\w.]*$/;
+
+/** Drops a version suffix, unless that would leave nothing behind. */
+function stripAdmxVersion(token: string): string {
+  return token.replace(ADMX_VERSION_SUFFIX, "") || token;
+}
+
+/**
+ * The ADMX namespace as the CSP path spells it, split into its `_` tokens.
+ *
+ * The definition id has the namespace flattened to lowercase, so reading it
+ * there can only ever produce "Onedrivengsc". The path keeps Microsoft's
+ * casing for the same namespace -- `OneDriveNGSCv2~Policy~OneDriveNGSC`,
+ * `VisualStudiov1~Policy~VisualStudio` -- and the version suffix is stripped
+ * from it exactly as it is from the id, so a product's releases still land in
+ * one area rather than one per release.
+ *
+ * Safe to prefer over the id only because the casing is consistent per product.
+ * Checked against a tenant before relying on it: all thirteen Edge namespaces
+ * spell it `microsoft_edge`, and both OneDrive ones `OneDriveNGSC`. Were one
+ * release spelled differently, this would split that product back into two
+ * areas -- which is what the version grouping exists to prevent.
+ *
+ * The separator is matched case-insensitively because the id writes it
+ * `~policy~` and the path writes it `~Policy~`.
+ */
+const ADMX_SEPARATOR_PATTERN = /~policy~/i;
+
+function admxNamespaceFromPath(cspPath: string | undefined): string[] | undefined {
+  if (!cspPath) return undefined;
+  const segment = cspPath.split("/").find((s) => ADMX_SEPARATOR_PATTERN.test(s));
+  if (!segment) return undefined;
+  const tokens = segment
+    .split(ADMX_SEPARATOR_PATTERN)[0]
+    .split("_")
+    .filter((p) => p && !CATALOG_BOILERPLATE.has(p.toLowerCase()));
+  return tokens.length > 0 ? tokens : undefined;
+}
+
+/**
+ * The CSP area for a Settings Catalog setting.
+ *
+ * Plain Policy CSP settings put the area in the first segment after the
+ * boilerplate, which is what `titleCase(parts[0])` reads.
+ *
+ * ADMX-backed settings do not, and taking the first segment got them wrong in
+ * two opposite ways. An ADMX id carries its namespace before a literal
+ * `~policy~`, and that namespace may itself contain underscores:
+ *
+ *   device_vendor_msft_policy_config_microsoft_edge~policy~microsoft_edge_relaunchnotification
+ *
+ * Splitting on `_` stopped at `microsoft`, so every Microsoft Edge setting was
+ * filed under "Microsoft" -- a vendor, not a product, and a bucket any other
+ * `microsoft_*` namespace would land in too. Meanwhile OneDrive's namespace has
+ * no underscore, so `onedrivengscv2`, `v3`, `v4`, `v6` and `v2.updates` each
+ * became an area of their own: one product scattered across five buckets while
+ * thirteen Edge namespaces were crushed into one mislabelled bucket.
+ *
+ * Reading the whole namespace and dropping the version suffix fixes both. The
+ * result is still the raw identifier, only parsed at the right boundary -- no
+ * dictionary of friendly names, so nothing here can claim a product is
+ * something it isn't. "Onedrivengsc" is not pretty; it is, however, true, and
+ * it is one area instead of five.
+ */
+function catalogArea(definitionId: string, firstPart: string, cspPath?: string): string {
+  const separator = definitionId.indexOf(ADMX_SEPARATOR);
+  if (separator === -1) return titleCase(firstPart);
+  // The path's spelling when there is one, the id's lowercase otherwise.
+  const namespace =
+    admxNamespaceFromPath(cspPath) ??
+    definitionId
+      .slice(0, separator)
+      .split("_")
+      .filter((p) => p && !CATALOG_BOILERPLATE.has(p.toLowerCase()));
+  // An id that is nothing but boilerplate before the separator has no namespace
+  // to read; fall back rather than returning an empty area.
+  if (namespace.length === 0) return titleCase(firstPart);
+  return namespace.map((token) => titleCase(stripAdmxVersion(token))).join(" ");
+}
+
+/**
+ * Path segments that are scaffolding rather than an area name.
+ *
+ * `Policy/Config` is stripped as a pair below; these catch a path that does not
+ * follow the usual shape, where the first surviving segment would otherwise be
+ * a structural word. Real case from a tenant: WinRE's setting is reached
+ * through `./Device/Vendor/MSFT/Policy/OpenExtensibilitySettings/...`, which
+ * has `Policy` without `Config` after it -- taking the first segment would file
+ * every such setting under an area called "Policy".
+ */
+const CSP_PATH_STRUCTURE = new Set(["policy", "config", "vendor", "msft", "device", "user"]);
+
+/**
+ * The CSP area, read from the setting's real CSP path.
+ *
+ * The area is in the definition id too, but flattened to lowercase --
+ * `applicationmanagement`, `localusersandgroups` -- with no case boundaries
+ * left to recover, which is why that route can only ever produce
+ * "Applicationmanagement". The CSP path carries Microsoft's own casing for the
+ * same area:
+ *
+ *   ./Device/Vendor/MSFT/Policy/Config/ApplicationManagement/RemoveDefault...
+ *
+ * so `friendlyLabel` splits it into "Application Management". This is the same
+ * fact the column always showed, with its capitalisation restored -- not a
+ * friendlier name chosen from a list, which could claim an area is something
+ * it isn't.
+ *
+ * Returns undefined rather than guessing whenever the path doesn't yield a
+ * clean area, and the caller keeps the id-derived name. That covers a missing
+ * path, a structural segment, and an ADMX namespace -- the last of those is
+ * `catalogArea`'s job, which groups a product's versions together and would be
+ * undone by reading one setting's path.
+ */
+function areaFromCspPath(cspPath: string | undefined): string | undefined {
+  if (!cspPath) return undefined;
+  let segments = cspPath.replace(/^\.\//, "").split("/").filter(Boolean);
+  if (segments[0] === "Device" || segments[0] === "User") segments = segments.slice(1);
+  if (segments[0] === "Vendor" && segments[1] === "MSFT") segments = segments.slice(2);
+  if (segments[0] === "Policy" && segments[1] === "Config") segments = segments.slice(2);
+  const area = segments[0];
+  if (!area || area.includes("~") || CSP_PATH_STRUCTURE.has(area.toLowerCase())) return undefined;
+  // Built-in ADMX-backed areas are prefixed in the path (ADMX_W32Time); the
+  // prefix names the mechanism, not the area.
+  return friendlyLabel(area.replace(/^ADMX_/, ""));
+}
+
+function parseCatalogDefinitionId(definitionId: string, cspPath?: string): { area: string; name: string } {
+  const parts = definitionId.split("_").filter((p) => p && !CATALOG_BOILERPLATE.has(p.toLowerCase()));
   if (parts.length === 0) return { area: "Settings Catalog", name: definitionId };
-  return { area: titleCase(parts[0]), name: parts.length > 1 ? parts.slice(1).join(" ") : parts[0] };
+  return {
+    area: catalogArea(definitionId, parts[0], cspPath),
+    name: parts.length > 1 ? parts.slice(1).join(" ") : parts[0],
+  };
 }
 
 /**
@@ -410,14 +552,17 @@ export function flattenSettingsCatalogEntries(
       const def = defsById.get(definitionId);
       const value = extractCatalogValue(instance, definitionId, def);
       if (value !== undefined && !bySettingId.has(definitionId)) {
-        const { area, name } = parseCatalogDefinitionId(definitionId);
-        const displayName = (def?.["displayName"] as string | undefined)?.trim() || name;
         const baseUri = def?.["baseUri"] as string | undefined;
         const offsetUri = def?.["offsetUri"] as string | undefined;
         const cspPath = baseUri ? `${baseUri}${offsetUri ?? ""}` : undefined;
+        // Parsed with the path in hand: it carries the casing for an ADMX
+        // namespace that the id has flattened away.
+        const { area, name } = parseCatalogDefinitionId(definitionId, cspPath);
+        const displayName = (def?.["displayName"] as string | undefined)?.trim() || name;
         bySettingId.set(definitionId, {
           settingId: definitionId,
-          cspArea: area,
+          // The path's casing when it gives a clean area, else the id's.
+          cspArea: areaFromCspPath(cspPath) ?? area,
           displayName,
           value,
           cspPath,

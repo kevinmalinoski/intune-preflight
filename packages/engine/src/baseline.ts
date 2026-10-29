@@ -149,6 +149,31 @@ function mergeSettings(policies: IntunePolicy[]): {
       });
     }
   }
+
+  // Order the merged baseline by CSP area, A-Z.
+  //
+  // Until now it came out in merge order -- the order the policies happened to
+  // be walked -- which is an implementation detail of the loop above, not
+  // anything a reader can use. On a real tenant that scatters the areas:
+  // Bitlocker, then Microsoft, then two unrelated OneDrive ADMX areas, then
+  // Bitlocker again if a second policy touched it. Nothing on screen explains
+  // the sequence, because there is nothing to explain.
+  //
+  // The sort is stable, so settings WITHIN an area keep merge order, which does
+  // mean something: they arrive in the order their policy declares them, and a
+  // policy's own settings stay together.
+  //
+  // Sorted here rather than in a renderer because the exports read this array
+  // too (`simulationRows`). Sorting in the UI would have the .xlsx disagree
+  // with the screen it was exported from.
+  //
+  // An empty area sorts last: the UI renders those under "Other", and a
+  // nameless bucket belongs at the end rather than above "Accounts".
+  settings.sort((a, b) => {
+    if (!a.cspArea !== !b.cspArea) return a.cspArea ? -1 : 1;
+    return a.cspArea.localeCompare(b.cspArea, undefined, { sensitivity: "base" });
+  });
+
   return { settings, conflicts, layered, overlaps };
 }
 
