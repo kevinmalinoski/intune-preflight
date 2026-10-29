@@ -455,7 +455,7 @@ export function AssignmentReport({
           onExport={exportManifest}
           className="rounded-md border border-emerald-400/50 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-500/20"
           options={[
-            { format: "xlsx", label: "Excel workbook (.xlsx)", hint: "Opens everywhere, iPad included" },
+            { format: "xlsx", label: "Excel workbook (.xlsx)", hint: "Opens everywhere, including mobile Excel" },
             { format: "csv", label: "CSV (.csv)", hint: "For scripts and other spreadsheets" },
           ]}
         />

@@ -252,7 +252,7 @@ _Each checked group's policies as a heat cluster; click through to the named chi
 
 Download the full manifest from the **Export ▾** menu, as an Excel workbook (`.xlsx`) or CSV — the raw per-assignment detail, ready to pivot by Group or Policy.
 
-The workbook is there because Excel for iPadOS refuses a `.csv` outright, however correct the file is: mobile Excel has no Text Import wizard, so it declines a format whose delimiter, encoding and column types have to be inferred. An `.xlsx` declares all three. It also means values like `=SUM(A1)` and `2026-10-28` arrive as the text they are, with none of the quote-prefixing a CSV needs to stay safe.
+The workbook is there because mobile Excel will not open a `.csv` at all, however correct the file is: it has no Text Import wizard, so it declines a format whose delimiter, encoding and column types have to be inferred. (Confirmed on Excel for iPadOS, where a file that opens cleanly in Excel on Windows and macOS is refused as corrupt.) An `.xlsx` declares all three. It also means values like `=SUM(A1)` and `2026-10-28` arrive as the text they are, with none of the quote-prefixing a CSV needs to stay safe.
 
 ![Export](img/15-manifest-export.png)
 

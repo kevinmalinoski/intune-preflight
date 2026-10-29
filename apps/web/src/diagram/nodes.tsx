@@ -14,8 +14,11 @@ import {
   STATUS_DOT,
   UNASSIGNED_EDGE,
   TYPE_BUBBLE_CAP,
+  TYPE_CHIP_WIDTH,
   TYPE_NODE_WIDTH,
+  kindCountLabel,
   pluralize,
+  policyPayloadLabel,
   type PolicyStatus,
 } from "./theme.ts";
 
@@ -177,8 +180,48 @@ export function PolicyTypeNode({
     expanded: boolean;
     onToggleExpand?: () => void;
     onOpen?: (scope: BaselineScope) => void;
+    /** Below `lg`: render as a chip and hand taps to `onPopOut`. */
+    compact?: boolean;
+    onPopOut?: (kind: string) => void;
   };
 }) {
+  const settings = data.policies.reduce((n, p) => n + p.settingsCount, 0);
+
+  // A chip, below `lg`. The bubble lists up to twelve policy names at 11px in a
+  // 400px node, which is right on a desktop canvas and unusable on a phone: the
+  // graph fits at a scale that renders that text at under 3px, and the names
+  // truncate at the end, which is where these names differ. So the chip carries
+  // only what survives being small -- colour, label, two counts -- and the names
+  // move to a pop-out that gets the full width of the screen (PolicyPopOut).
+  //
+  // Not a second component, because the two have to agree about which policies
+  // are of this type and how many settings they carry; one renderer over one set
+  // of node data cannot drift.
+  if (data.compact) {
+    return (
+      <button
+        onClick={() => data.onPopOut?.(data.kind)}
+        title={`Show the ${data.count} ${data.label} ${data.count === 1 ? "policy" : "policies"}`}
+        className="flex items-start gap-2 rounded-lg border bg-ink-900 px-2.5 py-2 text-left shadow-[0_4px_16px_rgba(0,0,0,0.35)] transition-colors hover:bg-ink-800/60"
+        style={{ borderColor: data.color, width: TYPE_CHIP_WIDTH }}
+      >
+        <Handle type="target" position={Position.Left} className="opacity-0" />
+        <span className="mt-0.5 h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: data.color }} />
+        <span className="min-w-0 flex-1">
+          <span className="block break-words text-[11px] font-semibold leading-tight" style={{ color: data.color }}>
+            {data.label}
+          </span>
+          <span className="mt-0.5 block text-[10px] tabular-nums text-slate-500">
+            {kindCountLabel(data.kind, data.count, settings)}
+          </span>
+        </span>
+        <span className="mt-0.5 shrink-0 text-[10px] text-slate-600" aria-hidden>
+          ▸
+        </span>
+      </button>
+    );
+  }
+
   const shown = data.expanded ? data.policies : data.policies.slice(0, TYPE_BUBBLE_CAP);
   const hiddenCount = data.policies.length - shown.length;
   return (
@@ -222,7 +265,9 @@ export function PolicyTypeNode({
               {p.name}
             </span>
             {p.status !== "excluded" && (
-              <span className="shrink-0 text-[10px] text-slate-500">{pluralize(p.settingsCount, "setting")}</span>
+              <span className="shrink-0 text-[10px] text-slate-500">
+                {policyPayloadLabel(data.kind, p.settingsCount)}
+              </span>
             )}
           </button>
         ))}

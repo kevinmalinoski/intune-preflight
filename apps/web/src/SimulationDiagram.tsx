@@ -11,11 +11,23 @@ import {
 import "@xyflow/react/dist/style.css";
 import type { SimulationResult } from "@intune-preflight/shared";
 import type { BaselineScope } from "./SimulationBaselinePanel.tsx";
+import { PolicyPopOut } from "./PolicyPopOut.tsx";
 import { toggled } from "./collections.ts";
 import { isCompact, subscribeLayout } from "./viewport.ts";
 import { buildGraph } from "./diagram/buildGraph.ts";
 import { EndpointStackNode, GroupNode, PolicyNode, PolicyTypeNode } from "./diagram/nodes.tsx";
-import { AUTOPILOT_COLOR, KIND_COLOR, KIND_LABEL, KIND_ORDER, STATUS_DOT } from "./diagram/theme.ts";
+import {
+  AUTOPILOT_COLOR,
+  COMPACT_MAX_ZOOM,
+  COMPACT_MIN_ZOOM,
+  COMPACT_TIER_ANCHOR_X,
+  COMPACT_TIER_ANCHOR_Y,
+  COMPACT_TIER_PADDING,
+  KIND_COLOR,
+  KIND_LABEL,
+  KIND_ORDER,
+  STATUS_DOT,
+} from "./diagram/theme.ts";
 
 // Which component React Flow uses for each node `type` buildGraph emits.
 const nodeTypes = {
@@ -94,12 +106,15 @@ export function SimulationDiagram({
   deviceFilterNames = [],
   onOpenBaseline,
   focus = false,
+  baselineOpen = false,
 }: {
   simulation: SimulationResult;
   deviceFilterNames?: string[];
   onOpenBaseline?: (scope: BaselineScope) => void;
   /** Focus mode: the diagram has the whole window and the pickers are gone. */
   focus?: boolean;
+  /** The merged-baseline panel is open over everything, so Escape is its key. */
+  baselineOpen?: boolean;
 }) {
   const compact = useSyncExternalStore(subscribeLayout, isCompact, () => false);
   // Dragging nodes and panning the canvas are the same gesture on a touch
@@ -133,18 +148,21 @@ export function SimulationDiagram({
   // detail view is the opt-in zoom.
   const [grouped, setGrouped] = useState(true);
 
-  // Per-policy setting counts come from each policy's OWN settings, not the
-  // merged baseline -- so a policy whose settings all collide with another (e.g.
-  // a 25H2 Feature Update profile deduped under 24H2) still shows its real count.
-  const settingsCount = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const p of [...simulation.policies, ...simulation.excludedPolicies]) counts[p.id] = p.settingsCount;
-    return counts;
-  }, [simulation.policies, simulation.excludedPolicies]);
-
-  // Type bubbles whose full (uncapped) policy list is shown.
+  // Type bubbles whose full (uncapped) policy list is shown. Desktop only in
+  // practice: a chip has no list to uncap.
   const [expandedKinds, setExpandedKinds] = useState<Set<string>>(new Set());
   const toggleKind = useCallback((kind: string) => setExpandedKinds(toggled(kind)), []);
+
+  // The type whose policies are popped out over the canvas, below `lg`. Tapping
+  // the chip that is already open closes it, so the same gesture is both ways.
+  const [poppedKind, setPoppedKind] = useState<string | null>(null);
+  const onPopOut = useCallback((kind: string) => setPoppedKind((open) => (open === kind ? null : kind)), []);
+  // The chips are gone at `lg+`, so the sheet they opened must go with them --
+  // otherwise widening the window leaves a pop-out with nothing that opened it,
+  // and narrowing again brings back a sheet nobody asked for.
+  useEffect(() => {
+    if (!compact) setPoppedKind(null);
+  }, [compact]);
 
   // Autopilot cards whose deployment details are expanded (collapsed by default).
   const [expandedAps, setExpandedAps] = useState<Set<string>>(new Set());
@@ -159,28 +177,30 @@ export function SimulationDiagram({
 
   const graph = useMemo(
     () =>
-      buildGraph(
+      buildGraph({
         simulation,
         deviceFilterNames,
         hiddenGroupIds,
-        settingsCount,
         grouped,
+        compact,
         expandedKinds,
-        toggleKind,
+        onToggleKind: toggleKind,
+        onPopOut,
         expandedAps,
-        toggleAp,
+        onToggleAp: toggleAp,
         stackHeight,
         onHeight,
-        onOpenBaseline
-      ),
+        onOpen: onOpenBaseline,
+      }),
     [
       simulation,
       deviceFilterNames,
       hiddenGroupIds,
-      settingsCount,
       grouped,
+      compact,
       expandedKinds,
       toggleKind,
+      onPopOut,
       expandedAps,
       toggleAp,
       stackHeight,
@@ -188,6 +208,12 @@ export function SimulationDiagram({
       onOpenBaseline,
     ]
   );
+
+  // Read back from the layout rather than kept alongside it: a group the lens
+  // has emptied, or a switch to detail view, leaves nothing to find and the
+  // sheet closes on its own instead of showing policies that are no longer on
+  // the canvas.
+  const popped = graph.typeGroups.find((g) => g.kind === poppedKind) ?? null;
 
   // Controlled nodes so React Flow can track drags and its own measurements.
   const [nodes, setNodes, onNodesChange] = useNodesState(graph.nodes);
@@ -205,27 +231,92 @@ export function SimulationDiagram({
   // changes, never on a height-only change (expanding a profile card, a name
   // wrapping to another line), so the viewport doesn't lurch while you read.
   const [rf, setRf] = useState<ReactFlowInstance | null>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Aim the viewport.
+   *
+   * A wide canvas fits the whole graph, which is what it wants. A narrow one
+   * aims at the policy column and lets the device and its groups sit off to
+   * the left -- see COMPACT_TIER_ANCHOR_X for why. The zoom is clamped rather
+   * than free so one chip doesn't fill the screen and twenty don't shrink to
+   * nothing.
+   */
+  const frame = useCallback(
+    (duration: number) => {
+      if (!rf) return;
+      const el = wrapRef.current;
+      const tier = graph.policyTier;
+      if (!tier || !el) {
+        void rf.fitView({ padding: fitPadding, duration });
+        return;
+      }
+      const paneW = el.clientWidth;
+      const paneH = el.clientHeight;
+      // A canvas that hasn't been laid out yet would divide by zero and send
+      // the viewport to infinity; the ResizeObserver calls back when it has.
+      if (paneW === 0 || paneH === 0) return;
+      const pad = COMPACT_TIER_PADDING * 2;
+      const zoom = Math.min(
+        COMPACT_MAX_ZOOM,
+        Math.max(COMPACT_MIN_ZOOM, Math.min(paneW / (tier.width + pad), paneH / (tier.height + pad)))
+      );
+      void rf.setViewport(
+        {
+          x: paneW * COMPACT_TIER_ANCHOR_X - (tier.x + tier.width / 2) * zoom,
+          y: paneH * COMPACT_TIER_ANCHOR_Y - (tier.y + tier.height / 2) * zoom,
+          zoom,
+        },
+        { duration }
+      );
+    },
+    [rf, graph.policyTier, fitPadding]
+  );
+
+  // Read through a ref so the effects below depend on WHAT changed, not on the
+  // identity of this callback -- `graph.policyTier` is a fresh object on every
+  // rebuild, and keying the refit on it would re-aim the viewport every time a
+  // profile card expanded or a name rewrapped, lurching while you read.
+  const frameRef = useRef(frame);
+  frameRef.current = frame;
+
   const nodeSignature = useMemo(() => graph.nodes.map((n) => n.id).join("|"), [graph.nodes]);
-  const firstFit = useRef(true);
   useEffect(() => {
     if (!rf) return;
-    // `fitView` fits the last MEASURED sizes, and React Flow measures a changed
-    // node a frame after it renders -- so wait two frames or the fit is computed
-    // from the previous layout. The initial fit is React Flow's own `fitView`
-    // prop; skipping it here avoids fighting that with a redundant animation.
-    if (firstFit.current) {
-      firstFit.current = false;
-      return;
-    }
+    // The fit reads the last MEASURED sizes, and React Flow measures a changed
+    // node a frame after it renders -- so wait two frames or it is computed
+    // from the previous layout.
     let second = 0;
     const first = requestAnimationFrame(() => {
-      second = requestAnimationFrame(() => void rf.fitView({ padding: fitPadding, duration: 260 }));
+      second = requestAnimationFrame(() => frameRef.current(260));
     });
     return () => {
       cancelAnimationFrame(first);
       cancelAnimationFrame(second);
     };
-  }, [rf, nodeSignature, fitPadding]);
+  }, [rf, nodeSignature]);
+
+  // The canvas changes size without the graph changing at all: collapsing the
+  // endpoint picker or the waitlist hands the diagram a few hundred more
+  // pixels, and until this existed it kept the zoom it had been given when it
+  // was short -- the graph just sat there small with empty space under it. The
+  // observer also delivers the first measurement, which is what aims the
+  // portrait viewport on load.
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el || !rf) return;
+    let raf = 0;
+    const observer = new ResizeObserver(() => {
+      // Coalesce: a resize fires per frame while a panel animates open.
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => frameRef.current(180));
+    });
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(raf);
+    };
+  }, [rf]);
 
   const onNodeClick: NodeMouseHandler = useCallback((_evt, node) => {
     if (node.type !== "entraGroup") return;
@@ -234,7 +325,7 @@ export function SimulationDiagram({
   }, []);
 
   return (
-    <div className="relative h-full w-full">
+    <div ref={wrapRef} className="relative h-full w-full">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -255,6 +346,14 @@ export function SimulationDiagram({
         <Controls showInteractive={false} position="bottom-right" />
       </ReactFlow>
       <Legend compact={compact} />
+      {popped && (
+        <PolicyPopOut
+          group={popped}
+          onOpenBaseline={onOpenBaseline}
+          onClose={() => setPoppedKind(null)}
+          escapeEnabled={!baselineOpen}
+        />
+      )}
       <div className="absolute left-3 top-3 z-10 flex flex-col items-start gap-2">
         <button
           onClick={() => setGrouped((g) => !g)}

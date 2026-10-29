@@ -6,6 +6,62 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [2.5.0] — 2026-10-28
+
+The diagram is readable on a phone. A policy type is a chip you tap to get its
+policy names, and the view zooms to the policies instead of trying to fit the
+whole graph into a screen that cannot hold it.
+
+### Added
+- **A policy type opens its policies in a pop-out, below `lg`.** Tapping a type
+  on the diagram brings up its policies with their names wrapping in full —
+  these run to sixty characters and the part that distinguishes one from
+  another is almost always at the end, so a truncated name is not a name.
+  Tapping a policy opens the merged baseline scoped to it, as before. The
+  pop-out reads the layout's own data, so it and the diagram cannot disagree
+  about which policies are of a type or how many settings they carry.
+
+### Changed
+- **A policy type is a chip below `lg`, not a 400px list.** The type bubble
+  lists up to twelve policy names, which is right on a desktop canvas and
+  unusable on a phone: the node was wider than the viewport and, for a Settings
+  Catalog of thirteen, 421px tall. The chip carries what survives being small —
+  colour, label, policy count, settings total — and the names moved to the
+  pop-out. Unchanged at `lg` and up.
+- **The narrow-window diagram aims at the policies rather than fitting the whole
+  graph.** Fitting three columns totalling 1050px into a 375px canvas landed at
+  27% zoom, rendering the nodes' 11px type at 3px. The view now goes to the
+  policy column at up to full size, with the device and its groups off to the
+  left where they have always been — the diagram still reads left to right, and
+  panning left walks back along the flow. Measured on a phone-sized window:
+  12.6px against 2.6px.
+- **The merged-baseline rail is desktop-only.** Below `lg` it was a collapsed
+  bar that opened a half-screen accordion of the baseline by CSP area, over the
+  diagram — a fourth list on a phone, arriving from the bottom of the screen
+  rather than from anything tapped, and grouped by an axis the diagram does not
+  use. Reaching the baseline is now one path: a type, then a policy, then its
+  settings, with a button on the canvas for the whole thing. The rail is
+  untouched at `lg` and up.
+- **The `.xlsx` export is described by what it is for.** The hint read "iPad
+  included", which was the story of how the limitation was found rather than
+  what it means when choosing a format; mobile Excel has the same constraint on
+  any device.
+
+### Fixed
+- **Platform Scripts counted their own payload as settings.** A script's
+  settings are `scriptContent`, `runAsAccount`, `enforceSignatureCheck` and the
+  rest, read off the policy itself — the engine namespaces them per policy
+  precisely so they never merge with anything, because scripts do not conflict
+  the way a shared CSP setting does. Reporting "1 policy, 4 settings" counted a
+  script's run options as though the device resolved them, reading as four
+  times more policy than is there. A type of scripts now reports how many
+  scripts, and each one reports "script config". The merged baseline's own
+  total is unchanged.
+- **The diagram stayed zoomed out after a panel was collapsed.** Collapsing the
+  endpoint picker or the Policy Waitlist hands the diagram a few hundred more
+  pixels, and it kept the zoom it was given while it was short — sitting small
+  with empty space beneath it. It now re-aims whenever the canvas changes size.
+
 ## [2.4.0] — 2026-10-28
 
 Exports can now be an Excel workbook, which is what finally opens on an iPad —

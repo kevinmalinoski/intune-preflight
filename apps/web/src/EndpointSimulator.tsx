@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useState, useSyncExternalStore } from "react";
 import type { AssignmentFilter, Platform, SimulationResult } from "@intune-preflight/shared";
 import { api } from "./api.ts";
 import { BaselinePeek } from "./BaselinePeek.tsx";
@@ -8,6 +8,7 @@ import { GroupTagPill } from "./GroupTagPill.tsx";
 import { PolicyPreflight } from "./PolicyPreflight.tsx";
 import { SimulationDiagram } from "./SimulationDiagram.tsx";
 import { SimulationBaselinePanel, type BaselineScope } from "./SimulationBaselinePanel.tsx";
+import { isCompact, subscribeLayout } from "./viewport.ts";
 
 export function EndpointSimulator({
   handoff,
@@ -40,6 +41,7 @@ export function EndpointSimulator({
     groupTag,
   } = device;
 
+  const compact = useSyncExternalStore(subscribeLayout, isCompact, () => false);
   const [filters, setFilters] = useState<AssignmentFilter[]>([]);
   const [simulation, setSimulation] = useState<SimulationResult | null>(null);
   const [showBaseline, setShowBaseline] = useState(false);
@@ -97,6 +99,29 @@ export function EndpointSimulator({
   // Memoized so its identity is stable across renders -- the diagram keys a
   // layout memo on it, and a fresh array each render would thrash that memo (and
   // the diagram's node-measurement pass) every render.
+  const baselineOverlay = simulation && (
+    <>
+      {/* Wherever the baseline rail isn't. At `lg` and up the rail is on screen
+          with the same counts and its own Open button, and two buttons for one
+          panel is how a UI starts to look accreted -- but focus mode hides the
+          rail, and below `lg` there is no rail at all now, so this is the only
+          way through to the whole baseline. */}
+      <button
+        onClick={() => openBaseline(null)}
+        className="rounded-md border border-emerald-400/50 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-300 shadow-lg backdrop-blur hover:bg-emerald-500/20"
+      >
+        View merged baseline ({simulation.settings.length} settings
+        {simulation.conflicts.length > 0 ? `, ${simulation.conflicts.length} conflicts` : ""})
+      </button>
+      {simulation.excludedPolicies.length > 0 && (
+        <div className="rounded-md border border-rose-400/40 bg-rose-500/10 px-3 py-1.5 text-xs text-rose-300 shadow-lg backdrop-blur">
+          {simulation.excludedPolicies.length} polic
+          {simulation.excludedPolicies.length === 1 ? "y" : "ies"} explicitly excluded for this selection
+        </div>
+      )}
+    </>
+  );
+
   const deviceFilterNames = useMemo(
     () =>
       deviceFilterIds
@@ -169,16 +194,17 @@ export function EndpointSimulator({
                 deviceFilterNames={deviceFilterNames}
                 onOpenBaseline={openBaseline}
                 focus={focus}
+                baselineOpen={showBaseline}
               />
               {/* Capped so these can't run off a narrow canvas -- the excluded-
-                policies note is a full sentence. Below `lg` they also drop to a
-                band of their own under the diagram's own top-left controls,
-                which is the only arrangement that holds however many cards are
-                showing. */}
+              policies note is a full sentence. Below `lg` they also drop to a
+              band of their own under the diagram's own top-left controls, which
+              is the only arrangement that holds however many cards are
+              showing. */}
               <div className="absolute right-4 top-14 z-10 flex max-w-[calc(100%-2rem)] flex-col items-end gap-2 lg:top-4">
                 <div className="flex items-start gap-2">
                   {/* Autopilot is a Windows-only enrollment path, so off Windows
-                    there is no Group Tag to keep and the pill isn't rendered. */}
+                  there is no Group Tag to keep and the pill isn't rendered. */}
                   {focus && platform === "windows" && (
                     <GroupTagPill
                       groups={groups}
@@ -206,32 +232,38 @@ export function EndpointSimulator({
                     </button>
                   )}
                 </div>
-                {/* Focus mode only. Everywhere else the rail is on screen with
-                  the same counts and its own Open button, and two buttons for
-                  one panel is how a UI starts to look accreted. */}
-                {focus && (
-                  <button
-                    onClick={() => openBaseline(null)}
-                    className="rounded-md border border-emerald-400/50 bg-emerald-500/10 px-3 py-1.5 text-xs font-medium text-emerald-300 shadow-lg hover:bg-emerald-500/20"
-                  >
-                    View merged baseline ({simulation.settings.length} settings
-                    {simulation.conflicts.length > 0 ? `, ${simulation.conflicts.length} conflicts` : ""})
-                  </button>
-                )}
-                {simulation.excludedPolicies.length > 0 && (
-                  <div className="rounded-md border border-rose-400/40 bg-rose-500/10 px-3 py-1.5 text-xs text-rose-300 shadow-lg">
-                    {simulation.excludedPolicies.length} polic{simulation.excludedPolicies.length === 1 ? "y" : "ies"}{" "}
-                    explicitly excluded for this selection
-                  </div>
-                )}
+                {/* Focus mode keeps these top-right, where the canvas is wide
+                and nothing competes. Below `lg` they move to the bottom-left
+                corner instead -- the viewport aims the policy column just
+                right of centre, so a top-right button lands squarely on the
+                chips. */}
+                {focus && baselineOverlay}
               </div>
+              {compact && !focus && (
+                <div className="absolute bottom-14 left-3 z-10 flex max-w-[calc(100%-5rem)] flex-col items-start gap-2">
+                  {baselineOverlay}
+                </div>
+              )}
             </>
           )}
         </div>
 
-        {/* Hidden in focus mode -- focus means the diagram and nothing else,
-            and the overlay keeps a way through to the full panel. */}
-        {!focus && !error && simulation && <BaselinePeek simulation={simulation} onOpen={() => openBaseline(null)} />}
+        {/* The rail, at `lg` and up only.
+            Below it this was a collapsed bar that opened a 45vh accordion of
+            the baseline by CSP area, over the canvas. It was the fourth list
+            on a phone -- after the policy types, their policies, and the
+            settings themselves -- and it arrived from the bottom of the screen
+            rather than from anything you had tapped, grouped by an axis the
+            diagram doesn't use. Reaching the baseline is now the end of one
+            path: a type, then a policy, then its settings, with the overlay's
+            button for the whole thing. That is what focus mode always did, and
+            it is the arrangement that reads cleanly at phone width.
+
+            The rail stays at `lg`, where it costs nothing and cause and effect
+            being on screen together is the whole argument for it. */}
+        {!focus && !compact && !error && simulation && (
+          <BaselinePeek simulation={simulation} onOpen={() => openBaseline(null)} />
+        )}
       </div>
 
       {showBaseline && simulation && (

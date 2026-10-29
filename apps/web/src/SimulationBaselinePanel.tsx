@@ -632,7 +632,7 @@ export function SimulationBaselinePanel({
               : "border-ink-700 text-slate-300 hover:bg-ink-800"
           }`}
           options={[
-            { format: "xlsx", label: "Excel workbook (.xlsx)", hint: "Opens everywhere, iPad included" },
+            { format: "xlsx", label: "Excel workbook (.xlsx)", hint: "Opens everywhere, including mobile Excel" },
             { format: "csv", label: "CSV (.csv)", hint: "For scripts and other spreadsheets" },
             { format: "json", label: "JSON (.json)", hint: "The raw simulation result" },
           ]}

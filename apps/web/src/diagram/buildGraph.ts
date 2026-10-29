@@ -1,25 +1,25 @@
 import type { Node, Edge } from "@xyflow/react";
 import type { SimulationGroup, SimulationResult } from "@intune-preflight/shared";
-import { filterExclusionReason } from "@intune-preflight/shared";
 import type { BaselineScope } from "../SimulationBaselinePanel.tsx";
 import type { StackProfile } from "./nodes.tsx";
+import { groupByKind, visiblePolicies } from "./policyGroups.ts";
 import {
   AUTOPILOT_COLOR,
   GROUP_NODE_WIDTH,
-  KIND_COLOR,
-  KIND_LABEL,
-  KIND_ORDER,
   LINE_HEIGHT,
+  POLICY_NODE_WIDTH,
   ROW_GAP,
   SOURCE_STYLE,
   STACK_WIDTH,
   TYPE_BUBBLE_CAP,
+  TYPE_CHIP_GAP,
+  TYPE_CHIP_WIDTH,
   TYPE_HEADER_HEIGHT,
   TYPE_LINE_HEIGHT,
   TYPE_PADDING,
   UNASSIGNED_EDGE,
+  estimateChipHeight,
   estimateRowHeight,
-  type PolicyStatus,
 } from "./theme.ts";
 
 /**
@@ -39,21 +39,37 @@ const COLUMN_GAP = 140;
 // group column as dimmed toggles (so they can be clicked back on), but the
 // policy column is laid out from ONLY the visible policies -- so hiding a group
 // collapses the gaps its policies leave behind instead of punching holes.
-export function buildGraph(
-  simulation: SimulationResult,
-  deviceFilterNames: string[],
-  hiddenGroupIds: Set<string>,
-  settingsCount: Record<string, number>,
-  grouped: boolean,
-  expandedKinds: Set<string>,
-  onToggleKind: (kind: string) => void,
-  expandedAps: Set<string>,
-  onToggleAp: (id: string) => void,
+export function buildGraph({
+  simulation,
+  deviceFilterNames,
+  hiddenGroupIds,
+  grouped,
+  compact,
+  expandedKinds,
+  onToggleKind,
+  onPopOut,
+  expandedAps,
+  onToggleAp,
+  stackHeight,
+  onHeight,
+  onOpen,
+}: {
+  simulation: SimulationResult;
+  deviceFilterNames: string[];
+  hiddenGroupIds: Set<string>;
+  grouped: boolean;
+  /** Below `lg`: type bubbles become chips and their policies move to a pop-out. */
+  compact: boolean;
+  expandedKinds: Set<string>;
+  onToggleKind: (kind: string) => void;
+  onPopOut: (kind: string) => void;
+  expandedAps: Set<string>;
+  onToggleAp: (id: string) => void;
   /** The endpoint stack's measured height, so it can be centered exactly. */
-  stackHeight: number,
-  onHeight: (height: number) => void,
-  onOpen?: (scope: BaselineScope) => void
-) {
+  stackHeight: number;
+  onHeight: (height: number) => void;
+  onOpen?: (scope: BaselineScope) => void;
+}) {
   const groupNames = simulation.groups.filter((g) => g.source === "selected").map((g) => g.displayName);
   const nodes: Node[] = [];
   const edges: Edge[] = [];
@@ -109,36 +125,10 @@ export function buildGraph(
   const groupSpan = Math.max(groupY - ROW_GAP, 0);
 
   // --- Visible policies (shared by both views) ---
+  // Derived in policyGroups.ts, not here: everything below this line is
+  // geometry, and the drill-down list reads the same two functions.
   const policyX = groupX + GROUP_NODE_WIDTH + COLUMN_GAP;
-  type VP = {
-    id: string;
-    name: string;
-    kind: string;
-    status: PolicyStatus;
-    excludedReason?: string;
-    settingsCount: number;
-    sources: string[];
-  };
-  const visible: VP[] = [];
-  for (const p of [...simulation.policies, ...simulation.excludedPolicies]) {
-    const excluded = simulation.excludedPolicies.includes(p);
-    // Group-exclude and filter-exclude are mutually exclusive per policy (see computeSimulation).
-    const sourceGroupIds = excluded && p.excludedViaGroupIds.length > 0 ? p.excludedViaGroupIds : p.viaGroupIds;
-    const visibleSources = sourceGroupIds.filter((id) => !hiddenGroupIds.has(id));
-    // A policy survives only while at least one group bringing it in is still visible.
-    if (sourceGroupIds.length > 0 && visibleSources.length === 0) continue;
-    visible.push({
-      id: p.id,
-      name: p.displayName,
-      kind: p.kind,
-      status: excluded ? "excluded" : p.unassigned ? "unassigned" : "included",
-      excludedReason: p.excludedByFilter
-        ? filterExclusionReason(p.excludedByFilter.filterName, p.excludedByFilter.filterType)
-        : undefined,
-      settingsCount: settingsCount[p.id] ?? 0,
-      sources: visibleSources,
-    });
-  }
+  const visible = visiblePolicies(simulation, hiddenGroupIds);
 
   // --- Enrollment edges: one line per (profile, targeted group) ---
   // The device and its profiles are a single node, so enrollment adds no edge of
@@ -163,22 +153,18 @@ export function buildGraph(
 
   // --- Policy column: one bubble per type (grouped) or one node per policy ---
   let policySpan = 0;
+  // Computed once and returned, so the pop-out reads the very groups the chips
+  // were drawn from rather than deriving them a second time. Empty in detail
+  // view, which is what closes an open pop-out when you switch to it.
+  const typeGroups = grouped ? groupByKind(visible) : [];
   if (grouped) {
-    const byKind = new Map<string, VP[]>();
-    for (const vp of visible) {
-      const list = byKind.get(vp.kind) ?? [];
-      list.push(vp);
-      byKind.set(vp.kind, list);
-    }
-    const rank = (k: string) => (KIND_ORDER.indexOf(k) === -1 ? 99 : KIND_ORDER.indexOf(k));
-    const kinds = [...byKind.keys()].sort((a, b) => rank(a) - rank(b));
-
     let y = 0;
-    for (const kind of kinds) {
-      const list = byKind.get(kind)!;
+    for (const { kind, label, color, count, policies: list } of typeGroups) {
       const expanded = expandedKinds.has(kind);
-      // Height must mirror what PolicyTypeNode renders: capped rows plus the
-      // "+N more / Show fewer" footer row when the list exceeds the cap.
+      // Height must mirror what PolicyTypeNode renders: a chip's single label
+      // (estimated, since an uncatalogued kind's label can wrap) when compact,
+      // otherwise the capped rows plus the "+N more / Show fewer" footer row
+      // when the list exceeds the cap.
       const capped = list.length > TYPE_BUBBLE_CAP;
       const shownRows = (expanded ? list.length : Math.min(list.length, TYPE_BUBBLE_CAP)) + (capped ? 1 : 0);
       nodes.push({
@@ -187,9 +173,9 @@ export function buildGraph(
         position: { x: policyX, y },
         data: {
           kind,
-          label: KIND_LABEL[kind] ?? kind,
-          color: KIND_COLOR[kind] ?? "#94a3b8",
-          count: list.length,
+          label,
+          color,
+          count,
           policies: list.map((vp) => ({
             id: vp.id,
             name: vp.name,
@@ -199,11 +185,16 @@ export function buildGraph(
           expanded,
           onToggleExpand: () => onToggleKind(kind),
           onOpen,
+          compact,
+          onPopOut,
         },
       });
-      y += TYPE_HEADER_HEIGHT + shownRows * TYPE_LINE_HEIGHT + TYPE_PADDING + ROW_GAP;
+      y += compact
+        ? estimateChipHeight(label)
+        : TYPE_HEADER_HEIGHT + shownRows * TYPE_LINE_HEIGHT + TYPE_PADDING + ROW_GAP;
     }
-    policySpan = Math.max(y - ROW_GAP, 0);
+    // Each estimate carries its own trailing gap; drop the last one.
+    policySpan = Math.max(y - (compact ? TYPE_CHIP_GAP : ROW_GAP), 0);
 
     // One edge per (group, kind); solid when the group contributes an applied
     // policy of that kind, otherwise dashed (rose exclude / orange unassigned).
@@ -313,5 +304,20 @@ export function buildGraph(
     });
   }
 
-  return { nodes, edges, centerline };
+  // Where the policy column ended up, for the compact viewport to aim at.
+  //
+  // Read after the centering pass, which has already moved it: the nodes were
+  // laid out from y=0 and then shifted by `centerline - policySpan / 2`, so
+  // that shift is the column's top edge. Null on a wide canvas, where fitting
+  // the whole graph is the right framing and needs no rect of its own.
+  const policyTier = compact
+    ? {
+        x: policyX,
+        y: centerline - policySpan / 2,
+        width: grouped ? TYPE_CHIP_WIDTH : POLICY_NODE_WIDTH,
+        height: policySpan,
+      }
+    : null;
+
+  return { nodes, edges, centerline, typeGroups, policyTier };
 }
