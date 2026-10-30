@@ -161,70 +161,121 @@ function LiveSetupPanel({ onUseSampleTenant }: { onUseSampleTenant: () => void }
  * one click away; the point is that publishing them becomes a decision instead
  * of the default.
  */
-export function LiveSessionBanner() {
+/**
+ * Who is signed in, and how the tenant load is going -- as one lock in the
+ * toolbar rather than a band across the window.
+ *
+ * This replaces a full-width banner. The banner was honest and expensive: it
+ * said "Authenticated to tenant · read-only · End session" on a row of its own,
+ * above a second row for the compact-layout notice, above the picker summary,
+ * above the waitlist. Four rows of status before any policy. On a phone that
+ * left the diagram about 150px. None of it is the data anyone opened the app
+ * for -- it is the app describing its own condition, and condition belongs in
+ * an icon that changes rather than a sentence that persists.
+ *
+ * So: closed, it is a lock. It spins while the tenant is loading, because the
+ * thing being read IS the tenant it is locked to, and it goes red if that
+ * failed. Open -- on hover, or pinned by a click so touch and keyboard reach it
+ * too -- it is everything the banner said.
+ *
+ * The identity stays concealed until then, which is the point the lock was
+ * given in 2.3.1: a screenshot of this app should not publish an admin's UPN
+ * and tenant id. Hovering is deliberate, not persisted, and closes on leave.
+ */
+export function SessionLock() {
   const progress = useSyncExternalStore(subscribeLoadProgress, getLoadProgress);
   const identity = signedInIdentity();
+  const [open, setOpen] = useState(false);
+  const [pinned, setPinned] = useState(false);
   const [ending, setEnding] = useState(false);
-  // Deliberately not persisted: concealed again on every load, because the
-  // screenshot it protects is usually taken on a freshly opened page.
-  const [revealed, setRevealed] = useState(false);
 
   if (!identity) return null;
 
+  const loading = progress.phase === "loading";
+  const failed = progress.phase === "failed";
   const endIt = async () => {
     setEnding(true);
     // Reloads the page, so nothing after this runs on the success path.
     await endLiveSession();
   };
+  const close = () => {
+    setPinned(false);
+    setOpen(false);
+  };
 
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-emerald-500/20 bg-emerald-500/10 px-4 py-1 text-[11px] text-emerald-300">
+    <div className="relative" onMouseEnter={() => setOpen(true)} onMouseLeave={() => !pinned && setOpen(false)}>
       <button
-        onClick={() => setRevealed((v) => !v)}
-        aria-expanded={revealed}
-        title={revealed ? "Hide the signed-in account and tenant" : "Show the signed-in account and tenant"}
-        className="-mx-1 flex items-center gap-1.5 rounded px-1 py-0.5 font-medium transition-colors hover:bg-emerald-500/20"
+        onClick={() => {
+          setPinned((v) => !v);
+          setOpen(true);
+        }}
+        aria-expanded={open}
+        aria-label={
+          failed ? "Tenant load failed" : loading ? "Reading your tenant" : "Authenticated to tenant — read-only"
+        }
+        title={
+          failed
+            ? `Load failed: ${progress.error}`
+            : loading
+              ? `Reading your tenant from Microsoft Graph — ${progress.requests} request${progress.requests === 1 ? "" : "s"}`
+              : "Authenticated to tenant — read-only. Hover or click for details."
+        }
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md border text-sm transition-colors ${
+          failed
+            ? "border-red-400/40 bg-red-500/10 text-red-300"
+            : "border-emerald-400/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
+        }`}
       >
-        <span aria-hidden>{revealed ? "🔓" : "🔒"}</span>
-        Authenticated to tenant
-        <span className="text-[9px] opacity-70" aria-hidden>
-          {revealed ? "▴" : "▾"}
+        {/* The lock itself is the spinner. A separate spinner beside it would
+            be a second thing to look at saying the same thing. */}
+        <span className={loading ? "inline-block animate-spin" : ""} aria-hidden>
+          {failed ? "⚠" : loading ? "🔓" : "🔒"}
         </span>
       </button>
-      <span className="text-emerald-300/50">·</span>
-      <span>read-only — this tool never writes to a tenant</span>
 
-      {progress.phase === "loading" && (
-        <span className="flex items-center gap-1.5 text-sky-300">
-          <span className="animate-spin" aria-hidden>
-            ⟳
-          </span>
-          Reading your tenant from Microsoft Graph… {progress.requests} request
-          {progress.requests === 1 ? "" : "s"}
-        </span>
-      )}
-      {progress.phase === "failed" && <span className="text-red-300">Load failed: {progress.error}</span>}
+      {open && (
+        <>
+          {/* Only while pinned: a click-away layer during hover would swallow
+              the first click anywhere else in the toolbar. */}
+          {pinned && <div className="fixed inset-0 z-30" onClick={close} />}
+          <div
+            className="absolute right-0 top-full z-40 mt-1 w-72 rounded-lg border border-ink-700 bg-ink-900 p-3 text-[11px] shadow-2xl"
+            role="status"
+          >
+            <div className="flex items-baseline gap-1.5">
+              <span aria-hidden>{failed ? "⚠" : "🔓"}</span>
+              <span className="font-medium text-emerald-300">
+                {failed ? "Tenant load failed" : "Authenticated to tenant"}
+              </span>
+            </div>
+            <div className="mt-1.5 break-words font-medium text-slate-200">{identity.name ?? identity.username}</div>
+            {identity.name && <div className="break-all text-slate-400">{identity.username}</div>}
+            <div className="mt-1 text-slate-400">
+              tenant <code className="break-all font-mono text-slate-300">{identity.tenantId}</code>
+            </div>
 
-      <button
-        onClick={endIt}
-        disabled={ending}
-        title="Discards the access token and the tenant data held in this tab, then reloads. Closing the tab does the same."
-        className="ml-auto rounded border border-emerald-400/40 px-2 py-0.5 font-medium text-emerald-200 transition-colors hover:bg-emerald-500/20 disabled:opacity-50"
-      >
-        {ending ? "Ending…" : "End session"}
-      </button>
+            <div className="mt-2 border-t border-ink-800 pt-2 text-slate-500">
+              read-only — this tool never writes to a tenant
+            </div>
 
-      {/* `w-full` puts this on its own line of the wrapping row, so revealing it
-          never reflows the controls above. */}
-      {revealed && (
-        <div className="flex w-full flex-wrap items-center gap-x-2 gap-y-0.5 pt-0.5 text-emerald-300/80">
-          <span className="font-medium text-emerald-200">{identity.name ?? identity.username}</span>
-          {identity.name && <span>({identity.username})</span>}
-          <span className="text-emerald-300/50">·</span>
-          <span>
-            tenant <code className="break-all font-mono">{identity.tenantId}</code>
-          </span>
-        </div>
+            {loading && (
+              <div className="mt-1 text-sky-300">
+                Reading from Microsoft Graph… {progress.requests} request{progress.requests === 1 ? "" : "s"}
+              </div>
+            )}
+            {failed && <div className="mt-1 break-words text-red-300">{progress.error}</div>}
+
+            <button
+              onClick={endIt}
+              disabled={ending}
+              title="Discards the access token and the tenant data held in this tab, then reloads. Closing the tab does the same."
+              className="mt-2 w-full rounded border border-emerald-400/40 px-2 py-1.5 font-medium text-emerald-200 transition-colors hover:bg-emerald-500/20 disabled:opacity-50"
+            >
+              {ending ? "Ending…" : "End session"}
+            </button>
+          </div>
+        </>
       )}
     </div>
   );

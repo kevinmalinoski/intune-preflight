@@ -26,10 +26,12 @@ import {
   listAssignmentFilters,
   listGroupSummaries,
   listUnassignedPolicies,
+  narrowSimulation,
   simulationToCsv,
   simulationToXlsx,
   type TenantData,
   XLSX_MIME,
+  type BaselineCriteria,
 } from "@intune-preflight/engine";
 import { createGraphClient, loadTenantData, type TenantMode, TtlCache } from "@intune-preflight/graph";
 import type { BaselineExportFormat, ManifestExportFormat, ServerStatus, SimulationInputs } from "./api.ts";
@@ -241,8 +243,11 @@ export function createLiveApi(deps: LiveApiDeps) {
     },
 
     simulate: async (inputs: SimulationInputs) => computeSimulation(await tenant(), toInputs(inputs)),
-    simulateExport: (inputs: SimulationInputs, format: BaselineExportFormat) => {
-      const sim = computeSimulation(tenantNow(), toInputs(inputs));
+    simulateExport: (inputs: SimulationInputs, format: BaselineExportFormat, criteria?: BaselineCriteria) => {
+      // Narrowed here rather than on the wire: this build holds the tenant in
+      // the tab, so "this view" is already in hand. Same function the panel and
+      // the server use, so the three agree about what a filtered export is.
+      const sim = narrowSimulation(computeSimulation(tenantNow(), toInputs(inputs)), criteria);
       if (format === "xlsx") return xlsxFile(simulationToXlsx(sim));
       return format === "csv"
         ? textFile("text/csv", simulationToCsv(sim))

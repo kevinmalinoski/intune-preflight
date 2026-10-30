@@ -166,6 +166,33 @@ describe("GET /api/simulate/export", () => {
     expect(res.body.split("\n")[0]).toContain("CSP Area");
   });
 
+  it("narrows the download to the view it was given", async () => {
+    // The browser-only builds narrow in the tab; this build has to be told what
+    // the panel was showing, and it has to actually apply it -- otherwise a
+    // filtered export quietly hands over the whole tenant.
+    const all = await get("/api/simulate/export?platform=windows&format=csv");
+    const scoped = await get("/api/simulate/export?platform=windows&format=csv&scopeKind=compliancePolicy");
+    const allRows = all.body.split("\r\n").filter(Boolean).length;
+    const scopedRows = scoped.body.split("\r\n").filter(Boolean).length;
+    expect(scoped.statusCode).toBe(200);
+    expect(scopedRows).toBeGreaterThan(1); // header plus something
+    expect(scopedRows).toBeLessThan(allRows);
+  });
+
+  it("searches the export the way the filter box searches the screen", async () => {
+    const hit = await get("/api/simulate/export?platform=windows&format=csv&q=bitlocker");
+    const miss = await get("/api/simulate/export?platform=windows&format=csv&q=zzz-no-such-setting");
+    expect(hit.body.toLowerCase()).toContain("bitlocker");
+    // Header only: nothing matched, and the file still has its columns.
+    expect(miss.body.split("\r\n").filter(Boolean).length).toBe(1);
+  });
+
+  it("ignores narrowing it was not given, so an old client still gets everything", async () => {
+    const plain = await get("/api/simulate/export?platform=windows&format=csv");
+    const explicitAll = await get("/api/simulate/export?platform=windows&format=csv&view=all");
+    expect(explicitAll.body).toBe(plain.body);
+  });
+
   it("serves an xlsx workbook, as bytes rather than JSON", async () => {
     // The route returns a Buffer so Fastify sends the ZIP as it is. Returned as
     // a Uint8Array it would be serialised to `{"0":80,"1":75,...}` -- a 200 with

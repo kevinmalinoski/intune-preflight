@@ -13,8 +13,10 @@ import {
   listGroupSummaries,
   listUnassignedPolicies,
   simulationToCsv,
+  narrowSimulation,
   simulationToXlsx,
   XLSX_MIME,
+  type BaselineCriteria,
 } from "@intune-preflight/engine";
 
 /**
@@ -172,11 +174,33 @@ export async function buildServer({ logger = true }: { logger?: boolean } = {}) 
   );
 
   app.get<{
-    Querystring: { groups?: string; platform?: string; deviceFilterIds?: string; unassigned?: string; format?: string };
+    Querystring: {
+      groups?: string;
+      platform?: string;
+      deviceFilterIds?: string;
+      unassigned?: string;
+      format?: string;
+      // What the panel was showing. Absent on a full export, and absent on
+      // every request this route saw before filtered exports existed, so an
+      // old client still gets the whole baseline.
+      scopeKind?: string;
+      scopePolicyId?: string;
+      view?: string;
+      q?: string;
+    };
   }>("/api/simulate/export", async (req, reply) => {
     try {
       const data = await loadTenantData();
-      const simulation = computeSimulation(data, parseSimulationQuery(req.query));
+      // Narrowed with the same function the panel narrows the screen with. The
+      // browser-only builds hold the simulation and call it directly; this
+      // build has to be told what "this view" meant, which is what these four
+      // parameters are.
+      const simulation = narrowSimulation(computeSimulation(data, parseSimulationQuery(req.query)), {
+        scopeKind: req.query.scopeKind as BaselineCriteria["scopeKind"],
+        scopePolicyId: req.query.scopePolicyId,
+        view: req.query.view as BaselineCriteria["view"],
+        query: req.query.q,
+      });
 
       if (req.query.format === "xlsx") {
         reply.header("Content-Type", XLSX_MIME);

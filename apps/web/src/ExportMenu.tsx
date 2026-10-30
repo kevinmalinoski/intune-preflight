@@ -26,21 +26,48 @@ export interface ExportFormatOption<F extends string> {
   hint: string;
 }
 
+/**
+ * The two things an export can cover, when the view is narrowed.
+ *
+ * Offered as a choice rather than decided for the reader: "what I am looking
+ * at" and "the whole baseline" are both reasonable things to want from the
+ * same button, and which one is meant is not inferable from the fact that a
+ * filter is on. Counts are on the options because that is the question being
+ * answered at the moment of clicking -- 23 rows or 271.
+ */
+export interface ExportScopeOption {
+  /** Narrow to what the view is showing, or export everything. */
+  filtered: boolean;
+  label: string;
+  count: number;
+}
+
 export function ExportMenu<F extends string>({
   options,
+  scopes,
   onExport,
   open,
   onOpenChange,
   className,
 }: {
   options: ExportFormatOption<F>[];
+  /**
+   * Omitted when nothing is narrowed: with no filter, scope or search on,
+   * "this view" and "everything" are the same rows, and offering the choice
+   * would be asking a question with one answer.
+   */
+  scopes?: ExportScopeOption[];
   /** Called with the chosen format, straight from the click -- see below. */
-  onExport: (format: F) => void;
+  onExport: (format: F, filtered: boolean) => void;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** The trigger's own styling, so each toolbar keeps the button it had. */
   className?: string;
 }) {
+  // Which of the two the formats below will use. Defaults to what is on
+  // screen: someone who has narrowed the view and then reached for Export was
+  // most likely asking for what they narrowed it to.
+  const [filtered, setFiltered] = useState(true);
   /**
    * How far the open menu has to slide to stay on screen.
    *
@@ -89,6 +116,30 @@ export function ExportMenu<F extends string>({
             style={shift === 0 ? undefined : { transform: `translateX(${shift}px)` }}
             className="absolute right-0 top-full z-40 mt-1 w-56 rounded-lg border border-ink-700 bg-ink-900 p-1 shadow-2xl"
           >
+            {scopes && scopes.length > 1 && (
+              <div className="mb-1 border-b border-ink-800 pb-1">
+                <div className="px-2 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wide text-slate-500">
+                  Export
+                </div>
+                {scopes.map((s) => (
+                  <button
+                    key={String(s.filtered)}
+                    role="menuitemradio"
+                    aria-checked={filtered === s.filtered}
+                    onClick={() => setFiltered(s.filtered)}
+                    className={`flex w-full items-center gap-2 rounded px-2 py-2 text-left text-xs transition-colors lg:py-1.5 ${
+                      filtered === s.filtered ? "bg-sky-500/15 text-sky-200" : "text-slate-400 hover:bg-ink-800"
+                    }`}
+                  >
+                    <span className="w-3 shrink-0 text-center text-[10px]" aria-hidden>
+                      {filtered === s.filtered ? "●" : "○"}
+                    </span>
+                    <span className="min-w-0 flex-1">{s.label}</span>
+                    <span className="shrink-0 tabular-nums text-slate-500">{s.count}</span>
+                  </button>
+                ))}
+              </div>
+            )}
             {options.map((option) => (
               <button
                 key={option.format}
@@ -98,7 +149,7 @@ export function ExportMenu<F extends string>({
                 // the click's own task, which is why the API's export helpers
                 // are synchronous. Closing the menu afterwards keeps that true.
                 onClick={() => {
-                  onExport(option.format);
+                  onExport(option.format, scopes && scopes.length > 1 ? filtered : false);
                   onOpenChange(false);
                 }}
                 // py-3 below lg, like the pickers: a menu item on a phone is a

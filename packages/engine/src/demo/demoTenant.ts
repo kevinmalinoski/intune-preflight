@@ -1,6 +1,6 @@
 import type { CspSetting, IntuneGroup, IntunePolicy } from "@intune-preflight/shared";
 import type { TenantData } from "../tenantData.js";
-import { VIRTUAL_GROUP_ALL_DEVICES, VIRTUAL_GROUP_ALL_USERS } from "../normalize.js";
+import { cspAreaForDefinition, VIRTUAL_GROUP_ALL_DEVICES, VIRTUAL_GROUP_ALL_USERS } from "../normalize.js";
 
 // Synthetic sample tenant for demo mode -- no real tenant identifiers, and no
 // invented settings. Every Windows/macOS profile NAME and every setting name +
@@ -27,6 +27,26 @@ const ALL_USERS = VIRTUAL_GROUP_ALL_USERS.id;
 const s = (settingId: string, cspArea: string, displayName: string, value: string, cspPath?: string): CspSetting => ({
   settingId,
   cspArea,
+  displayName,
+  value,
+  cspPath,
+});
+
+/**
+ * A Settings Catalog setting whose CSP area is DERIVED, not written down.
+ *
+ * `s` above takes the area as an argument, which is right for the hand-authored
+ * OIB settings: they have no Graph definition id to derive from. These do. The
+ * id and path are the real identifiers Microsoft ships -- not tenant data, the
+ * same strings any tenant returns -- so the area comes out of exactly the code
+ * a connected tenant runs, and demo mode shows what /app shows.
+ *
+ * That is the point of them. Before this, demo mode could not demonstrate the
+ * area naming at all, because every area was a string typed into this file.
+ */
+const sc = (definitionId: string, cspPath: string, displayName: string, value: string): CspSetting => ({
+  settingId: definitionId,
+  cspArea: cspAreaForDefinition(definitionId, cspPath),
   displayName,
   value,
   cspPath,
@@ -704,6 +724,127 @@ const policies: IntunePolicy[] = [
         "Current Channel (Staged)"
       ),
       s("defenderupd.sigchannel", "Defender Update controls", "Security Intelligence Updates Channel", "Current"),
+    ],
+  },
+
+  // ============================ ADMX-backed and Policy CSP naming ============================
+  // These exist so demo mode exercises the area derivation rather than quoting
+  // it. Every id and path below is a Microsoft identifier, so the areas they
+  // produce here are the areas a real tenant produces.
+  {
+    id: "pol-corp-browser-edge",
+    kind: "settingsCatalog",
+    displayName: "Win - CORP - Browser - Edge - Relaunch and Updates",
+    platform: "windows",
+    assignedGroupIds: [ALL_DEVICES],
+    excludedGroupIds: [],
+    assignmentFilters: [],
+    settings: [
+      // Two ADMX namespaces, one product. Vendors ship a namespace per release
+      // (`microsoft_edge`, `microsoft_edgev141`), and both must land in one
+      // "Microsoft Edge" area -- not a vendor bucket called "Microsoft", and
+      // not one area per release.
+      sc(
+        "device_vendor_msft_policy_config_microsoft_edge~policy~microsoft_edge_relaunchnotification",
+        "./Device/Vendor/MSFT/Policy/Config/microsoft_edge~Policy~microsoft_edge/RelaunchNotification",
+        "Notify a user that a browser relaunch or device restart is recommended or required",
+        "Required"
+      ),
+      sc(
+        "device_vendor_msft_policy_config_microsoft_edgev141~policy~microsoft_edge_relaunchfastifoutdated",
+        "./Device/Vendor/MSFT/Policy/Config/microsoft_edgev141~Policy~microsoft_edge/RelaunchFastIfOutdated",
+        "Relaunch fast if outdated",
+        "Enabled"
+      ),
+      // The path spells the namespace as its vendor does, which the definition
+      // id has flattened to lowercase -- "OneDriveNGSC", not "Onedrivengsc".
+      sc(
+        "device_vendor_msft_policy_config_onedrivengscv2~policy~onedrivengsc_blocktenantlist",
+        "./Device/Vendor/MSFT/Policy/Config/OneDriveNGSCv2~Policy~OneDriveNGSC/BlockTenantList",
+        "Block syncing OneDrive accounts for specific organizations",
+        "Enabled"
+      ),
+      sc(
+        "device_vendor_msft_policy_config_onedrivengscv2.updates~policy~onedrivengsc_kfmoptinnowizard",
+        "./Device/Vendor/MSFT/Policy/Config/OneDriveNGSCv2.Updates~Policy~OneDriveNGSC/KFMOptInNoWizard",
+        "Silently move Windows known folders to OneDrive",
+        "Enabled"
+      ),
+    ],
+  },
+  {
+    id: "pol-corp-device-controls",
+    kind: "settingsCatalog",
+    displayName: "Win - CORP - Device - Local Accounts and Store",
+    platform: "windows",
+    assignedGroupIds: [ALL_DEVICES],
+    excludedGroupIds: [],
+    assignmentFilters: [],
+    settings: [
+      // Plain Policy CSP areas. The id flattens the case away; the path keeps
+      // it, so these read as words rather than as one run-on token.
+      sc(
+        "device_vendor_msft_policy_config_applicationmanagement_removedefaultmicrosofts",
+        "./Device/Vendor/MSFT/Policy/Config/ApplicationManagement/RemoveDefaultMicrosoftStorePackages",
+        "Remove default Microsoft Store packages",
+        "Enabled"
+      ),
+      sc(
+        "device_vendor_msft_policy_config_localusersandgroups_configure",
+        "./Device/Vendor/MSFT/Policy/Config/LocalUsersAndGroups/Configure",
+        "Configure local users and groups",
+        "Configured"
+      ),
+      sc(
+        "vendor_msft_sharedpc_enablesharedpcmode",
+        "./Vendor/MSFT/SharedPC/EnableSharedPCMode",
+        "Enable Shared PC mode",
+        "Disabled"
+      ),
+      sc(
+        "device_vendor_msft_laps_policies_backupdirectory",
+        "./Device/Vendor/MSFT/LAPS/Policies/BackupDirectory",
+        "Backup directory",
+        "Microsoft Entra ID"
+      ),
+      // The path has no area segment where one normally sits -- `Policy` with
+      // no `Config` after it -- so the derivation declines and the id's name is
+      // kept. "Winre", not an area called "Policy".
+      sc(
+        "device_vendor_msft_policy_config_winre_enablewinre",
+        "./Device/Vendor/MSFT/Policy/OpenExtensibilitySettings/IntunePolicyAdaptor/Device_Vendor_MSFT_Policy_Config_WinRE_EnableWinRE",
+        "Enable Windows Recovery Environment",
+        "Enabled"
+      ),
+    ],
+  },
+  {
+    id: "pol-corp-chrome-update",
+    kind: "adminTemplate",
+    displayName: "Win - CORP - Browser - Chrome - Update Policy",
+    platform: "windows",
+    assignedGroupIds: [ALL_DEVICES],
+    excludedGroupIds: [],
+    assignmentFilters: [],
+    settings: [
+      // Written out rather than derived, deliberately: an Administrative
+      // Template's area comes from Graph's categoryPath, or from its category
+      // id where Graph leaves that null, and both of those live in
+      // packages/graph -- which demo mode never calls. These are the strings
+      // that pipeline produces for an uploaded Chrome ADMX, including the case
+      // where only the category name is recoverable and no path is.
+      s(
+        "adminTemplate:demo-chrome-relaunch-notification",
+        "ADMX (Imported) Google Chrome",
+        "Notify a user that a browser relaunch is recommended or required",
+        "Enabled"
+      ),
+      s(
+        "adminTemplate:demo-chrome-target-channel",
+        "ADMX (Imported) Google\\Google Update\\Applications\\Google Chrome",
+        "Target Channel override",
+        "Enabled"
+      ),
     ],
   },
 

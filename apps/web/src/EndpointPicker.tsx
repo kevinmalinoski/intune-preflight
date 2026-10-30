@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   classifyAutopilotMatch,
   classifyGroupTagMatch,
@@ -241,20 +241,40 @@ export function EndpointPicker({
               />
             </div>
           </div>
+
+          {/* Device filters used to be a third column of their own, `lg:w-56`
+              of mostly empty space -- a tenant with no filters for the selected
+              platform spent it on the words "No filters for this platform",
+              and the groups list, which is the control people actually work in,
+              was narrowed to pay for it. As a dropdown here it costs one row,
+              and the groups column spans what it used to take. */}
+          <DeviceFilterSelect filters={platformFilters} selectedIds={deviceFilterIds} onToggle={onToggleDeviceFilter} />
         </div>
 
         {/* Col 2: Entra security groups -- the primary, most-used control, so it gets the width */}
         <div className="flex min-w-0 flex-1 flex-col gap-1">
           <div
-            className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-500"
+            className="mb-1 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500"
             title="Entra security groups this device/user belongs to. Expand “membership rule” on a dynamic group to read the rule that decides whether a device lands in it; rules we could not fully evaluate open on their own. If a selected group's rule logically implies membership in another dynamic group (e.g. a narrower OrderID prefix), that group is added automatically and shown in amber in the diagram. Entering a Group Tag above auto-selects groups scoped to it."
           >
-            Entra security groups
-            {selectedGroupIds.length > 0 && (
-              <span className="ml-1.5 rounded bg-sky-500/15 px-1.5 py-0.5 text-sky-300">
-                {selectedGroupIds.length} selected
-              </span>
-            )}
+            <span>
+              Entra security groups
+              {selectedGroupIds.length > 0 && (
+                <span className="ml-1.5 rounded bg-sky-500/15 px-1.5 py-0.5 text-sky-300">
+                  {selectedGroupIds.length} selected
+                </span>
+              )}
+            </span>
+            {/* What the list does on your behalf, said before you read it
+                rather than after. It used to sit under the list, which is
+                where it was least likely to be seen: you scroll a long list of
+                groups, stop at the one you want, and never reach the bottom.
+                It rides the label row now, so it costs no height of its own --
+                the groups column has the width for it since the filters moved
+                out of the third column. */}
+            <span className="font-normal normal-case tracking-normal text-slate-600">
+              All Devices &amp; All Users always apply · dynamic group rules are checked for implied memberships
+            </span>
           </div>
           <input
             value={search}
@@ -441,46 +461,119 @@ export function EndpointPicker({
               </div>
             )}
           </div>
-          <div className="mt-0.5 text-[10px] text-slate-600">
-            All Devices &amp; All Users always apply. Dynamic group rules are checked automatically for implied
-            memberships.
-          </div>
-        </div>
-
-        {/* Col 3: Device Filters -- least-used, pushed to the far right (and
-            to the bottom of the stack below `lg`, for the same reason) */}
-        <div className="flex w-full flex-col gap-1 lg:w-56 lg:shrink-0">
-          <div
-            className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-500"
-            title="Which Intune Assignment Filters this device matches. A device can match multiple filters simultaneously (e.g. Kiosk Devices + Corporate Owned). Policies whose assignments include/exclude these filters are resolved accordingly."
-          >
-            Device Filters
-          </div>
-          {platformFilters.length === 0 ? (
-            <div className="rounded-md border border-ink-700 px-3 py-2 text-[11px] text-slate-500">
-              No filters for this platform
-            </div>
-          ) : (
-            <div className="max-h-72 overflow-y-auto rounded-md border border-ink-700 lg:max-h-44">
-              {platformFilters.map((f) => (
-                <label
-                  key={f.id}
-                  className="flex cursor-pointer items-start gap-2 border-b border-ink-800 px-2.5 py-2.5 text-xs last:border-b-0 hover:bg-ink-800 lg:py-1.5"
-                  title={f.rule}
-                >
-                  <input
-                    type="checkbox"
-                    checked={deviceFilterIds.includes(f.id)}
-                    onChange={() => onToggleDeviceFilter(f.id)}
-                    className="mt-0.5 shrink-0 accent-violet-400"
-                  />
-                  <span className="min-w-0 flex-1 break-words leading-snug text-slate-200">{f.displayName}</span>
-                </label>
-              ))}
-            </div>
-          )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Device filters, as a dropdown rather than a column.
+ *
+ * The collapsed trigger NAMES what is selected rather than only counting it.
+ * An assignment filter is not a view option -- an exclude filter removes
+ * policies from the simulation outright -- so a filter that is on while its
+ * control is shut has to stay legible, or the baseline quietly answers a
+ * different question from the one on screen. The names also carry the violet
+ * the picker's collapsed summary uses for filters, so the two read as the same
+ * fact in two places.
+ *
+ * Multi-select, because a device matches as many filters as its properties
+ * satisfy -- Kiosk Devices and Corporate Owned at once is ordinary. Checkboxes
+ * rather than a native <select multiple>, which on a phone becomes a modal
+ * list that hides the rules.
+ */
+function DeviceFilterSelect({
+  filters,
+  selectedIds,
+  onToggle,
+}: {
+  filters: AssignmentFilter[];
+  selectedIds: string[];
+  onToggle: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = filters.filter((f) => selectedIds.includes(f.id));
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  return (
+    <div>
+      <div
+        className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-500"
+        title="Which Intune Assignment Filters this device matches. A device can match multiple filters simultaneously (e.g. Kiosk Devices + Corporate Owned). Policies whose assignments include/exclude these filters are resolved accordingly."
+      >
+        Device Filters
+        {selected.length > 0 && (
+          <span className="ml-1.5 rounded bg-violet-500/15 px-1.5 py-0.5 text-violet-300">{selected.length}</span>
+        )}
+      </div>
+
+      {filters.length === 0 ? (
+        <div className="rounded-lg border border-ink-700 bg-ink-800 px-2.5 py-2 text-[11px] text-slate-500">
+          None for this platform
+        </div>
+      ) : (
+        <div className="relative">
+          <button
+            onClick={() => setOpen((v) => !v)}
+            aria-haspopup="listbox"
+            aria-expanded={open}
+            title="Choose the Assignment Filters this device matches"
+            className="flex w-full items-center gap-2 rounded-lg border border-ink-700 bg-ink-800 px-2.5 py-2 text-left text-xs transition-colors hover:bg-ink-700/60 lg:py-1.5"
+          >
+            <span className="min-w-0 flex-1">
+              {selected.length === 0 ? (
+                <span className="text-slate-500">None matched</span>
+              ) : (
+                <span className="block break-words leading-snug text-violet-300">
+                  {selected.map((f) => f.displayName).join(", ")}
+                </span>
+              )}
+            </span>
+            <span
+              className={`shrink-0 text-[10px] text-slate-500 transition-transform ${open ? "rotate-180" : ""}`}
+              aria-hidden
+            >
+              ▾
+            </span>
+          </button>
+
+          {open && (
+            <>
+              <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+              <div
+                role="listbox"
+                aria-multiselectable
+                className="absolute inset-x-0 top-full z-40 mt-1 max-h-64 overflow-y-auto rounded-lg border border-ink-700 bg-ink-900 shadow-2xl"
+              >
+                {filters.map((f) => (
+                  <label
+                    key={f.id}
+                    className="flex cursor-pointer items-start gap-2 border-b border-ink-800 px-2.5 py-3 text-xs last:border-b-0 hover:bg-ink-800 lg:py-2"
+                    title={f.rule}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.includes(f.id)}
+                      onChange={() => onToggle(f.id)}
+                      className="mt-0.5 shrink-0 accent-violet-400"
+                    />
+                    <span className="min-w-0 flex-1 break-words leading-snug text-slate-200">{f.displayName}</span>
+                  </label>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

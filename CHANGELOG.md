@@ -6,6 +6,54 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [2.6.0] — 2026-10-29
+
+The screen belongs to the data again. Status moved into the toolbar it was
+describing, the picker gave its wasted column back to the groups list, and an
+export can now cover what you are actually looking at.
+
+### Added
+- **Export the view, or the whole baseline.** Reading one configuration profile
+  and clicking Export handed you the entire tenant's baseline. The menu now
+  offers both, with the count of each, and defaults to what is on screen —
+  someone who narrowed the view and then reached for Export was most likely
+  asking for what they narrowed it to. The choice only appears when the two
+  differ. Scope, view and search are all applied by one function the panel and
+  all three builds share, so a filtered export is the same rows wherever it is
+  produced, through the same serialiser as a full one.
+
+### Changed
+- **Status lives in the toolbar instead of above it.** The authentication
+  banner is a lock that spins while the tenant loads, goes red if it failed,
+  and opens on hover or a click for the signed-in account, the tenant, the
+  Graph request count and End session — the identity still concealed until
+  asked for. The compact-layout notice is one glyph, since what mattered in it
+  was the switch. The tabs stop taking a row of their own on a narrow window.
+  Measured on a phone: the diagram goes from 189px of an 812px window to
+  633px — 23% of the screen to 78%.
+- **Device filters are a dropdown, and the groups list has the width.** Filters
+  were a third column that was usually empty, while the groups list — long
+  names, the control people actually work in — was narrowed to pay for it. The
+  closed dropdown names what is selected rather than only counting it: an
+  exclude filter removes policies from the simulation outright, so a filter
+  that is on while its control is shut has to stay legible.
+- **The groups note moved above the list.** "All Devices & All Users always
+  apply" sat under a long scrolling list, which is where it was least likely to
+  be read.
+- **Demo mode derives its CSP areas** through the same code a connected tenant
+  runs, instead of carrying areas written into the sample data by hand.
+
+### Fixed
+- **Tapping a text field on iOS shifted the app up and left a blank strip
+  behind.** Known since 2.3.0 and disclosed there as a document that could
+  still scroll. It was not the document: it was Safari's own zoom. Safari
+  zooms in on any form control it focuses whose font size is under 16px, and
+  on blur it neither zooms back out nor undoes the scroll it did to lift the
+  control above the keyboard — so the group search box, 12px like every other
+  control, zoomed the page to 1.33× and scrolled it 282px, and that is where
+  it stayed. Form controls now have a 16px floor on a touch pointer, and
+  `<html>` and `<body>` say outright that the document does not scroll.
+
 ## [2.5.1] — 2026-10-28
 
 The merged baseline's CSP areas say what they are. They are sorted, they carry

@@ -9,6 +9,7 @@ import {
 } from "react";
 import type { Platform, PolicyKind, SimulationResult } from "@intune-preflight/shared";
 import { filterExclusionReason, resolutionRuleDetail, resolutionRuleLabel } from "@intune-preflight/shared";
+import { isWholeBaseline, narrowSimulation, type BaselineCriteria } from "@intune-preflight/engine";
 import { api, type BaselineExportFormat } from "./api.ts";
 import { BaselineSettingList } from "./BaselineSettingList.tsx";
 import { buildRows, cspRef, isLegacyRow, type DisplayRow } from "./baselineRow.ts";
@@ -48,37 +49,6 @@ const DEFAULT_WIDTHS = Object.fromEntries(COLUMN_DEFS.map((c) => [c.id, c.width]
 /** Restrict the baseline panel to one policy type, or one policy. */
 export type BaselineScope = { kind: PolicyKind; label: string } | { policyId: string; label: string };
 
-/** Narrow a simulation's settings to the scope so buildRows only shows those rows. */
-function applyScope(simulation: SimulationResult, scope: BaselineScope | null | undefined): SimulationResult {
-  if (!scope) return simulation;
-  if ("kind" in scope) {
-    return { ...simulation, settings: simulation.settings.filter((s) => s.sourceKind === scope.kind) };
-  }
-  const pid = scope.policyId;
-  // Include settings this policy won, plus any conflict/layered/overlap finding
-  // it takes part in (where another policy's value won the merge) so its full
-  // involvement shows.
-  const involved = new Set<string>();
-  for (const c of simulation.conflicts) if (c.values.some((v) => v.sourcePolicyId === pid)) involved.add(c.settingId);
-  for (const l of simulation.layered) if (l.values.some((v) => v.sourcePolicyId === pid)) involved.add(l.settingId);
-  for (const o of simulation.overlaps)
-    if (o.sourcePolicies.some((sp) => sp.sourcePolicyId === pid)) involved.add(o.settingId);
-  return {
-    ...simulation,
-    settings: simulation.settings.filter((s) => s.sourcePolicyId === pid || involved.has(s.settingId)),
-  };
-}
-
-function rowMatchesText(row: DisplayRow, needle: string): boolean {
-  const hay = [row.cspArea, row.displayName];
-  if (row.kind === "normal") hay.push(row.sourcePolicyName, row.value);
-  if (row.kind === "conflict" || row.kind === "layered")
-    for (const v of row.values) hay.push(v.value, v.sourcePolicyName);
-  if (row.kind === "layered") hay.push(resolutionRuleLabel(row.rule));
-  if (row.kind === "overlap") hay.push(row.value, ...row.sources);
-  return hay.some((h) => h.toLowerCase().includes(needle));
-}
-
 export function SimulationBaselinePanel({
   simulation,
   groupIds,
@@ -105,13 +75,23 @@ export function SimulationBaselinePanel({
   const compact = useSyncExternalStore(subscribeLayout, isCompact, () => false);
 
   // Built here, in the click, with nothing awaited before `saveDownload` -- iOS
-  // only opens the share sheet inside the click's own task. The export always
-  // covers the WHOLE baseline, never the on-screen filter or scope; that is what
-  // the "filters and exports always cover everything" row promises.
-  const exportBaseline = (format: BaselineExportFormat) =>
+  // only treats a download as user-initiated inside the click's own task.
+  //
+  // The export used to always cover the whole baseline, whatever the screen was
+  // showing, because the alternative then available was exporting only the
+  // RENDERED rows -- and the table renders in chunks, so that would have handed
+  // you 50 of 271 without saying so. Now the narrowing is a property of the
+  // simulation rather than of the DOM (narrowSimulation), so "what I am looking
+  // at" is a real thing to export, and which one is wanted is the reader's
+  // choice rather than ours. The filename says which one came out.
+  const exportBaseline = (format: BaselineExportFormat, filtered: boolean) =>
     saveDownload(
-      api.simulateExport({ groupIds, platform, deviceFilterIds, unassignedPolicyIds }, format),
-      `endpoint-baseline.${format}`
+      api.simulateExport(
+        { groupIds, platform, deviceFilterIds, unassignedPolicyIds },
+        format,
+        filtered ? rowCriteria : undefined
+      ),
+      `endpoint-baseline${filtered ? "-filtered" : ""}.${format}`
     );
   // The toolbar's two popovers. Declared together, and above the Escape handler
   // that backs out of them, because a dependency array is read during render --
@@ -186,24 +166,30 @@ export function SimulationBaselinePanel({
 
   const toggleOverlap = (id: string) => setExpandedOverlaps(toggled(id));
 
-  const scoped = useMemo(() => applyScope(simulation, scope), [simulation, scope]);
-  const allRows = useMemo(() => buildRows(scoped), [scoped]);
+  // Scope, view and search are all narrowings of the same baseline, and the
+  // engine owns all three (see narrowSimulation) so the exports can apply
+  // exactly what the screen applied. Scope is still its own step because the
+  // header counts what the SCOPE left, not what the search left: "23 settings"
+  // beside a policy's name is a fact about the policy, and it should not drop
+  // while you type in the filter box.
+  const scopeCriteria = useMemo<BaselineCriteria>(
+    () => (!scope ? {} : "kind" in scope ? { scopeKind: scope.kind } : { scopePolicyId: scope.policyId }),
+    [scope]
+  );
+  // "collision" renders cross-model findings rather than setting rows, so it
+  // narrows nothing here; the collision list does its own work below.
+  const rowCriteria = useMemo<BaselineCriteria>(
+    () => ({ ...scopeCriteria, view: view === "collision" ? "all" : view, query: filter }),
+    [scopeCriteria, view, filter]
+  );
+  const scoped = useMemo(() => narrowSimulation(simulation, scopeCriteria), [simulation, scopeCriteria]);
   // Count of settings ANY of whose contributing policies is a legacy Endpoint
   // Security (intents) policy, for the "Legacy policies" view option. Counted
   // off the unscoped rows -- like the conflict/overlap counts shown alongside it
   // -- and via the same `sourceKinds` the view filters on, so the number in the
   // dropdown can't disagree with the rows it selects.
   const legacyCount = useMemo(() => buildRows(simulation).filter(isLegacyRow).length, [simulation]);
-  const needle = filter.toLowerCase();
-  const rows = allRows.filter(
-    (r) =>
-      (view === "all" ||
-        (view === "conflicts" && r.kind === "conflict") ||
-        (view === "layered" && r.kind === "layered") ||
-        (view === "overlaps" && r.kind === "overlap") ||
-        (view === "legacy" && isLegacyRow(r))) &&
-      (!filter || rowMatchesText(r, needle))
-  );
+  const rows = useMemo(() => buildRows(narrowSimulation(simulation, rowCriteria)), [simulation, rowCriteria]);
 
   // Chunked rendering (see ROW_RENDER_CHUNK). Filtering/search always runs over
   // the FULL row set above -- only the DOM is chunked -- and exports are
@@ -398,7 +384,11 @@ export function SimulationBaselinePanel({
   };
 
   // Legacy-collision rows (view === "collision"): each cross-model finding is a
-  // group of one row per policy that targets the same CSP through a different model.
+  // group of one row per policy that targets the same CSP through a different
+  // model. These are not setting rows, so they are not what narrowSimulation
+  // narrows -- a cross-model finding spans several settings across models. The
+  // search box still has to work on them, hence its own needle here.
+  const needle = filter.trim().toLowerCase();
   const collisionFindings =
     view === "collision"
       ? simulation.crossModel.filter(
@@ -626,6 +616,16 @@ export function SimulationBaselinePanel({
           open={showExportMenu}
           onOpenChange={setShowExportMenu}
           onExport={exportBaseline}
+          scopes={
+            // One option is no choice: with nothing narrowed the two exports
+            // are the same rows.
+            isWholeBaseline(rowCriteria)
+              ? undefined
+              : [
+                  { filtered: true, label: "This view", count: rows.length },
+                  { filtered: false, label: "Whole baseline", count: simulation.settings.length },
+                ]
+          }
           className={`rounded-md border px-3 py-1.5 text-xs ${
             showExportMenu
               ? "border-sky-400/50 bg-sky-500/10 text-sky-300"

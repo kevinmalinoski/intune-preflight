@@ -447,6 +447,22 @@ function areaFromCspPath(cspPath: string | undefined): string | undefined {
   return friendlyLabel(area.replace(/^ADMX_/, ""));
 }
 
+/**
+ * The CSP area a Settings Catalog setting is filed under.
+ *
+ * Exported for the demo tenant. Demo mode has no raw Graph payload to flatten,
+ * so its settings used to carry hand-written areas -- which meant the public
+ * demo could not show the naming this derives, and no test exercised it end to
+ * end. Deriving there from the same ids and paths a real tenant returns keeps
+ * the two honest about each other.
+ *
+ * Same order of preference as the flattener: the path's casing when it yields
+ * a clean area, the id otherwise.
+ */
+export function cspAreaForDefinition(definitionId: string, cspPath?: string): string {
+  return areaFromCspPath(cspPath) ?? parseCatalogDefinitionId(definitionId, cspPath).area;
+}
+
 function parseCatalogDefinitionId(definitionId: string, cspPath?: string): { area: string; name: string } {
   const parts = definitionId.split("_").filter((p) => p && !CATALOG_BOILERPLATE.has(p.toLowerCase()));
   if (parts.length === 0) return { area: "Settings Catalog", name: definitionId };

@@ -3,17 +3,17 @@ import type { Platform } from "@intune-preflight/shared";
 import { api, LIVE_MODE, STATIC_DEMO } from "./api.ts";
 import { EndpointSimulator } from "./EndpointSimulator.tsx";
 import { AssignmentReport } from "./AssignmentReport.tsx";
-import { CompactLayoutBanner } from "./CompactLayoutBanner.tsx";
-import { LiveFirstRunGate, LiveSessionBanner } from "./LiveSession.tsx";
+import { LayoutToggle } from "./LayoutToggle.tsx";
+import { LiveFirstRunGate, SessionLock } from "./LiveSession.tsx";
 
 // Public repo, for the "deploy your own / self-host" nudges shown in demo mode.
 const REPO_URL = "https://github.com/kevinmalinoski/intune-preflight";
 
 type Tab = "simulate" | "assignments";
 
-const TABS: { value: Tab; label: string; icon: string }[] = [
-  { value: "simulate", label: "Endpoint Preflight", icon: "💻" },
-  { value: "assignments", label: "Assignment Manifest", icon: "📋" },
+const TABS: { value: Tab; label: string; short: string; icon: string }[] = [
+  { value: "simulate", label: "Endpoint Preflight", short: "Preflight", icon: "💻" },
+  { value: "assignments", label: "Assignment Manifest", short: "Manifest", icon: "📋" },
 ];
 
 export default function App() {
@@ -148,12 +148,16 @@ export default function App() {
       {!focus && (
         <>
           <header className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-ink-700 bg-ink-900 px-3 py-2 sm:px-5 sm:py-2.5">
+            {/* The wordmark gives up size before the controls do: below `lg` it
+                is a label, not a banner, so the tabs can sit on its row instead
+                of claiming one of their own. On a phone that row was the single
+                most expensive piece of chrome above the canvas. */}
             <div className="flex items-baseline gap-2">
-              <h1 className="text-base font-semibold text-slate-100">Intune Preflight</h1>
-              <span className="hidden text-[11px] text-slate-500 md:inline">read-only · no device required</span>
+              <h1 className="whitespace-nowrap text-sm font-semibold text-slate-100 lg:text-base">Intune Preflight</h1>
+              <span className="hidden text-[11px] text-slate-500 xl:inline">read-only · no device required</span>
             </div>
 
-            <nav className="order-last flex w-full items-center gap-1 lg:order-none lg:w-auto">
+            <nav className="flex min-w-0 items-center gap-1">
               {TABS.map((t) => (
                 <button
                   key={t.value}
@@ -161,14 +165,19 @@ export default function App() {
                     setFocus(false);
                     setTab(t.value);
                   }}
-                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-3 py-2 text-xs font-medium transition-colors lg:flex-none lg:justify-start lg:py-1.5 ${
+                  className={`flex min-h-[36px] items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors lg:px-3 ${
                     tab === t.value
                       ? "bg-sky-500/15 text-sky-300"
                       : "text-slate-400 hover:bg-ink-800 hover:text-slate-200"
                   }`}
                 >
                   <span aria-hidden>{t.icon}</span>
-                  {t.label}
+                  {/* "Endpoint Preflight" and "Assignment Manifest" do not fit
+                      beside a wordmark and four controls at 375px. The short
+                      forms are still the nouns people use for these two
+                      screens, and the full ones come back with the room. */}
+                  <span className="lg:hidden">{t.short}</span>
+                  <span className="hidden lg:inline">{t.label}</span>
                 </button>
               ))}
             </nav>
@@ -230,6 +239,14 @@ export default function App() {
                 </div>
               )}
 
+              {/* Status, not a row: the lock spins while the tenant loads and
+                  opens on hover for who is signed in; the layout switch is one
+                  glyph instead of the banner that used to announce it. Both sit
+                  beside Refresh because that is where "the app's own condition"
+                  now lives, all of it one row high. */}
+              {LIVE_MODE && !demo && <SessionLock />}
+              <LayoutToggle />
+
               <button
                 onClick={handleRefresh}
                 disabled={refreshing}
@@ -260,8 +277,6 @@ export default function App() {
               </button>
             </div>
           </header>
-
-          <CompactLayoutBanner />
 
           {/* Demo banner */}
           {demo && (
@@ -300,8 +315,6 @@ export default function App() {
               )}
             </div>
           )}
-          {/* Live build: who is signed in, which tenant, and how the load is going. */}
-          {LIVE_MODE && !demo && <LiveSessionBanner />}
 
           {modeError && (
             <div className="border-b border-red-500/20 bg-red-500/10 px-4 py-1 text-center text-[11px] text-red-300">

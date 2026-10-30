@@ -93,6 +93,44 @@ describe("demo tenant", () => {
     expect(finding?.entries.some((e) => e.sourceLegacyTemplate)).toBe(true);
   });
 
+  it("derives its CSP areas rather than quoting them", () => {
+    // The point of the ADMX/Policy-CSP settings in the demo tenant: their areas
+    // come out of the same derivation a connected tenant runs, so demo mode
+    // shows what /app shows and a regression fails here rather than only in
+    // somebody's live baseline.
+    const sim = computeSimulation(data, { selectedGroupIds: [], platform: "windows" });
+    const areaOf = (settingId: string) => sim.settings.find((x) => x.settingId === settingId)?.cspArea;
+
+    // Thirteen versioned Edge namespaces exist in the wild; two here, and both
+    // must be one area named for the product, not for the vendor.
+    const edge = sim.settings.filter((x) => x.settingId.includes("microsoft_edge"));
+    expect(edge.length).toBe(2);
+    expect(new Set(edge.map((x) => x.cspArea))).toEqual(new Set(["Microsoft Edge"]));
+
+    // One product, two namespaces, cased as its vendor writes it.
+    const onedrive = sim.settings.filter((x) => x.settingId.includes("onedrivengsc"));
+    expect(onedrive.length).toBe(2);
+    expect(new Set(onedrive.map((x) => x.cspArea))).toEqual(new Set(["OneDriveNGSC"]));
+
+    // Capitalisation recovered from the CSP path, which the id flattened.
+    expect(areaOf("device_vendor_msft_policy_config_applicationmanagement_removedefaultmicrosofts")).toBe(
+      "Application Management"
+    );
+    expect(areaOf("vendor_msft_sharedpc_enablesharedpcmode")).toBe("Shared PC");
+    expect(areaOf("device_vendor_msft_laps_policies_backupdirectory")).toBe("LAPS");
+
+    // And the case where the path yields nothing clean: the old name is kept
+    // rather than an area called "Policy" being invented.
+    expect(areaOf("device_vendor_msft_policy_config_winre_enablewinre")).toBe("Winre");
+  });
+
+  it("shows an uploaded third-party ADMX as imported", () => {
+    const sim = computeSimulation(data, { selectedGroupIds: [], platform: "windows" });
+    const imported = sim.settings.filter((x) => x.cspArea.startsWith("ADMX (Imported) "));
+    expect(imported.length).toBeGreaterThan(0);
+    expect(imported.map((x) => x.cspArea)).toContain("ADMX (Imported) Google Chrome");
+  });
+
   it("covers all four OS platforms", () => {
     for (const platform of ["windows", "macos", "ios", "android"] as const) {
       expect(buildAssignmentReport(data, platform).rows.length).toBeGreaterThan(0);

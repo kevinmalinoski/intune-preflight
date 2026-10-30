@@ -18,6 +18,45 @@ body,
   }
 }
 
+/* The app shell fills the window exactly and every pane inside it does its own
+   scrolling, so the DOCUMENT scrolling is never something we want -- an
+   overflowing child should be a clipped child, not a page that slides out from
+   under the layout. Saying so on both elements rather than relying on the
+   default: <body>'s `visible` propagates to the viewport, which is the same
+   trap `html.desktop-layout` below is built around, and that block is the one
+   deliberate exception -- it hands <body> its scroll back so the 1280px console
+   can be panned. */
+html,
+body {
+  overflow: hidden;
+  /* The diagram does its own panning. Without this, dragging past the edge of
+     it rubber-bands the whole page on iOS instead of stopping. It is on <html>
+     as well as <body> because the propagation that used to carry it up from
+     <body> only happens while <html> is `visible`, and it no longer is. */
+  overscroll-behavior: none;
+}
+
+/* iOS Safari zooms the page in when a form control it is focusing has a font
+   size under 16px, and on blur it neither zooms back out nor restores the
+   scroll it did to bring the control above the keyboard. That is the whole of
+   the "tapping the group search box shifts the app up and leaves a blank strip"
+   bug: the controls are `text-xs` by design, the group search box is 12px, and
+   Safari zooms to 16/12 and scrolls 282px down a page that never scrolls
+   otherwise. So put a floor under the font size, and only where the zoom
+   happens -- a touch pointer, at any width, since an iPad on the desktop layout
+   zooms just the same. The other way to stop it is `maximum-scale=1` in the
+   viewport meta, which bans pinch-zoom outright; that is exactly the gesture
+   the desktop-layout escape hatch exists to offer, so it is not an option here.
+   The `#root` prefix is only there for specificity -- a bare element selector
+   loses to the `text-xs` utility class on the control itself. */
+@media (pointer: coarse) {
+  #root input:not([type="checkbox"]):not([type="radio"]),
+  #root select,
+  #root textarea {
+    font-size: 16px;
+  }
+}
+
 /* Gentle fade-in used to draw the eye to a Group Tag match as it appears. */
 @keyframes fadeInFocus {
   from {
@@ -40,9 +79,6 @@ body,
 
 body {
   @apply bg-ink-950 text-slate-200;
-  /* The diagram does its own panning. Without this, dragging past the edge of
-     it rubber-bands the whole page on iOS instead of stopping. */
-  overscroll-behavior: none;
 }
 
 /* Bottom padding that clears the home indicator, for the bars that sit against

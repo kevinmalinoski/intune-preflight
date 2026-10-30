@@ -35,6 +35,7 @@ export { rowsToXlsx, XLSX_MIME } from "./xlsx.js";
 // Graph -> CSP-setting normalizers, platform classification, assignment-target
 // parsing, and the flat dynamic-membership-rule helpers.
 export {
+  cspAreaForDefinition,
   flattenIntentSettings,
   flattenScriptToCspSettings,
   flattenSettingsCatalogEntries,
@@ -59,3 +60,5 @@ export { crosswalkTemplateSetting, normalizeCspNode } from "./crosswalk.js";
 
 // The bundled synthetic sample tenant that backs Demo mode and the public demo.
 export { demoTenantData } from "./demo/demoTenant.js";
+export { isWholeBaseline, narrowSimulation } from "./narrow.js";
+export type { BaselineCriteria, BaselineView } from "./narrow.js";

@@ -6,6 +6,7 @@ import type {
   SimulationResult,
   UnassignedPolicy,
 } from "@intune-preflight/shared";
+import { isWholeBaseline, type BaselineCriteria } from "@intune-preflight/engine";
 import { demoApi } from "./demoApi.ts";
 import type { Download } from "./download.ts";
 import { createLiveApi } from "./liveApi.ts";
@@ -70,6 +71,26 @@ function simulationQuery({ groupIds, platform, deviceFilterIds, unassignedPolicy
   return params.toString();
 }
 
+/**
+ * What the panel was showing, for the server to narrow by.
+ *
+ * Only the self-hosted build needs this on the wire: its export is a URL the
+ * browser follows, so the server has to be told what "this view" meant. The
+ * demo and live builds hold the simulation already and narrow it in the tab.
+ * Omitted entirely when nothing is narrowed, so an unfiltered export produces
+ * the identical URL it always did.
+ */
+function criteriaQuery(criteria: BaselineCriteria | undefined): string {
+  if (!criteria || isWholeBaseline(criteria)) return "";
+  const params = new URLSearchParams();
+  if (criteria.scopeKind) params.set("scopeKind", criteria.scopeKind);
+  if (criteria.scopePolicyId) params.set("scopePolicyId", criteria.scopePolicyId);
+  if (criteria.view && criteria.view !== "all") params.set("view", criteria.view);
+  if (criteria.query?.trim()) params.set("q", criteria.query.trim());
+  const q = params.toString();
+  return q ? `&${q}` : "";
+}
+
 export interface ServerStatus {
   status: string;
   demo: boolean;
@@ -111,9 +132,9 @@ const serverApi = {
   },
   simulate: (inputs: SimulationInputs, signal?: AbortSignal) =>
     getJson<SimulationResult>(`/simulate?${simulationQuery(inputs)}`, signal),
-  simulateExport: (inputs: SimulationInputs, format: BaselineExportFormat): Download => ({
+  simulateExport: (inputs: SimulationInputs, format: BaselineExportFormat, criteria?: BaselineCriteria): Download => ({
     kind: "url",
-    url: `/api/simulate/export?${simulationQuery(inputs)}&format=${format}`,
+    url: `/api/simulate/export?${simulationQuery(inputs)}&format=${format}${criteriaQuery(criteria)}`,
   }),
 };
 
