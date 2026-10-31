@@ -5,11 +5,22 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Intune Preflight — see what Intune applies before you deploy</title>
 <meta name="description" content="A read-only, open-source tool that runs in your browser and simulates an Intune endpoint and shows the exact merged policy baseline it would receive — conflicts, overlaps, Autopilot and all.">
+<link rel="canonical" href="https://kevinmalinoski.github.io/intune-preflight/">
 <meta property="og:type" content="website">
-<meta property="og:title" content="Intune Preflight">
-<meta property="og:description" content="See what Intune applies to a device — before you deploy it. Runs in your browser. Read-only, open source.">
-<meta property="og:image" content="https://raw.githubusercontent.com/kevinmalinoski/intune-preflight/main/docs/img/01-simulator-overview.png">
+<meta property="og:site_name" content="Intune Preflight">
+<meta property="og:url" content="https://kevinmalinoski.github.io/intune-preflight/">
+<meta property="og:title" content="Intune Preflight — see what Intune applies before you deploy">
+<meta property="og:description" content="A read-only, open-source tool that runs in your browser and simulates an Intune endpoint and shows the exact merged policy baseline it would receive — conflicts, overlaps, Autopilot and all.">
+<meta property="og:image" content="https://kevinmalinoski.github.io/intune-preflight/og-card.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Intune Preflight simulator: a configured endpoint resolving through Autopilot and Entra groups to the policies that apply to it.">
 <meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Intune Preflight — see what Intune applies before you deploy">
+<meta name="twitter:description" content="A read-only, open-source tool that runs in your browser and simulates an Intune endpoint and shows the exact merged policy baseline it would receive — conflicts, overlaps, Autopilot and all.">
+<meta name="twitter:image" content="https://kevinmalinoski.github.io/intune-preflight/og-card.png">
+<meta name="twitter:image:alt" content="The Intune Preflight simulator: a configured endpoint resolving through Autopilot and Entra groups to the policies that apply to it.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2334d399' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2 L15 10 L22 12 L15 14 L12 22 L9 14 L2 12 L9 10 Z'/%3E%3C/svg%3E">
 <style>
     :root{
@@ -39,6 +50,11 @@
     .frbar{display:flex;gap:7px;align-items:center;padding:11px 14px;border-bottom:1px solid var(--line);background:#0e131c;}
     .dot{width:11px;height:11px;border-radius:50%;}
     .shot{width:100%;display:block;}
+    .fcard{position:relative;overflow:hidden;}
+    .fcard::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent,var(--line2));}
+    .tstrip{display:flex;justify-content:center;flex-wrap:wrap;gap:10px 28px;margin-top:26px;}
+    .tstrip span{display:inline-flex;align-items:center;gap:8px;font-size:14px;color:var(--mut);}
+    .tstrip svg{flex:none;}
     .muted{color:var(--mut);} .dim{color:var(--dim);}
     .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--sky);}
   
@@ -49,6 +65,7 @@
       h2{font-size:28px !important;}
       .wrap[style*="grid-template-columns"]{grid-template-columns:1fr !important;}
       .nav-links a[href^="#"]{display:none !important;}
+      .nav-links a[href*="/demo/"]{display:none !important;}
     }
 </style>
 </head>
@@ -59,12 +76,12 @@
     <div class="wrap" style="display:flex;align-items:center;gap:20px;height:68px;">
       <div style="display:flex;align-items:center;gap:10px;">
         <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 L15 10 L22 12 L15 14 L12 22 L9 14 L2 12 L9 10 Z"/></svg>
-        <span style="font-weight:700;font-size:17px;letter-spacing:-.01em;">Intune Preflight</span>
+        <span style="font-weight:700;font-size:17px;letter-spacing:-.01em;white-space:nowrap;">Intune Preflight</span>
       </div>
       <div style="flex:1;"></div>
       <div class="nav-links" style="display:flex;align-items:center;gap:26px;font-size:14px;">
         <a href="#features" style="color:var(--mut);">Features</a>
-        <a href="#try" style="color:var(--mut);">How it works</a>
+        <a href="https://kevinmalinoski.github.io/intune-preflight/demo/" style="color:var(--mut);">Live demo</a>
         <a href="#try" style="color:var(--mut);">Get started</a>
         <a class="btn btn-em" href="https://github.com/kevinmalinoski/intune-preflight" style="padding:9px 16px;font-size:14px;">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.5 2 2 6.6 2 12.2c0 4.5 2.9 8.3 6.8 9.6.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.4-3.4-1.4-.4-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.6 2.4 1.1 3 .9.1-.7.3-1.1.6-1.4-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.7 1a9.4 9.4 0 0 1 4.9 0c1.9-1.3 2.7-1 2.7-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.9-2.4 4.7-4.6 5 .3.3.6.9.6 1.9v2.8c0 .3.2.6.7.5 3.9-1.3 6.8-5.1 6.8-9.6C22 6.6 17.5 2 12 2Z"/></svg>
@@ -75,33 +92,39 @@
   </div>
 
   <!-- HERO -->
-  <div class="sec" style="padding-top:84px;padding-bottom:40px;text-align:center;">
+  <div class="sec" style="padding-top:68px;padding-bottom:40px;text-align:center;">
     <div class="wrap" style="max-width:900px;">
       <div class="kick">Read-only · Runs in your browser · Open source</div>
       <h1 style="font-size:60px;line-height:1.05;font-weight:800;letter-spacing:-.03em;margin-top:22px;">
         See what Intune applies to a device.<br><span style="color:var(--em);">Before you deploy it.</span>
       </h1>
-      <p style="font-size:20px;color:var(--mut);max-width:720px;margin:26px auto 0;line-height:1.55;">
-        Connect read-only to your tenant, pick an OS and the Entra groups a device belongs to, and see the exact
-        merged CSP baseline it would receive. Conflicts, overlaps, Autopilot and legacy Endpoint Security included.
+      <p style="font-size:20px;color:var(--mut);max-width:680px;margin:26px auto 0;line-height:1.55;">
+        Pick an OS, the Entra groups a device belongs to and its Autopilot group tag, and see the exact merged
+        CSP baseline it would receive — conflicts, overlaps and legacy Endpoint Security included.
         No hardware, no enrollment, no writes.
       </p>
       <div style="display:flex;gap:13px;justify-content:center;align-items:center;flex-wrap:wrap;margin-top:34px;">
-        <a class="btn btn-em" href="https://kevinmalinoski.github.io/intune-preflight/app/">
-          Try it now
+        <a class="btn btn-em" href="https://kevinmalinoski.github.io/intune-preflight/demo/">
+          Try it now — no sign-in
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
         </a>
-        <a class="btn btn-gh" href="https://github.com/kevinmalinoski/intune-preflight">View it on GitHub</a>
         <a class="btn btn-gh" href="https://kevinmalinoski.github.io/intune-preflight/connect/">Connect your tenant</a>
       </div>
-      <div class="mono" style="margin-top:20px;font-size:13px;color:var(--dim);">Runs entirely in your browser · sign in with your own admin account, or explore the sample tenant first · no install, no secret</div>
+      <div class="tstrip">
+        <span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Nothing to install</span>
+        <span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>No client secret exists</span>
+        <span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Nothing leaves your tab</span>
+      </div>
     </div>
 
     <!-- hero shot -->
-    <div class="wrap" style="max-width:1100px;margin-top:56px;">
+    <div class="wrap" style="max-width:1100px;margin-top:42px;">
       <div class="frame">
         <div class="frbar"><span class="dot" style="background:#ff5f56;"></span><span class="dot" style="background:#febc2e;"></span><span class="dot" style="background:#28c840;"></span>
-          <span class="mono" style="margin-left:12px;font-size:12px;color:var(--dim);">localhost:5173 — Endpoint Preflight</span>
+          <span style="margin-left:10px;display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:6px;padding:3px 10px;background:#0b0f17;">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+            <span class="mono" style="font-size:11.5px;color:var(--mut);">kevinmalinoski.github.io/intune-preflight/app/</span>
+          </span>
         </div>
         <svg viewBox="0 0 1180 600" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Endpoint Preflight simulation diagram: an endpoint (with its Autopilot enrollment) resolved through Entra groups to its merged policy baseline, grouped by policy type" style="display:block;width:100%;height:auto;background:#0b0f17;">
         <rect x="0" y="0" width="1180" height="600" fill="#0b0f17"/>
@@ -142,8 +165,8 @@
       </div>
       <div>
         <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
-        <h3 style="font-size:18px;font-weight:700;margin-top:16px;">The whole tenant, unfiltered</h3>
-        <p class="muted" style="margin-top:8px;font-size:15px;">App-only permissions mean you see the complete configuration, not one admin's RBAC slice, so a preflight reflects the entire tenant.</p>
+        <h3 style="font-size:18px;font-weight:700;margin-top:16px;">Your scope, or the whole tenant</h3>
+        <p class="muted" style="margin-top:8px;font-size:15px;">Signed in, it reads exactly what your Intune role already can. Self-hosted with app-only permissions, it reads the entire tenant unfiltered by scope tags — the complete picture a preflight wants.</p>
       </div>
     </div>
   </div>
@@ -187,27 +210,27 @@
 
     <!-- feature grid -->
     <div class="wrap" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px;margin-top:80px;">
-      <div class="card" style="padding:24px;">
+      <div class="card fcard" style="padding:24px 24px 24px 27px;--accent:#fb923c;">
         <div class="eyebrow">Conflicts &amp; overlaps</div>
         <p class="muted" style="font-size:15px;margin-top:12px;">Genuine value disagreements vs redundant duplicate config, surfaced separately (Windows).</p>
       </div>
-      <div class="card" style="padding:24px;">
+      <div class="card fcard" style="padding:24px 24px 24px 27px;--accent:#818cf8;">
         <div class="eyebrow">Autopilot V1 &amp; V2</div>
         <p class="muted" style="font-size:15px;margin-top:12px;">Deployment profiles and device-preparation shown as an enrollment stage, dual-targeting and all.</p>
       </div>
-      <div class="card" style="padding:24px;">
+      <div class="card fcard" style="padding:24px 24px 24px 27px;--accent:#fb7185;">
         <div class="eyebrow">Legacy Endpoint Security</div>
         <p class="muted" style="font-size:15px;margin-top:12px;">Intents-based BitLocker, Defender AV, Firewall and ASR read and merged with modern policies.</p>
       </div>
-      <div class="card" style="padding:24px;">
+      <div class="card fcard" style="padding:24px 24px 24px 27px;--accent:#a78bfa;">
         <div class="eyebrow">Merged CSP baseline</div>
         <p class="muted" style="font-size:15px;margin-top:12px;">Every setting in one filterable grid, with the real CSP path and a Microsoft Learn link per setting.</p>
       </div>
-      <div class="card" style="padding:24px;">
+      <div class="card fcard" style="padding:24px 24px 24px 27px;--accent:#38bdf8;">
         <div class="eyebrow">Four platforms</div>
         <p class="muted" style="font-size:15px;margin-top:12px;">Windows, macOS, iOS/iPadOS and Android, each scoped and resolved separately.</p>
       </div>
-      <div class="card" style="padding:24px;">
+      <div class="card fcard" style="padding:24px 24px 24px 27px;--accent:#34d399;">
         <div class="eyebrow">Export</div>
         <p class="muted" style="font-size:15px;margin-top:12px;">JSON or CSV from both the simulator and the Manifest, ready to pivot in Excel.</p>
       </div>
