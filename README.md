@@ -48,15 +48,13 @@ The row that decides it for most people is **Sees**. Browser mode signs you in a
 
 Self-hosting is also the answer when Conditional Access won't issue a token to a single-page app. Nothing about it changed in 2.2: same `.env`, same Docker images, same behaviour.
 
-➡️ **[Connect your tenant — three-minute walkthrough](https://kevinmalinoski.github.io/intune-preflight/connect/)** · **[Full setup guide — app registration, browser mode, config, Docker](docs/SETUP.md)**
-
-There is also a **browser mode**: a static build with no backend, where an admin signs in with their own account and the page reads the tenant directly from Graph with delegated, read-only permissions and no client secret. ➡️ **[Browser mode setup](docs/SETUP.md#browser-mode--sign-in-as-yourself-no-backend)**
+➡️ **[Connect your tenant — three-minute walkthrough](https://kevinmalinoski.github.io/intune-preflight/connect/)** · **[Browser mode setup](docs/SETUP.md#browser-mode--sign-in-as-yourself-no-backend)** · **[Full setup guide — app registration, config, Docker](docs/SETUP.md)**
 
 ## Why preflight?
 
 The normal loop is deploy-and-pray: assign a policy, wait for devices to check in, watch for failures and conflicts, dig into which policy actually won, fix it, then wait a few more days for the next check-in to confirm. **Intune Preflight collapses that loop** — simulate the endpoint up front and see its full merged baseline, conflicts, overlaps, and exclusions *before* you deploy.
 
-**This is an admin tool that deliberately sees everything.** It authenticates with tenant-wide, read-only *application* permissions, so it returns the **complete, unfiltered** picture of every policy and assignment. Unlike the Intune console for a scoped admin, it is **not** filtered by RBAC scope tags or admin-unit boundaries — that's intentional. A meaningful preflight needs the whole tenant's configuration, not one admin's slice of it.
+**A meaningful preflight wants the whole tenant's configuration, not one admin's slice of it.** Self-hosted mode gets there: tenant-wide, read-only *application* permissions return the **complete** picture of every policy and assignment, unfiltered by RBAC scope tags or admin-unit boundaries, deliberately. Browser mode reads the tenant as you instead, so a scoped admin gets a scoped preflight — that's the trade for needing no server and no secret.
 
 ## What it does
 
@@ -105,7 +103,7 @@ Read this before you host it anywhere other than your own machine:
 - **Read-only.** Every Graph permission is `*.Read.All`; the tool never writes to your tenant.
 - **Credentials stay server-side.** `TENANT_ID` / `CLIENT_ID` / `CLIENT_SECRET` live only in the server's `.env`, are never sent to the browser, and `.env` is gitignored.
 - **Browser mode has no secret at all.** The static build is a public client using PKCE: the tenant and client IDs it stores in the browser are not secrets, the access token lives in `sessionStorage` and dies with the tab, and the permissions are delegated — bounded by what the signed-in admin can already read.
-- **Full-tenant visibility by design.** App-only permissions mean it sees the *entire* tenant's configuration, unfiltered by scope tags or admin units. That's intended — but it makes the app registration effectively a tenant-wide read key. Protect it, grant only the permissions listed in the setup guide, and rotate the secret periodically.
+- **Full-tenant visibility, in self-hosted mode.** App-only permissions mean the server sees the *entire* tenant's configuration, unfiltered by scope tags or admin units. That's intended — but it makes the app registration effectively a tenant-wide read key. Protect it, grant only the permissions listed in the setup guide, and rotate the secret periodically. Browser mode has no such key: it is bounded by the signed-in admin's own RBAC.
 
 ## Documentation
 
