@@ -1,10 +1,11 @@
 # Features
 
-A walkthrough of what Intune Preflight does. Two surfaces: the **Endpoint Preflight** simulator (what would *this device* get?) and the **Assignment Manifest** (which groups carry which policies, tenant-wide).
+A walkthrough of what Intune Preflight does. Two tabs: the **Endpoint Preflight** simulator (what would *this device* get — its settings and, new in v3, its apps) and the **Assignment Manifest** (which groups carry which policies, tenant-wide).
 
 > Everything here is read-only. The tool never writes to your tenant.
 
 - [Endpoint Preflight — the simulator](#endpoint-preflight--the-simulator)
+  - [Apps for this endpoint](#apps-for-this-endpoint) _(new in v3)_
 - [Assignment Manifest](#assignment-manifest)
 
 ---
@@ -17,6 +18,16 @@ Describe an endpoint, and the tool resolves every policy that would land on it �
 
 _The full flow: configured endpoint → Autopilot enrollment → Entra groups → the policies each group brings._
 
+**The screen is three columns, in the order you use them.**
+
+| Column | What it is |
+|---|---|
+| **Simulated endpoint** (left) | The inputs: OS, Autopilot and Group Tag, device filters, the Entra groups, and the Policy Waitlist. It scrolls on its own and collapses to a strip with **«** when you want the width. |
+| **The diagram** (middle) | How the endpoint resolves. It always has the full height — nothing you open on the left resizes it. A **Policies / Apps** switch chooses what it draws. |
+| **Results** (right) | What the endpoint gets: the **Baseline** tab (merged settings) and the **Apps** tab. Switching tabs switches the diagram with it. |
+
+On a phone-width screen the left column becomes a one-line summary of the endpoint with an **Edit** button, and the results open as panels over the diagram.
+
 ## Entra group assignment
 
 Pick the Entra security groups the endpoint is associated with. Policies resolve live as you select — you see the merged result immediately, not after a device check-in.
@@ -25,7 +36,7 @@ Pick the Entra security groups the endpoint is associated with. Policies resolve
 
 ![Selecting Entra groups](img/02-entra-groups.png)
 
-_Search and select the groups an endpoint belongs to. **All Devices** and **All Users** always apply and are added automatically._
+_The endpoint sidebar. Search and tick the groups an endpoint belongs to; selected groups rise to the top. **All Devices** and **All Users** always apply and are added automatically. Each dynamic group's membership rule is one click away under **rule**._
 
 Three things happen automatically:
 
@@ -47,7 +58,7 @@ _Set the Group Tag and the matching dynamic groups float to the top and select t
 - **`+ conditions`** — the tag matches, but the rule *also* hinges on a property a Group Tag can't decide (`deviceOSType`, `deviceCategory`, enrollment profile, …). Still auto-selected (as before), but flagged with the **full membership rule shown** so you can verify the rest.
 - **`conditional`** — the tag is referenced but the flat evaluator can't confirm the combined rule (e.g. two ANDed `[OrderID]` tags). **Surfaced but not auto-selected** — review the rule and tick it if it applies.
 
-> **Why not a full evaluator?** Auto-selection reads the `[OrderID]` (Group Tag) and `[ZTDId]` (Autopilot-joined) clauses in `device.devicePhysicalIds` (`-eq` / `-startsWith`, plus `-contains` for `[ZTDId]`). Other device properties can't be evaluated from a Group Tag alone, so rather than pretend to be Entra's membership engine, the tool **shows the rule and the match state** and lets you judge. A real membership-rule evaluator is a post-2.0 accuracy upgrade — see [ROADMAP.md](../ROADMAP.md).
+> **Why not a full evaluator?** Auto-selection reads the `[OrderID]` (Group Tag) and `[ZTDId]` (Autopilot-joined) clauses in `device.devicePhysicalIds` (`-eq` / `-startsWith`, plus `-contains` for `[ZTDId]`). Other device properties can't be evaluated from a Group Tag alone, so rather than pretend to be Entra's membership engine, the tool **shows the rule and the match state** and lets you judge. A real membership-rule evaluator is a planned accuracy upgrade — see [ROADMAP.md](../ROADMAP.md).
 
 **`or` is handled correctly, with operator precedence.** A bare `[ZTDId]` clause is satisfied by *every* Autopilot-registered device, so whenever it stands as a top-level `or` branch the group is selected — any satisfied branch grants membership. Entra applies standard precedence (`and` binds tighter than `or`), so this very common real-tenant shape resolves as `(ownership and trust and appId and osType) or (ZTDId)` — and an Autopilot device is a member via that last branch regardless of the `and` chain:
 
@@ -83,7 +94,7 @@ The diagram groups policies by type by default, so a 150-policy tenant stays rea
 
 ![Detail view](img/04-grouped-vs-detail.png)
 
-_Detail view — every applied policy as its own node. Excluded policies are dashed in red, and both Autopilot V1 profiles (one targeted, one excluded) are shown._
+_Detail view — every applied policy as its own node, coloured by type. Excluded policies are drawn dashed in red._
 
 ## Hide a group's policies
 
@@ -95,15 +106,15 @@ _Click a group to fold away its policies; click again to bring them back._
 
 ## Policy Waitlist — "what if I assigned this?"
 
-Policies that exist in your tenant but are assigned to **nothing** never show up in a normal simulation. The **Policy Waitlist** lists them and lets you pull any of them into the simulation to preview the impact before you ever create the assignment.
+Policies that exist in your tenant but are assigned to **nothing** never show up in a normal simulation. The **Policy Waitlist** — the last section of the endpoint sidebar, since it is one more input to the endpoint — lists them and lets you pull any of them into the simulation to preview the impact before you ever create the assignment.
 
 ![Policy Waitlist](img/06-policy-waitlist.png)
 
-_Unassigned policies waiting to board. Add one — or Select all — to see what it would do to this endpoint._
+_Unassigned policies waiting to board, at the foot of the sidebar. Tick one — or **All** — and it joins the diagram on a dashed orange "No assignment" line, and its settings join the baseline._
 
 ## Merged baseline & policy drill-down
 
-The heart of the tool: every CSP setting from every applied policy, merged into one filterable grid.
+The heart of the tool: every CSP setting from every applied policy, merged. The **Baseline** tab beside the diagram shows it by CSP area, with conflicts and overlaps badged on each area, so you watch it change as you tick groups. **Open ↗** expands it into the full filterable grid.
 
 ![Merged baseline](img/07-merged-baseline.png)
 
@@ -146,11 +157,13 @@ The tool catches these separately as **legacy policy collisions**: each setting 
 
 ## Autopilot profile associations (V1 & V2)
 
-Autopilot appears as an **enrollment stage** between the endpoint and its Entra groups, showing which deployment profile the device would enroll through.
+Autopilot appears as an **enrollment stage** under the endpoint card, showing which deployment profile the device would enroll through.
 
 ![Autopilot V1 and V2 associations](img/10-autopilot-v1-v2.png)
 
 _Autopilot V1 deployment profiles and V2 device-preparation policies, with the groups they target. Cards are collapsed by default — click to expand the deployment settings._
+
+Two kinds of line meet at a group, because they are two different relations. A **solid** line from the endpoint card means the device is a *member* of that group. A **dotted** line from an Autopilot card, leaving from the profile's name, means that profile is *assigned* to that group. A profile that is assigned but excluded draws its line dashed in red, like every other exclusion.
 
 - **V1** — `windowsAutopilotDeploymentProfiles`, targeted by device group. Exclusions are evaluated.
 - **V2** — Windows Autopilot **device preparation** policies. Targeting keys on the policy's **configured just-in-time device group**, not its user assignment.
@@ -162,7 +175,62 @@ _Autopilot V1 deployment profiles and V2 device-preparation policies, with the g
 >
 > To be clear: **user-group assignments are still resolved everywhere else.** Entra user groups are selectable like any other group, the **All Users** virtual group always applies, and both are counted in the Assignment Manifest. What's absent is inferring membership from a sign-in.
 >
-> We understand this isn't full V2 logic. It's included because the deployment context genuinely helps you understand and validate an Intune configuration. **Richer user / user-group modelling is a candidate for v2** — see [ROADMAP.md](../ROADMAP.md).
+> We understand this isn't full V2 logic. It's included because the deployment context genuinely helps you understand and validate an Intune configuration. **Richer user / user-group modelling is on the roadmap** — see [ROADMAP.md](../ROADMAP.md).
+
+## Apps for this endpoint
+
+![The Apps view](img/18-apps-overview.png)
+
+_The same endpoint, switched to **Apps**: one bubble per app type in the diagram, and the list grouped the same way, with findings badged on each type._
+
+The same groups that deliver a device's policies deliver its apps, so the simulator resolves those too. The rail beside the diagram has an **Apps** tab next to the baseline, and the diagram follows it: on **Baseline** it draws the endpoint's policies, on **Apps** it draws its apps instead. It is one or the other, never both, so neither view shrinks to make room for the other; a **Policies / Apps** switch on the canvas does the same thing where there is no rail (phone widths and focus mode).
+
+Apps are laid out the way the baseline is. The list is an accordion **grouped by app type** — Win32, Enterprise App Catalog, Store, line-of-business, and so on — with the findings badged on each type's header, and inside each type the apps are sectioned **Required**, **Uninstall** and **Available**. Microsoft 365 Apps, Microsoft Edge and Microsoft Defender — the apps Intune has its own type for — share one **Built-in** group. The diagram matches: one bubble per app type, sectioned the same way, with edges from the groups that deliver them. Click a bubble, or an app in it, to open that type in the list.
+
+Each app object is listed **once**, in the list and in the diagram, showing its publisher and the groups it arrives through — an app that lands under two intents lists both on that one row. Two *different* objects for one product (a Store app and a Win32 package of the same title) stay separate, because they are different payloads; that is what the same-product finding is for.
+
+**Available apps are hidden by default.** An offer in Company Portal changes nothing on the device until a user takes it up, so the space goes to what will be installed and what will be removed. The **Available apps** section at the bottom of the list (and **Show Available** on the canvas) brings them back, and a search or a finding view always includes them. Assignment resolution is the same as for policies: include and exclude groups, All Devices / All Users, and Assignment Filters, so toggling a device filter re-resolves apps along with everything else. Apps a group assigns but an exclusion or filter carves out are listed under **Doesn't land**, with the reason.
+
+Apps are deliberately **not** rows in the merged baseline. The baseline is settings, compared by value; an app has neither, so it gets a surface of its own.
+
+### App types at a glance
+
+Above the list, a **type mix** bar shows the proportions of each app type. Each segment is a button: click one to narrow the list to that type, and click it again to come back.
+
+### App assignment findings
+
+The aim is one product, on the device once, under one intent. Three findings flag where that isn't so, each the counterpart of a baseline finding. **Every alert is a button**: click "Available not needed" or "opposing intents ×4" on an app and the list narrows to that finding — for a same-product alert, to exactly the apps that overlap, side by side with their intents and groups. The row of finding buttons above the list (**All · Conflicts · Redundant · Same product**) does the same from the top, and shows a clean result in green.
+
+| Finding | Baseline counterpart | What it means |
+|---|---|---|
+| **Install + uninstall conflict** | Conflict | One app is assigned to install (Required or Available) *and* to uninstall on this device, with no exclusion keeping the two apart. |
+| **Redundant** | Policy overlap | An assignment that changes nothing: the app is Required *and* Available, or one intent reaches the device through several groups. |
+| **Same product, several apps** | Legacy collision | *Different* app objects that look like one product — a Store app and a Win32 package of the same title, or three versions of one installer. Flagged **opposing** when one installs and another uninstalls. |
+
+![Same-product drill-down](img/19-apps-same-product.png)
+
+_Clicking "opposing intents" on 7-Zip narrows the list to the two app objects behind it: the catalog app installing for All Devices, and an older Win32 package uninstalling for one group._
+
+A fourth flag is a recommendation rather than a finding about assignments:
+
+- **Line-of-business `.msi` — convert to Win32.** A Windows LOB app uploaded as an `.msi` is tagged in amber. Microsoft recommends [deploying Windows apps as Win32 apps exclusively](https://learn.microsoft.com/intune/app-management/deployment/win32): repackaged as an `.intunewin`, the same installer gains detection rules, requirements, dependencies and supersedence. When the endpoint gets LOB `.msi` apps *and* Win32 apps together, the view says so, because that is the combination Microsoft warns about — both install through TrustedInstaller, one at a time, and during classic Windows Autopilot the [Enrollment Status Page can fail](https://learn.microsoft.com/intune/device-enrollment/windows/setup-status-page#esp-tracking). Windows Autopilot device preparation supports the mix. MSIX/AppX line-of-business apps are not flagged; the advice is about `.msi`.
+
+![Line-of-business warning](img/20-apps-findings.png)
+
+_A line-of-business `.msi` flagged for conversion, with the Enrollment Status Page warning because this endpoint also gets Win32 apps._
+
+> **ℹ️ How far each finding goes.**
+> - **A conflict is flagged, not resolved.** Intune settles it by a [documented table](https://learn.microsoft.com/intune/intune-service/apps/apps-deploy#how-conflicts-between-app-intents-are-resolved): Required always beats Uninstall, but *Available* against *Uninstall* depends on whether each group holds users or devices, which this tool cannot see. Every assignment is listed and no winner is picked. The fix is an exclusion — and exclusions only take precedence between groups of the same kind (user with user, device with device).
+> - **Redundant is not broken.** Required with Available is a supported combination that Intune treats as "Required and Available"; the Available assignment isn't needed to deliver the app and only keeps it listed in Company Portal. Keep it if you want that.
+> - **Same product is a name match.** Intune compares assignments within one app object and never across two, so it reports nothing here however they are assigned — which is why this is worth surfacing, and also why it can only be a heuristic. Names are compared after dropping versions, architecture and packaging words; a package whose whole job is to remove something will pair with the thing it removes, often deliberately. Read it as "verify".
+> - **Available is mostly a user-group assignment.** For almost every app type, Intune only honours *Available* when it targets a user group (Win32 apps, and Android Enterprise fully managed / corporate-owned work profile devices, are the exceptions). An available app is listed when a selected group or **All Users** delivers it; since no specific user is modelled, confirm the signed-in user is actually in that group.
+> - **Exclusions count against their own intent.** A group excluded from an app's Required assignment is not thereby excluded from its Available one, matching how the admin center records it.
+>
+> Not covered: Win32 dependencies and supersedence (which can also install or remove an app nobody assigned), app protection (MAM) and app configuration policies, and install status.
+
+**Export** offers an Excel workbook or a CSV. Each app's row carries its own **detection rule** as configured in Intune — the file, registry key or MSI product code Intune checks to decide the app is installed, with every rule listed when there are several. A custom detection script is named as one and its content is left out; a Store app shows its package id. The workbook also carries a **Finding definitions** sheet, stating for every finding exactly what is tested, what it means, what to do and the Microsoft reference — the same definitions the alerts show on hover, so a flag in a spreadsheet can be checked rather than taken on trust.
+
+The Apps view needs one more read-only permission, `DeviceManagementApps.Read.All`, which [SETUP.md](SETUP.md) has you grant with the others. If it is missing, the Apps tab is marked **Needs setup** and names it; the baseline still loads.
 
 ## Platform support
 
@@ -170,14 +238,14 @@ Windows, macOS, iOS/iPadOS, and Android are scoped separately, so a Windows simu
 
 ![Platform support](img/11-platform-support.png)
 
-_Switch platform to scope the whole simulation — policies, filters, and the waitlist all follow._
+_Switch platform with the four buttons at the top of the sidebar to scope the whole simulation — groups, policies, apps, filters and the waitlist all follow._
 
-| Platform | Baseline | Conflicts & overlaps |
-|---|---|---|
-| Windows | ✅ | ✅ |
-| macOS | ✅ | Suppressed (see above) |
-| iOS / iPadOS | ✅ | Suppressed |
-| Android | ✅ | Suppressed |
+| Platform | Baseline | Conflicts & overlaps | Apps |
+|---|---|---|---|
+| Windows | ✅ | ✅ | ✅ with every finding |
+| macOS | ✅ | Suppressed (see above) | ✅ |
+| iOS / iPadOS | ✅ | Suppressed | ✅ |
+| Android | ✅ | Suppressed | ✅ |
 
 > **Roadmap:** enrollment profiles, and Android policy-type breakdown, are longer-term items — see [ROADMAP.md](../ROADMAP.md).
 

@@ -55,6 +55,7 @@ So if you are *only* an Intune Administrator, you'll need a Global Admin (or one
    | `Group.Read.All` | Resolving group names and reading dynamic membership rules | **Required** |
    | `DeviceManagementServiceConfig.Read.All` | Windows Autopilot deployment profiles | Optional — skipped gracefully if omitted |
    | `DeviceManagementScripts.Read.All` | Platform Scripts (Windows PowerShell + macOS shell) | Optional — skipped gracefully if omitted |
+   | `DeviceManagementApps.Read.All` | The Apps view: the Required, Available and Uninstall apps an endpoint gets | **Required** for the Apps view — without it the Apps tab asks for it; the baseline still loads |
 
 4. Click **Grant admin consent** for your tenant (needs one of the roles noted above).
 5. Under **Certificates & secrets → New client secret**, create a secret and copy its value immediately (it's only shown once).
@@ -91,7 +92,8 @@ $wanted = @(
   "DeviceManagementConfiguration.Read.All",
   "Group.Read.All",
   "DeviceManagementServiceConfig.Read.All",
-  "DeviceManagementScripts.Read.All"
+  "DeviceManagementScripts.Read.All",
+  "DeviceManagementApps.Read.All"   # the Apps view
 )
 
 $existing = Get-MgApplication -Filter "displayName eq '$displayName'" -ErrorAction SilentlyContinue
@@ -150,7 +152,7 @@ on behalf of the organisation; everyone else just needs the client ID.
    slash — Entra compares it character for character, and a missing slash fails the sign-in with
    `AADSTS50011`.
 2. Under **API permissions → Add a permission → Microsoft Graph → Delegated permissions**, add the
-   same four read-only scopes the server build uses:
+   same read-only scopes the server build uses:
 
    | Permission | Needed for |
    |---|---|
@@ -158,8 +160,14 @@ on behalf of the organisation; everyone else just needs the client ID.
    | `Group.Read.All` | Resolving group names and reading dynamic membership rules |
    | `DeviceManagementServiceConfig.Read.All` | Windows Autopilot deployment profiles |
    | `DeviceManagementScripts.Read.All` | Platform Scripts (Windows PowerShell + macOS shell) |
+   | `DeviceManagementApps.Read.All` | The Apps view: the Required, Available and Uninstall apps an endpoint gets |
 
-3. Click **Grant admin consent** — all four require it even as delegated permissions.
+   Add all five. The first four are named in the sign-in request; the apps permission is not, so a
+   registration set up before v3 keeps signing in. Granting it here is enough — the token Entra
+   issues carries every Graph permission the registration has been consented to. If it is missing,
+   the Apps tab is marked **Needs setup** and names the permission to add.
+
+3. Click **Grant admin consent** — all of them require it even as delegated permissions.
 4. **No client secret.** Don't create one; a public client cannot keep it, and this build has
    nowhere to put it.
 
@@ -298,11 +306,14 @@ The server authenticates to Microsoft Graph using the app registration (client-c
 | `GET /api/filters` | Intune Assignment Filters available in the tenant |
 | `GET /api/unassigned?platform=windows` | Policies with no assignment (the Policy Waitlist) |
 | `GET /api/simulate?groups=id1,id2&platform=windows&deviceFilterIds=id1,id2&unassigned=id3` | Simulated endpoint baseline |
-| `GET /api/simulate/export?…&format=json\|csv\|xlsx` | Download the simulated baseline |
+| `GET /api/simulate/export?…&format=json\|csv\|xlsx` | Download the simulated baseline. The workbook carries the endpoint's apps and their finding definitions as extra sheets |
+| `GET /api/simulate/export?…&format=apps-xlsx\|apps-csv` | Download the endpoint's apps on their own: a workbook with a finding-definitions sheet, or a CSV (`404` when no app data was read) |
 | `GET /api/reports/assignments?platform=windows` | Assignment Manifest data |
 | `GET /api/reports/assignments/export?platform=windows&format=csv\|xlsx` | Download the manifest as CSV or as an Excel workbook |
 | `POST /api/mode` | Switch between `demo` and `connected` |
 | `POST /api/refresh` | Clear the cache, re-fetch from Graph, and report any load warnings |
+
+`GET /api/simulate` returns the endpoint's apps under `apps`: `apps.apps` (one entry per app and intent that lands), `apps.excluded` (assigned, then carved out by an exclusion or filter) and three lists of findings: `apps.conflicts` (one app assigned both to install and to uninstall — listed, never adjudicated), `apps.redundant` (an assignment that changes nothing: Required with Available, or one intent through several groups) and `apps.sameProduct` (different app objects that look like one product, matched on name — best-effort). When the apps permission is missing, `apps.unavailable` carries the reason and the three lists are empty.
 
 > Autopilot "device" and Group Tag selection are resolved in the web UI (they drive which group ids get sent in `groups`), so the API surface stays a simple "given these groups, compute the baseline."
 
@@ -345,6 +356,7 @@ never points at an intentionally empty `conflicts` list.
   - **`ClientAuthError: network_error` / `ENETUNREACH`** — the container has an IPv6 address but no working IPv6 route (common on Docker Desktop / WSL2), so the token call to `login.microsoftonline.com` fails. This repo already disables IPv6 in the container (`sysctls` in `docker-compose.yml`) and prefers IPv4 in the server, which fixes it. If you removed those, put them back.
   - **`ENOTFOUND` / DNS errors** — the container can't resolve names. Restart Docker Desktop, or run `wsl --shutdown` (Windows) and start it again.
 - **A `403` in the logs after pointing at a new tenant** — the app registration's permissions were added but **admin consent wasn't granted** (or hasn't propagated yet, which can take several minutes). Confirm each permission shows **"Granted for &lt;tenant&gt;."**
+- **The Apps tab is marked "Needs setup" and says "Apps need one more permission".** The apps read came back `403`. Add `DeviceManagementApps.Read.All` — as an **Application** permission for the self-hosted build, **Delegated** for browser mode — and grant admin consent. The self-hosted server keeps its Graph token for up to an hour, so **restart the server** after granting it; Refresh alone reuses the old token. This is not an incomplete load: the baseline never depended on it.
 - **An "Incomplete load" banner appears.** Something failed to import even after retries, so the baseline is missing data — the banner names what dropped and the server log has a summary. Usually a transient Graph error: click **Refresh from Intune**. If it persists, check the named policy in the admin center.
 - **The first load is slow.** A cold load reads every policy and assignment in the tenant. It's cached afterwards (`CACHE_TTL_SECONDS`), so only the first request pays for it. The server logs a summary line with call counts and any throttling.
 - **Docker CLI says `failed to connect to Docker API at npipe://…`** — Docker Desktop isn't running or hasn't finished starting. Launch it, wait for **"Engine running,"** and confirm with `docker version` (you want a **Server:** section).

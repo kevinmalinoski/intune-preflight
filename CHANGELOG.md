@@ -6,6 +6,127 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [3.0.0] — 2026-11-14
+
+The simulator now answers what is put *on* a device, not only how it is
+configured — and is laid out in the order it is used.
+
+**Upgrading.** Add one read-only permission, `DeviceManagementApps.Read.All`:
+the Apps view needs it. Until it is granted the Apps tab is marked **Needs
+setup** and names it; everything else behaves as before.
+Self-hosted: add it as an **Application** permission, grant admin consent, and
+restart the server (it keeps its Graph token for up to an hour). Browser mode:
+add it as a **Delegated** permission on the app registration.
+
+### Added
+- **Apps for the endpoint.** The groups that deliver a device's policies also
+  deliver its apps, and until now the tool stopped at the first half. The
+  simulator resolves which apps reach the endpoint and under which intent —
+  Required, Available, Uninstall — through the same include/exclude groups and
+  Assignment Filters as policies. They get a tab of their own beside the merged
+  baseline rather than rows inside it: the baseline is settings compared by
+  value, and an app has neither.
+- **The Apps list is grouped the way the baseline is:** an accordion by app
+  type — Win32, Enterprise App Catalog, Store, line-of-business, built-in —
+  with the findings badged on each header, and Required / Uninstall / Available
+  inside each type. A type bar above it shows the proportions and filters to
+  one type. Microsoft 365 Apps, Edge and Defender share one "Built-in" type.
+- **One entry per app object.** An app under two intents is listed once, with
+  both on its row, under Required before Uninstall before Available. Different
+  objects for one product stay separate — different payloads are the thing to
+  see.
+- **Available apps are hidden until asked for,** in the list and the diagram
+  together. An offer in Company Portal changes nothing on the device, so the
+  space goes to what installs and what is removed; a search or a finding view
+  still includes them.
+- **Three app findings, mirroring the baseline's.** The aim is one product, on
+  the device once, under one intent; each finding is a way that isn't so.
+  - *Install + uninstall conflict* (the baseline's conflict): one app assigned
+    both to install and to uninstall, with no exclusion keeping them apart.
+    Flagged and never adjudicated — Required always beats Uninstall, but
+    Available against Uninstall depends on whether each group holds users or
+    devices, which the tool cannot see.
+  - *Redundant* (the baseline's overlap): Required with Available, where the
+    Available assignment only keeps the app in Company Portal, or one intent
+    arriving through several groups.
+  - *Same product, several apps* (the baseline's legacy collision): different
+    app objects that look like one product, such as a Store app and a Win32
+    package of the same title. Intune compares assignments within one app and
+    never across two, so it reports nothing here even when one installs and
+    another uninstalls. Matched on name, and labelled "verify" accordingly.
+- **Every alert is a button.** Clicking an alert on an app narrows the list to
+  that finding; a same-product alert drills into exactly the app objects that
+  overlap, with their intents and groups side by side.
+- **Line-of-business `.msi` apps are flagged for conversion to Win32,** with
+  links to Microsoft's guidance. When they reach an endpoint that also gets
+  Win32 apps, the view calls out the combination Microsoft warns about: both
+  install through TrustedInstaller, and during classic Autopilot the Enrollment
+  Status Page can fail. Only an app being installed counts; MSIX/AppX
+  line-of-business apps are not flagged.
+- **Apps in the diagram, instead of the policies rather than beside them.** The
+  canvas draws the endpoint's policies or its apps, and follows the rail: the
+  Baseline tab shows policy types, the Apps tab shows one bubble per app type,
+  sectioned by intent. Drawn together, the column pushed the fit-to-view scale
+  down until nothing was readable. A Policies / Apps switch on the canvas does
+  the same where there is no rail.
+- **Apps in the exports, with how each is detected.** The Apps view exports an
+  Excel workbook or a CSV, and the simulator's own workbook carries the apps as
+  a second sheet. Each app's row includes its detection rule as configured in
+  Intune — file, registry key or MSI product code, every rule when there are
+  several — so "what does Intune look for" no longer means opening each app in
+  the admin center. A custom detection script is named as one; its content is
+  never read into the simulation or an export. Both workbooks also include a
+  **Finding definitions** sheet: for every finding, exactly what is tested,
+  what it means, what to do and the Microsoft reference. A narrowed baseline
+  export ("this view") leaves apps out: it is a question about settings.
+- **One new read-only permission:** `DeviceManagementApps.Read.All`, required
+  for the Apps view. Nothing asks for it at sign-in, so an existing
+  registration keeps working. Without it the Apps tab is marked **Needs
+  setup** and names it, and everything else — including the "incomplete load" check, which
+  apps deliberately do not trip — behaves exactly as before.
+- **The demo tenant has apps.** The bundled sample tenant gains a set of
+  ordinary app titles arranged to show each app finding once, so the public
+  demo exercises the Apps view without a real tenant.
+- **Refresh from Intune asks first.** A refresh resets the simulated endpoint —
+  its groups, filters, Autopilot settings and waitlist picks — which is a lot
+  to lose to a stray click. It now opens a confirmation that says so.
+
+### Changed
+- **The simulator is three columns, in the order it is used.** The endpoint's
+  definition — OS, Autopilot, device filters, groups — is a sidebar on the
+  left, the diagram has the full height in the middle, and the results rail is
+  on the right: define it, see it resolve, read the result. The inputs used to
+  be full-width bars above the diagram, so every control that was open took its
+  height from the canvas and the graph refitted each time. The sidebar scrolls
+  on its own and collapses to a strip; below desktop width it is a slide-over
+  opened from a one-line summary of the endpoint.
+- **The Policy Waitlist is a section of that sidebar** rather than a bar of its
+  own. It is one more input to the endpoint, like a group.
+- **Group rows are compact.** Tags and the membership-rule toggle share one
+  line under the name, and the platform choice is four buttons across.
+- **Membership and Autopilot assignment are drawn as two lines.** Every group
+  gets a solid line from the endpoint card, and an Autopilot profile adds its
+  own dotted line to the groups it is assigned to. A group a profile targeted
+  used to lose its line from the device, so the endpoint appeared not to belong
+  to exactly the groups that enrolled it.
+- **A group that only delivers apps now appears in the group picker.**
+  Previously only groups referenced by a policy or Autopilot profile were
+  loaded.
+- **Docs and screenshots retaken for v3,** from the demo build by
+  `scripts/capture-docs-shots.mjs`, so the next retake is one command.
+
+### Fixed
+- **Layered values are listed in order.** Three Feature Update profiles
+  targeting 24H2, 25H2 and 26H2 were listed in whatever order Graph returned
+  them — 24H2, 26H2, 25H2 on the tenant that reported it — under a rule called
+  "latest version". The values of a layered setting are now in ascending
+  natural order, on screen and in every export. Ordering is not ranking: no
+  value is marked as the one that applies.
+- **An Autopilot card's line no longer slides when the card is opened.** It was
+  anchored to the card's vertical middle, so expanding the deployment details
+  moved it down among the settings. It now leaves from the profile's name, and
+  an excluded profile's line is dashed red like every other exclusion.
+
 ## [2.6.1] — 2026-10-30
 
 Nothing in the app changed. What changed is what the app looks like when

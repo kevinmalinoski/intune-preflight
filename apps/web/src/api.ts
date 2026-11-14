@@ -53,6 +53,13 @@ async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
  * simulation for scripting, not a table.
  */
 export type BaselineExportFormat = "xlsx" | "csv" | "json";
+/**
+ * Everything `simulateExport` can produce. `apps-csv` is the endpoint's apps as
+ * a table of their own -- not offered in the baseline's export menu, because it
+ * is not the baseline; the Apps view has its own button for it.
+ */
+export type AppsExportFormat = "apps-xlsx" | "apps-csv";
+export type SimulationExportFormat = BaselineExportFormat | AppsExportFormat;
 export type ManifestExportFormat = "xlsx" | "csv";
 
 export interface SimulationInputs {
@@ -132,7 +139,11 @@ const serverApi = {
   },
   simulate: (inputs: SimulationInputs, signal?: AbortSignal) =>
     getJson<SimulationResult>(`/simulate?${simulationQuery(inputs)}`, signal),
-  simulateExport: (inputs: SimulationInputs, format: BaselineExportFormat, criteria?: BaselineCriteria): Download => ({
+  simulateExport: (
+    inputs: SimulationInputs,
+    format: SimulationExportFormat,
+    criteria?: BaselineCriteria
+  ): Download => ({
     kind: "url",
     url: `/api/simulate/export?${simulationQuery(inputs)}&format=${format}${criteriaQuery(criteria)}`,
   }),

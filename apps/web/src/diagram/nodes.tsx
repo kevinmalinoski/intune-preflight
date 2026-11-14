@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef } from "react";
+import { Fragment, useCallback, useLayoutEffect, useRef } from "react";
 import { Handle, Position } from "@xyflow/react";
 import type { PolicyKind, SimulationAutopilotProfile, SimulationGroup } from "@intune-preflight/shared";
 import type { BaselineScope } from "../SimulationBaselinePanel.tsx";
@@ -15,7 +15,9 @@ import {
   UNASSIGNED_EDGE,
   TYPE_BUBBLE_CAP,
   TYPE_CHIP_WIDTH,
+  TYPE_LINE_HEIGHT,
   TYPE_NODE_WIDTH,
+  isAppKind,
   kindCountLabel,
   pluralize,
   policyPayloadLabel,
@@ -142,7 +144,9 @@ export function PolicyNode({
       title={
         data.unassigned
           ? `${data.label}\n\nNo group assignment — added manually to this simulation.\nClick to open its settings.`
-          : `${data.label}\n\nClick to open its settings in the merged baseline.`
+          : isAppKind(data.kind)
+            ? `${data.label}\n\nClick to open it in the Apps list.`
+            : `${data.label}\n\nClick to open its settings in the merged baseline.`
       }
     >
       <Handle type="target" position={Position.Left} className="opacity-0" />
@@ -157,7 +161,9 @@ export function PolicyNode({
       </div>
       <div className="mt-1.5 flex items-center justify-between gap-2 text-[10px] text-slate-500">
         <span className="truncate">{KIND_LABEL[data.kind] ?? data.kind}</span>
-        {!data.excluded && <span className="shrink-0 text-slate-400">{pluralize(data.settingsCount, "setting")}</span>}
+        {!data.excluded && !isAppKind(data.kind) && (
+          <span className="shrink-0 text-slate-400">{pluralize(data.settingsCount, "setting")}</span>
+        )}
       </div>
       {data.excluded && (
         <div className="mt-1 text-[10px] text-rose-300/80">{data.excludedReason ?? "Excluded for this group"}</div>
@@ -176,7 +182,13 @@ export function PolicyTypeNode({
     label: string;
     color: string;
     count: number;
-    policies: { id: string; name: string; status: PolicyStatus; settingsCount: number }[];
+    policies: {
+      id: string;
+      name: string;
+      status: PolicyStatus;
+      settingsCount: number;
+      section?: { label: string; color: string };
+    }[];
     expanded: boolean;
     onToggleExpand?: () => void;
     onOpen?: (scope: BaselineScope) => void;
@@ -201,7 +213,11 @@ export function PolicyTypeNode({
     return (
       <button
         onClick={() => data.onPopOut?.(data.kind)}
-        title={`Show the ${data.count} ${data.label} ${data.count === 1 ? "policy" : "policies"}`}
+        title={
+          isAppKind(data.kind)
+            ? `Show the ${data.count} ${data.label}`
+            : `Show the ${data.count} ${data.label} ${data.count === 1 ? "policy" : "policies"}`
+        }
         className="flex items-start gap-2 rounded-lg border bg-ink-900 px-2.5 py-2 text-left shadow-[0_4px_16px_rgba(0,0,0,0.35)] transition-colors hover:bg-ink-800/60"
         style={{ borderColor: data.color, width: TYPE_CHIP_WIDTH }}
       >
@@ -232,7 +248,11 @@ export function PolicyTypeNode({
       <Handle type="target" position={Position.Left} className="opacity-0" />
       <button
         onClick={() => data.onOpen?.({ kind: data.kind as PolicyKind, label: `${data.label} policies` })}
-        title={`Open the merged baseline for all ${data.label} policies`}
+        title={
+          isAppKind(data.kind)
+            ? `Open ${data.label} in the Apps list`
+            : `Open the merged baseline for all ${data.label} policies`
+        }
         className="flex w-full items-center justify-between gap-2 border-b border-ink-800 px-3 py-2 text-left hover:bg-ink-800/50"
       >
         <span className="font-semibold" style={{ color: data.color }}>
@@ -247,29 +267,44 @@ export function PolicyTypeNode({
       </button>
       <div className="flex flex-col">
         {shown.map((p, i) => (
-          <button
-            key={i}
-            onClick={() => data.onOpen?.({ policyId: p.id, label: p.name })}
-            title={`${p.name}\n\nOpen this policy's settings in the merged baseline`}
-            className="flex items-center gap-2 border-b border-ink-800/60 px-3 py-1.5 text-left transition-colors last:border-b-0 hover:bg-ink-800/60"
-          >
-            <span
-              className="h-1.5 w-1.5 shrink-0 rounded-full"
-              style={{ backgroundColor: p.status === "included" ? data.color : STATUS_DOT[p.status] }}
-            />
-            <span
-              className={`min-w-0 flex-1 truncate leading-snug ${
-                p.status === "excluded" ? "text-slate-500 line-through" : "text-slate-200"
-              }`}
-            >
-              {p.name}
-            </span>
-            {p.status !== "excluded" && (
-              <span className="shrink-0 text-[10px] text-slate-500">
-                {policyPayloadLabel(data.kind, p.settingsCount)}
-              </span>
+          <Fragment key={i}>
+            {/* A new section wherever the label changes. Fixed at a row's
+                height, which is what buildGraph reserves for it. */}
+            {p.section && p.section.label !== shown[i - 1]?.section?.label && (
+              <div
+                className="flex items-end border-b border-ink-800/60 bg-ink-950/60 px-3 pb-1 text-[9px] font-semibold uppercase tracking-wide"
+                style={{ color: p.section.color, height: TYPE_LINE_HEIGHT }}
+              >
+                {p.section.label}
+              </div>
             )}
-          </button>
+            <button
+              onClick={() => data.onOpen?.({ policyId: p.id, label: p.name })}
+              title={
+                isAppKind(data.kind)
+                  ? `${p.name}\n\nOpen it in the Apps list`
+                  : `${p.name}\n\nOpen this policy's settings in the merged baseline`
+              }
+              className="flex items-center gap-2 border-b border-ink-800/60 px-3 py-1.5 text-left transition-colors last:border-b-0 hover:bg-ink-800/60"
+            >
+              <span
+                className="h-1.5 w-1.5 shrink-0 rounded-full"
+                style={{ backgroundColor: p.status === "included" ? data.color : STATUS_DOT[p.status] }}
+              />
+              <span
+                className={`min-w-0 flex-1 truncate leading-snug ${
+                  p.status === "excluded" ? "text-slate-500 line-through" : "text-slate-200"
+                }`}
+              >
+                {p.name}
+              </span>
+              {p.status !== "excluded" && (
+                <span className="shrink-0 text-[10px] text-slate-500">
+                  {policyPayloadLabel(data.kind, p.settingsCount)}
+                </span>
+              )}
+            </button>
+          </Fragment>
         ))}
         {(hiddenCount > 0 || data.expanded) && data.policies.length > TYPE_BUBBLE_CAP && (
           <button
@@ -306,13 +341,10 @@ export function AutopilotCard({
   const excluded = profile.status === "excluded";
   const color = excluded ? "#fb7185" : AUTOPILOT_COLOR;
   return (
-    // `relative` anchors the handle below to THIS card rather than to the node
-    // wrapper, so each profile's line leaves from its own card.
     <div
-      className="relative rounded-lg border bg-ink-900 text-xs shadow-[0_4px_16px_rgba(0,0,0,0.35)]"
+      className="rounded-lg border bg-ink-900 text-xs shadow-[0_4px_16px_rgba(0,0,0,0.35)]"
       style={{ borderColor: color, borderStyle: excluded ? "dashed" : "solid" }}
     >
-      <Handle type="source" id={`ap:${profile.id}`} position={Position.Right} className="opacity-0" />
       <div className="flex items-center justify-between gap-2 border-b border-ink-800 px-3 py-2">
         <span className="font-semibold" style={{ color }}>
           ✈ Autopilot enrollment
@@ -324,23 +356,34 @@ export function AutopilotCard({
           {profile.generation === "v1" ? "V1 · Deployment profile" : "V2 · Device preparation"}
         </span>
       </div>
-      {/* Collapsed by default: name + targeted/excluded status. Click to expand. */}
-      <button
-        onClick={onToggle}
-        title={expanded ? "Hide deployment details" : "Show deployment details"}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-ink-800/40"
-      >
-        <span className="shrink-0 text-slate-500">{expanded ? "▾" : "▸"}</span>
-        <span className="min-w-0 flex-1 break-words font-medium leading-snug text-slate-100">
-          {profile.displayName}
-        </span>
-        <span
-          className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium uppercase"
-          style={{ color, backgroundColor: `${color}22` }}
+      {/* Collapsed by default: name + targeted/excluded status. Click to expand.
+          The handle is anchored to THIS row, not to the card. On the card it
+          sat at the card's vertical middle, which is the profile's name while
+          the card is shut and somewhere among its settings once it is open --
+          so expanding a card slid its line down to leave from between "User
+          account type" and "Device name template". The name is what the line
+          is about, and this row does not move when the details open under it.
+          `-mr-px` carries the row to the card's outer edge so the line starts
+          on the border rather than a pixel inside it. */}
+      <div className="relative -mr-px">
+        <Handle type="source" id={`ap:${profile.id}`} position={Position.Right} className="opacity-0" />
+        <button
+          onClick={onToggle}
+          title={expanded ? "Hide deployment details" : "Show deployment details"}
+          className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-ink-800/40"
         >
-          {excluded ? "Excluded" : "Targeted"}
-        </span>
-      </button>
+          <span className="shrink-0 text-slate-500">{expanded ? "▾" : "▸"}</span>
+          <span className="min-w-0 flex-1 break-words font-medium leading-snug text-slate-100">
+            {profile.displayName}
+          </span>
+          <span
+            className="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-medium uppercase"
+            style={{ color, backgroundColor: `${color}22` }}
+          >
+            {excluded ? "Excluded" : "Targeted"}
+          </span>
+        </button>
+      </div>
       {expanded && (
         <div className="flex flex-col gap-0.5 border-t border-ink-800/60 px-3 pb-2 pt-1.5">
           {profile.settings.map((s, i) => (

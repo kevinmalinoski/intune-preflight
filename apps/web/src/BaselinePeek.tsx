@@ -1,4 +1,4 @@
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import type { SimulationResult } from "@intune-preflight/shared";
 import { BaselineSettingList } from "./BaselineSettingList.tsx";
 import { buildRows } from "./baselineRow.ts";
@@ -25,7 +25,16 @@ const OPEN_KEY = "baselinePeekOpen";
  * own compact renderer does, so the rail and the panel cannot show a different
  * baseline for the same simulation.
  */
-export function BaselinePeek({ simulation, onOpen }: { simulation: SimulationResult; onOpen: () => void }) {
+export function BaselinePeek({
+  simulation,
+  onOpen,
+  tabs,
+}: {
+  simulation: SimulationResult;
+  onOpen: () => void;
+  /** The rail's tab strip, when the rail has a second tab (Apps) to switch to. */
+  tabs?: ReactNode;
+}) {
   const compact = useSyncExternalStore(subscribeLayout, isCompact, () => false);
   const [expanded, setExpanded] = useState(() => readStored(OPEN_KEY) === "1");
   // At `lg` and up the rail IS the feature, so there is nothing to collapse.
@@ -69,6 +78,7 @@ export function BaselinePeek({ simulation, onOpen }: { simulation: SimulationRes
       aria-label="Merged baseline"
       className="relative flex shrink-0 flex-col border-t border-ink-700 bg-ink-900 lg:h-full lg:min-h-0 lg:w-96 lg:border-l lg:border-t-0"
     >
+      {tabs}
       <div className="flex items-center gap-2 px-3 py-2">
         {/* A button only where it does something: below `lg` the header is the
             one affordance for opening the accordion, at `lg` the rail is

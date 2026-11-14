@@ -2,7 +2,7 @@
 
 Save PNGs here with these **exact filenames** and they'll light up in the docs. Captions are already written in [FEATURES.md](../FEATURES.md) — you only need the images.
 
-Roughly **1600px wide** is plenty (docs scale to page width). Delete any line in `FEATURES.md` for a shot you decide not to take, so the page has no broken image.
+Shots are retaken with `scripts/capture-docs-shots.mjs`, which drives headless Edge at 2x against the **demo build** and writes these files; add a shot there rather than capturing by hand, so the next retake is one command. Roughly **1600px wide** is plenty (docs scale to page width). Delete any line in `FEATURES.md` for a shot you decide not to take, so the page has no broken image.
 
 ## Main README
 
@@ -14,16 +14,24 @@ Roughly **1600px wide** is plenty (docs scale to page width). Delete any line in
 
 | File | What to capture |
 |---|---|
-| `02-entra-groups.png` | The Entra security group picker with a couple of groups selected (show All Devices / All Users noted as always applying). |
+| `02-entra-groups.png` | The **Simulated endpoint** sidebar with a couple of groups selected (All Devices / All Users noted as always applying). |
 | `03-autopilot-group-tag.png` | **Autopilot device** toggled on with a Group Tag typed in, and the dynamic group(s) it auto-selected — ideally showing the "dynamic" badge. |
-| `04-grouped-vs-detail.png` | Grouped-by-type view and **Detail view** side by side (or a split/stitched image) so the difference is obvious. |
+| `04-grouped-vs-detail.png` | The diagram in **Detail view**, on an endpoint with few enough policies that each node is readable. |
 | `05-hide-group.png` | A group clicked to hide its policies — before/after, or the diagram with one group visibly folded away. |
-| `06-policy-waitlist.png` | The Policy Waitlist expanded, showing unassigned policies with checkboxes and the **Select all / Clear** buttons. |
+| `06-policy-waitlist.png` | The Policy Waitlist expanded at the foot of the sidebar, with a couple of unassigned policies ticked and drawn in the diagram. |
 | `07-merged-baseline.png` | The **View merged baseline** panel open — the settings grid with the source-policy column visible. |
 | `08-csp-paths.png` | The baseline grid focused on the **CSP path** column, ideally with the Microsoft Learn link visible (and the column picker open, if it fits). |
 | `09-conflicts-overlaps.png` | The baseline showing at least one genuine **conflict** and one **overlap**, expanded to show contributing policies. Windows platform. |
 | `10-autopilot-v1-v2.png` | The Autopilot enrollment cards — ideally a **V1 and a V2** card together (dual targeting), with one expanded to show deployment settings. |
 | `11-platform-support.png` | The platform switcher, on macOS / iOS / Android — showing the baseline still renders (with conflict/overlap flags absent). |
+
+## Apps
+
+| File | What to capture |
+|---|---|
+| `18-apps-overview.png` | The full simulator on the **Apps** tab: app-type bubbles in the diagram, the list grouped by type with findings badged. Also used in the main README. |
+| `19-apps-same-product.png` | The Apps rail after clicking a **same product / opposing intents** alert — the drill-down to the overlapping app objects. |
+| `20-apps-findings.png` | The Apps rail on **LOB to convert**, with the Microsoft links and the Enrollment Status Page warning. |
 
 ## Assignment Manifest
 
@@ -40,7 +48,7 @@ Roughly **1600px wide** is plenty (docs scale to page width). Delete any line in
 
 Screenshots bake in whatever is on screen. Since this repo is public:
 
-- **Use the demo tenant where you can** — `npm run dev` with no `.env` starts in Demo mode with fully synthetic data and nothing to redact. It exercises conflicts, overlaps, exclude-wins, an include-filter case, Autopilot V1 + V2, and an unassigned policy.
+- **Use the demo tenant where you can** — `npm run dev` with no `.env` starts in Demo mode with fully synthetic data and nothing to redact. It exercises conflicts, overlaps, exclude-wins, an include-filter case, Autopilot V1 + V2, an unassigned policy, and every app finding.
 - If you shoot a **real tenant**, scrub it first: policy and group names, device-name templates, SSIDs, admin account names, certificate authority / IdP names, and anything with your org's prefix.
 - Double-check no tenant IDs, user names, email addresses, or device serials are visible.
 - Redact by **replacing** names with generic ones where possible — blur bars read as "censored" and look worse than clean placeholder names.

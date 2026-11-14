@@ -7,15 +7,85 @@ import {
   isAutopilotJoinedRule,
 } from "@intune-preflight/shared";
 import type { AssignmentFilter, GroupSummary, Platform } from "@intune-preflight/shared";
-import { isCompact } from "./viewport.ts";
 
-const PLATFORM_OPTIONS: { value: Platform; label: string }[] = [
-  { value: "windows", label: "Windows" },
-  { value: "macos", label: "macOS" },
-  { value: "ios", label: "iOS / iPadOS" },
-  { value: "android", label: "Android" },
+// `short` is what fits four-across in the sidebar; "iOS / iPadOS" does not.
+const PLATFORM_OPTIONS: { value: Platform; label: string; short: string }[] = [
+  { value: "windows", label: "Windows", short: "Windows" },
+  { value: "macos", label: "macOS", short: "macOS" },
+  { value: "ios", label: "iOS / iPadOS", short: "iOS" },
+  { value: "android", label: "Android", short: "Android" },
 ];
 
+/**
+ * The simulated endpoint in one line: OS, Autopilot, filters, groups.
+ *
+ * It is the way back into the sidebar wherever the sidebar is not on screen --
+ * the trigger for the slide-over below `lg` -- and it names what is selected
+ * rather than counting it, because a filter or a group that is on while its
+ * control is shut still changes every answer on the page.
+ */
+export function EndpointSummary({
+  groups,
+  selectedGroupIds,
+  platform,
+  filters,
+  deviceFilterIds,
+  isAutopilotDevice,
+  groupTag,
+  onOpen,
+}: {
+  groups: GroupSummary[];
+  selectedGroupIds: string[];
+  platform: Platform;
+  filters: AssignmentFilter[];
+  deviceFilterIds: string[];
+  isAutopilotDevice: boolean;
+  groupTag: string;
+  onOpen: () => void;
+}) {
+  const selectedGroupNames = selectedGroupIds
+    .map((id) => groups.find((g) => g.id === id)?.displayName ?? id)
+    .join(", ");
+  const platformLabel = PLATFORM_OPTIONS.find((p) => p.value === platform)?.label ?? platform;
+  const deviceFilterLabels = deviceFilterIds
+    .map((id) => filters.find((f) => f.id === id)?.displayName)
+    .filter((label): label is string => Boolean(label));
+  const trimmedGroupTag = groupTag.trim();
+  return (
+    <button
+      onClick={onOpen}
+      className="flex w-full items-center gap-2.5 border-b border-ink-700 bg-ink-900 px-4 py-2 text-left hover:bg-ink-800/50"
+    >
+      <span className="text-base leading-none" aria-hidden>
+        💻
+      </span>
+      <span className="min-w-0 flex-1 truncate text-xs text-slate-300">
+        <span className="font-medium text-slate-200">{platformLabel}</span>
+        {isAutopilotDevice && (
+          <span className="text-amber-300"> · Autopilot{trimmedGroupTag ? ` (${trimmedGroupTag})` : ""}</span>
+        )}
+        {deviceFilterLabels.length > 0 && <span className="text-violet-300"> · {deviceFilterLabels.join(", ")}</span>}
+        {selectedGroupIds.length > 0 ? (
+          <span className="text-slate-400"> · {selectedGroupNames}</span>
+        ) : (
+          <span className="text-slate-500"> · All Devices / All Users only</span>
+        )}
+      </span>
+      <span className="shrink-0 rounded-md border border-ink-700 px-2.5 py-1 text-xs text-slate-300">Edit</span>
+    </button>
+  );
+}
+
+/**
+ * The simulated endpoint's definition, as one column: OS, Autopilot, device
+ * filters, then the groups list taking whatever height is left.
+ *
+ * It used to be a full-width bar above the diagram, three columns across. That
+ * put the inputs on top of a picture that reads left to right, and made the
+ * canvas pay in height for every control that was open. As the first column of
+ * the page it sits where the flow starts -- define it, see it resolve, read the
+ * result -- and scrolls on its own, so nothing here can resize the diagram.
+ */
 export function EndpointPicker({
   groups,
   selectedGroupIds,
@@ -46,11 +116,6 @@ export function EndpointPicker({
   loading?: boolean;
 }) {
   const [search, setSearch] = useState("");
-  // Open on a desktop, folded away on a narrow window -- where expanded it
-  // would take the whole viewport and leave the diagram nothing. Read once, at
-  // mount, so rotating the device (or opening the Split View wider) never
-  // reaches in and undoes a choice the admin has since made here.
-  const [collapsed, setCollapsed] = useState(isCompact);
   /**
    * Per-group overrides for whether the membership rule is visible, keyed by
    * group id. Only groups the admin has actually clicked appear here: everything
@@ -109,97 +174,25 @@ export function EndpointPicker({
   // Autopilot is a Windows-only enrollment path -- disable the whole section off Windows.
   const autopilotDisabled = platform !== "windows";
 
-  const selectedGroupNames = selectedGroupIds
-    .map((id) => groups.find((g) => g.id === id)?.displayName ?? id)
-    .join(", ");
-  const platformLabel = PLATFORM_OPTIONS.find((p) => p.value === platform)?.label ?? platform;
-  const deviceFilterLabels = deviceFilterIds
-    .map((id) => filters.find((f) => f.id === id)?.displayName)
-    .filter((label): label is string => Boolean(label));
-
-  if (collapsed) {
-    return (
-      <div
-        role="button"
-        tabIndex={0}
-        aria-expanded={false}
-        onClick={() => setCollapsed(false)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            setCollapsed(false);
-          }
-        }}
-        className="flex cursor-pointer items-center gap-2.5 border-b border-ink-700 bg-ink-900 px-4 py-2 hover:bg-ink-800/50"
-      >
-        <span className="text-base leading-none" aria-hidden>
-          💻
-        </span>
-        <div className="min-w-0 flex-1 truncate text-xs text-slate-300">
-          <span className="font-medium text-slate-200">{platformLabel}</span>
-          {isAutopilotDevice && (
-            <span className="text-amber-300"> · Autopilot{trimmedGroupTag ? ` (${trimmedGroupTag})` : ""}</span>
-          )}
-          {deviceFilterLabels.length > 0 && <span className="text-violet-300"> · {deviceFilterLabels.join(", ")}</span>}
-          {selectedGroupIds.length > 0 ? (
-            <span className="text-slate-400"> · {selectedGroupNames}</span>
-          ) : (
-            <span className="text-slate-500"> · All Devices / All Users only</span>
-          )}
-        </div>
-        <span className="shrink-0 rounded-md border border-ink-700 px-2.5 py-1 text-xs text-slate-300">Edit ▾</span>
-      </div>
-    );
-  }
-
   return (
-    <div className="border-b border-ink-700 bg-ink-900 px-4 py-3">
-      {/* Description row — click anywhere on the bar to collapse. */}
-      <div
-        role="button"
-        tabIndex={0}
-        aria-expanded={true}
-        onClick={() => setCollapsed(true)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            setCollapsed(true);
-          }
-        }}
-        className="-mx-4 -mt-3 mb-2 flex cursor-pointer items-center justify-between gap-3 rounded-b-md px-4 py-3 hover:bg-ink-800/50"
-      >
-        <div className="flex items-center gap-2 text-xs text-slate-400">
-          <span className="text-sm" aria-hidden>
-            💻
-          </span>
-          Configure the simulated endpoint — OS, Autopilot, Entra groups, and filters
-        </div>
-        <span className="shrink-0 rounded-md border border-ink-700 px-2.5 py-1 text-xs text-slate-300">Collapse ▴</span>
-      </div>
-
-      {/* 3-column control row on a desktop; one stacked column below `lg`,
-          where the three of them used to overlap each other. The expanded body
-          is capped and scrolls there too, so the picker can never grow past the
-          window and squeeze the diagram out of existence. */}
-      <div className="flex max-h-[45vh] flex-col gap-4 overflow-y-auto lg:max-h-none lg:flex-row lg:overflow-visible">
+    <div className="flex min-h-0 flex-1 flex-col px-3 py-3">
+      <div className="flex min-h-0 flex-1 flex-col gap-3">
         {/* Col 1: Platform + Autopilot */}
-        <div className="flex w-full flex-col gap-2 lg:w-48 lg:shrink-0">
+        <div className="flex w-full shrink-0 flex-col gap-2.5">
           <div>
             <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-500">Platform</div>
-            {/* Two-up below `lg`: four full-width rows is a lot of height to
-                spend on the first control, and "iOS / iPadOS" doesn't fit at a
-                quarter of a phone's width. */}
-            <div className="grid grid-cols-2 gap-1 rounded-lg border border-ink-700 bg-ink-800 p-0.5 lg:flex lg:flex-col lg:gap-0">
+            <div className="grid grid-cols-4 gap-0.5 rounded-lg border border-ink-700 bg-ink-800 p-0.5">
               {PLATFORM_OPTIONS.map((opt) => (
                 <button
                   key={opt.value}
                   onClick={() => onTogglePlatform(opt.value)}
-                  title={`Show only ${opt.label} policies`}
-                  className={`rounded px-2.5 py-2 text-center text-xs font-medium transition-colors lg:py-1 lg:text-left ${
+                  aria-pressed={platform === opt.value}
+                  title={`Simulate a ${opt.label} endpoint`}
+                  className={`rounded px-1 py-1.5 text-center text-[11px] font-medium transition-colors ${
                     platform === opt.value ? "bg-sky-500/20 text-sky-300" : "text-slate-400 hover:text-slate-200"
                   }`}
                 >
-                  {opt.label}
+                  {opt.short}
                 </button>
               ))}
             </div>
@@ -252,10 +245,10 @@ export function EndpointPicker({
         </div>
 
         {/* Col 2: Entra security groups -- the primary, most-used control, so it gets the width */}
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-1">
           <div
-            className="mb-1 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500"
-            title="Entra security groups this device/user belongs to. Expand “membership rule” on a dynamic group to read the rule that decides whether a device lands in it; rules we could not fully evaluate open on their own. If a selected group's rule logically implies membership in another dynamic group (e.g. a narrower OrderID prefix), that group is added automatically and shown in amber in the diagram. Entering a Group Tag above auto-selects groups scoped to it."
+            className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-500"
+            title="All Devices and All Users always apply, and dynamic group rules are checked for implied memberships. Entra security groups this device/user belongs to. Expand “membership rule” on a dynamic group to read the rule that decides whether a device lands in it; rules we could not fully evaluate open on their own. If a selected group's rule logically implies membership in another dynamic group (e.g. a narrower OrderID prefix), that group is added automatically and shown in amber in the diagram. Entering a Group Tag above auto-selects groups scoped to it."
           >
             <span>
               Entra security groups
@@ -265,15 +258,8 @@ export function EndpointPicker({
                 </span>
               )}
             </span>
-            {/* What the list does on your behalf, said before you read it
-                rather than after. It used to sit under the list, which is
-                where it was least likely to be seen: you scroll a long list of
-                groups, stop at the one you want, and never reach the bottom.
-                It rides the label row now, so it costs no height of its own --
-                the groups column has the width for it since the filters moved
-                out of the third column. */}
             <span className="font-normal normal-case tracking-normal text-slate-600">
-              All Devices &amp; All Users always apply · dynamic group rules are checked for implied memberships
+              All Devices &amp; All Users always apply
             </span>
           </div>
           <input
@@ -282,10 +268,9 @@ export function EndpointPicker({
             placeholder="Search groups…"
             className="mb-1 w-full rounded-md border border-ink-700 bg-ink-800 px-2.5 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 focus:border-sky-400 focus:outline-none"
           />
-          {/* Taller below `lg`: this list sits inside a scrolling picker there,
-              and two nested scrollers 176px tall is a miserable way to find a
-              group on a phone. */}
-          <div className="max-h-72 overflow-y-auto rounded-md border border-ink-700 lg:max-h-44">
+          {/* Takes the height the sidebar has left. A floor, so that on a
+              short window the list is still a list and not a two-row slot. */}
+          <div className="min-h-[9rem] flex-1 overflow-y-auto rounded-md border border-ink-700">
             {sortedGroups.map((g) => {
               const tm = trimmedGroupTag
                 ? classifyGroupTagMatch(g.membershipRule, trimmedGroupTag)
@@ -326,7 +311,7 @@ export function EndpointPicker({
               return (
                 <label
                   key={g.id}
-                  className={`flex items-start gap-2.5 border-b border-l-2 border-ink-800 px-2.5 py-3 text-xs last:border-b-0 transition-colors lg:py-2 ${
+                  className={`flex items-start gap-2 border-b border-l-2 border-ink-800 px-2 py-3 text-xs last:border-b-0 transition-colors lg:py-1.5 ${
                     highlight ? "border-l-amber-400/60 bg-amber-500/[0.06]" : "border-l-transparent"
                   } ${locked ? "cursor-default" : "cursor-pointer"} hover:bg-ink-800`}
                   title={
@@ -343,8 +328,12 @@ export function EndpointPicker({
                     className="mt-0.5 shrink-0 accent-sky-400 disabled:opacity-70"
                   />
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-start gap-1.5">
-                      <span className="min-w-0 flex-1 break-words leading-snug text-slate-200">{g.displayName}</span>
+                    {/* Wraps: at sidebar width a long name and two pills do not
+                        fit on one line, and the name is the part to read. */}
+                    <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+                      <span className="min-w-[8rem] flex-1 break-words leading-snug text-slate-200">
+                        {g.displayName}
+                      </span>
                       {/* Tag scope pill — subsumes the "group tag" label: amber when the
                           entered tag matches, muted otherwise; always exposes the [OrderID] scope. */}
                       {tagScope && (
@@ -411,12 +400,10 @@ export function EndpointPicker({
                           dynamic
                         </span>
                       )}
-                    </div>
-                    {canShowRule && (
-                      <>
-                        {/* `type="button"` and stopping the click matter: this sits
-                            inside the row's <label>, so without both, reading a rule
-                            would also tick the group's checkbox. */}
+                      {/* `type="button"` and stopping the click matter: this sits
+                          inside the row's <label>, so without both, reading a rule
+                          would also tick the group's checkbox. */}
+                      {canShowRule && (
                         <button
                           type="button"
                           onClick={(e) => {
@@ -425,7 +412,7 @@ export function EndpointPicker({
                             toggleRule(g.id, ruleOpen);
                           }}
                           aria-expanded={ruleOpen}
-                          className="mt-1 inline-flex items-center gap-1 rounded text-[10px] leading-none text-slate-500 transition-colors hover:text-slate-300"
+                          className="inline-flex items-center gap-1 rounded text-[10px] leading-none text-slate-500 transition-colors hover:text-slate-300"
                           title={ruleOpen ? "Hide the membership rule" : "Show the membership rule"}
                         >
                           <svg
@@ -442,14 +429,14 @@ export function EndpointPicker({
                           >
                             <path d="M9 18l6-6-6-6" />
                           </svg>
-                          membership rule
+                          rule
                         </button>
-                        {ruleOpen && (
-                          <div className="mt-1 break-words border-l border-ink-700 pl-2 font-mono text-[10px] leading-relaxed text-slate-500">
-                            {g.membershipRule}
-                          </div>
-                        )}
-                      </>
+                      )}
+                    </div>
+                    {canShowRule && ruleOpen && (
+                      <div className="mt-1 break-words border-l border-ink-700 pl-2 font-mono text-[10px] leading-relaxed text-slate-500">
+                        {g.membershipRule}
+                      </div>
                     )}
                   </div>
                 </label>

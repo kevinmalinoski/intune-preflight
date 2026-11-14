@@ -1,14 +1,20 @@
 import type {
+  AppsUnavailable,
   AssignmentFilter,
   AssignmentFilterRef,
   AutopilotProfile,
   AutopilotProfileSetting,
+  IntuneApp,
   IntuneGroup,
   IntunePolicy,
   Platform,
 } from "@intune-preflight/shared";
+import { APPS_GRAPH_PERMISSION } from "@intune-preflight/shared";
 import { type GraphClient, isGraphStatus, mapWithConcurrency } from "./graphClient.js";
 import {
+  appFamilyFromOdataType,
+  appPlatformFromOdataType,
+  appTypeLabel,
   demoTenantData,
   flattenIntentSettings,
   flattenScriptToCspSettings,
@@ -17,8 +23,11 @@ import {
   indexIntentSettingDefinitions,
   type IntentSettingDef,
   isLegacyTemplateType,
+  isLobMsiType,
   isSecurityIntentTemplate,
   mapWellKnownGroupId,
+  normalizeAppAssignments,
+  normalizeAppDetection,
   parseAssignmentTarget,
   platformFromAssignmentFilter,
   platformFromIntentTemplate,
@@ -885,6 +894,70 @@ export async function fetchEndpointSecurityIntents(ctx: LoadContext): Promise<In
 }
 
 /**
+ * Assigned apps, with their assignments inline.
+ *
+ * Unlike every fetcher above, a failure here is NOT a load warning. Warnings say
+ * the baseline is incomplete, and apps are not in the baseline: a tenant that
+ * never granted the apps permission has a whole baseline and simply no Apps
+ * view. So this never throws and never calls `recordWarning` for a failed read.
+ * It reports `unavailable` with the reason, and the UI explains it in the one
+ * place it matters. Only a per-app problem inside an otherwise good read is a
+ * warning, since by then the Apps view is on screen and would be silently short.
+ *
+ * `isAssigned eq true` keeps the read to apps that can reach a device at all;
+ * a tenant's unassigned catalogue can run to hundreds of entries that no
+ * simulation would ever show. Should Graph reject the filter alongside
+ * `$expand` (400), the unfiltered collection is read and narrowed here instead.
+ */
+export async function fetchApps(ctx: LoadContext): Promise<{ apps: IntuneApp[] } | { unavailable: AppsUnavailable }> {
+  const base = "/deviceAppManagement/mobileApps?$expand=assignments";
+  let items: Record<string, unknown>[];
+  try {
+    try {
+      items = await ctx.client.graphGetCollection<Record<string, unknown>>(`${base}&$filter=isAssigned eq true`, true);
+    } catch (err) {
+      if (!isGraphStatus(err, 400)) throw err;
+      items = await ctx.client.graphGetCollection<Record<string, unknown>>(base, true);
+    }
+  } catch (err) {
+    const permission = isGraphStatus(err, 401, 403);
+    const detail = permission
+      ? `Microsoft Graph refused the apps read. Grant ${APPS_GRAPH_PERMISSION} to enable the Apps view.`
+      : skipReason(err as Error, `If this persists, check that ${APPS_GRAPH_PERMISSION} is granted.`);
+    // The log keeps Graph's own words; the UI gets only the plain-language detail.
+    console.warn(`Skipping apps: ${detail}${permission ? ` [${(err as Error).message}]` : ""}`);
+    return { unavailable: { reason: permission ? "permission" : "error", detail } };
+  }
+
+  const apps: IntuneApp[] = [];
+  for (const item of items) {
+    const raw = (item.assignments as Parameters<typeof normalizeAppAssignments>[0] | undefined) ?? [];
+    const { assignments, dropped } = normalizeAppAssignments(raw);
+    const displayName = (item.displayName as string) ?? "Untitled";
+    if (dropped > 0) {
+      ctx.recordWarning(
+        `App “${displayName}” has ${dropped} assignment(s) with an intent or target this tool doesn't recognise — they are missing from the Apps view.`
+      );
+    }
+    if (assignments.length === 0) continue;
+    const odataType = item["@odata.type"] as string | undefined;
+    const detection = normalizeAppDetection(item);
+    apps.push({
+      id: item.id as string,
+      displayName,
+      publisher: (item.publisher as string | undefined) || undefined,
+      appType: appTypeLabel(odataType),
+      family: appFamilyFromOdataType(odataType),
+      ...(isLobMsiType(odataType) ? { lobMsi: true } : {}),
+      ...(detection.length > 0 ? { detection } : {}),
+      platform: appPlatformFromOdataType(odataType),
+      assignments,
+    });
+  }
+  return { apps };
+}
+
+/**
  * Wraps a top-level resource fetch so one failing category -- a missing
  * permission, a transient Graph error, a malformed policy -- degrades to empty
  * instead of failing the entire tenant load with a 502. Each category is
@@ -945,6 +1018,7 @@ export async function loadTenantData({ client, mode, cache }: LoadTenantDataOpti
       autopilotV1,
       autopilotV2,
       assignmentFilters,
+      appsResult,
     ] = await Promise.all([
       safeFetch(ctx, "device configurations", fetchDeviceConfigurations),
       safeFetch(ctx, "compliance policies", fetchCompliancePolicies),
@@ -956,7 +1030,9 @@ export async function loadTenantData({ client, mode, cache }: LoadTenantDataOpti
       safeFetch(ctx, "Autopilot profiles", fetchAutopilotProfiles),
       safeFetch(ctx, "Autopilot device preparation policies", fetchAutopilotV2Policies),
       safeFetch(ctx, "assignment filters", fetchAssignmentFilters),
+      fetchApps(ctx),
     ]);
+    const apps = "apps" in appsResult ? appsResult.apps : undefined;
     const autopilotProfiles = [...autopilotV1, ...autopilotV2];
 
     const policies = [
@@ -982,6 +1058,9 @@ export async function loadTenantData({ client, mode, cache }: LoadTenantDataOpti
       if (a.deviceGroupId) groupIds.add(a.deviceGroupId);
       for (const s of a.settings) if (s.groupId) groupIds.add(s.groupId);
     }
+    // Groups that only deliver apps still need a name, and still need to be
+    // offered in the picker.
+    for (const app of apps ?? []) for (const a of app.assignments) groupIds.add(a.groupId);
 
     const realGroupIds = [...groupIds].filter(
       (id) => id !== VIRTUAL_GROUP_ALL_DEVICES.id && id !== VIRTUAL_GROUP_ALL_USERS.id
@@ -1036,10 +1115,17 @@ export async function loadTenantData({ client, mode, cache }: LoadTenantDataOpti
       );
     } else {
       console.log(
-        `Tenant load finished in ${seconds}s: ${policies.length} policies, ${groups.length} groups — complete. ${detail}.`
+        `Tenant load finished in ${seconds}s: ${policies.length} policies, ${groups.length} groups, ${apps ? `${apps.length} assigned apps` : "apps unavailable"} — complete. ${detail}.`
       );
     }
 
-    return { policies, groups, autopilotProfiles, assignmentFilters, warnings: loadWarnings };
+    return {
+      policies,
+      groups,
+      autopilotProfiles,
+      assignmentFilters,
+      ...("apps" in appsResult ? { apps: appsResult.apps } : { appsUnavailable: appsResult.unavailable }),
+      warnings: loadWarnings,
+    };
   });
 }

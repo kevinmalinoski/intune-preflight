@@ -123,26 +123,36 @@ function sheetName(raw: string): string {
   return cleaned === "" ? "Sheet1" : cleaned;
 }
 
-function workbookXml(name: string): string {
+function workbookXml(names: string[]): string {
   return (
     `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
     `<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"` +
     ` xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">` +
-    `<sheets><sheet name="${escapeXml(name)}" sheetId="1" r:id="rId1"/></sheets>` +
+    `<sheets>` +
+    names.map((name, i) => `<sheet name="${escapeXml(name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join("") +
+    `</sheets>` +
     `</workbook>`
   );
 }
 
-const CONTENT_TYPES_XML =
-  `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
-  `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
-  `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>` +
-  `<Default Extension="xml" ContentType="application/xml"/>` +
-  `<Override PartName="/xl/workbook.xml"` +
-  ` ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>` +
-  `<Override PartName="/xl/worksheets/sheet1.xml"` +
-  ` ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>` +
-  `</Types>`;
+function contentTypesXml(sheetCount: number): string {
+  let overrides = "";
+  for (let i = 1; i <= sheetCount; i++) {
+    overrides +=
+      `<Override PartName="/xl/worksheets/sheet${i}.xml"` +
+      ` ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`;
+  }
+  return (
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
+    `<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>` +
+    `<Default Extension="xml" ContentType="application/xml"/>` +
+    `<Override PartName="/xl/workbook.xml"` +
+    ` ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>` +
+    overrides +
+    `</Types>`
+  );
+}
 
 const ROOT_RELS_XML =
   `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
@@ -152,13 +162,21 @@ const ROOT_RELS_XML =
   ` Target="xl/workbook.xml"/>` +
   `</Relationships>`;
 
-const WORKBOOK_RELS_XML =
-  `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
-  `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
-  `<Relationship Id="rId1"` +
-  ` Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"` +
-  ` Target="worksheets/sheet1.xml"/>` +
-  `</Relationships>`;
+function workbookRelsXml(sheetCount: number): string {
+  let rels = "";
+  for (let i = 1; i <= sheetCount; i++) {
+    rels +=
+      `<Relationship Id="rId${i}"` +
+      ` Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"` +
+      ` Target="worksheets/sheet${i}.xml"/>`;
+  }
+  return (
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+    `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">` +
+    rels +
+    `</Relationships>`
+  );
+}
 
 /** The standard CRC-32 (IEEE 802.3) table, built once rather than written out. */
 const CRC_TABLE = (() => {
@@ -287,6 +305,42 @@ function zip(parts: Part[]): Uint8Array {
   return out;
 }
 
+/** One worksheet: its tab name, and its rows with the header first. */
+export interface XlsxSheet {
+  name: string;
+  rows: string[][];
+}
+
+/**
+ * Several sheets as the bytes of one .xlsx workbook, in the order given.
+ *
+ * Excel refuses a workbook with two sheets of the same name (compared without
+ * case), and names are truncated to 31 characters first -- so a clash is
+ * resolved here with a numeric suffix rather than left for the caller to
+ * discover as a "corrupted file".
+ */
+export function sheetsToXlsx(sheets: XlsxSheet[]): Uint8Array {
+  const all = sheets.length > 0 ? sheets : [{ name: "Sheet1", rows: [] }];
+  const taken = new Set<string>();
+  const names = all.map((sheet) => {
+    const base = sheetName(sheet.name);
+    let name = base;
+    for (let n = 2; taken.has(name.toLowerCase()); n++) {
+      const suffix = ` (${n})`;
+      name = base.slice(0, 31 - suffix.length) + suffix;
+    }
+    taken.add(name.toLowerCase());
+    return name;
+  });
+  return zip([
+    { path: "[Content_Types].xml", xml: contentTypesXml(all.length) },
+    { path: "_rels/.rels", xml: ROOT_RELS_XML },
+    { path: "xl/workbook.xml", xml: workbookXml(names) },
+    { path: "xl/_rels/workbook.xml.rels", xml: workbookRelsXml(all.length) },
+    ...all.map((sheet, i) => ({ path: `xl/worksheets/sheet${i + 1}.xml`, xml: sheetXml(sheet.rows) })),
+  ]);
+}
+
 /**
  * Rows of strings as the bytes of a single-sheet .xlsx workbook.
  *
@@ -295,11 +349,5 @@ function zip(parts: Part[]): Uint8Array {
  * row-builder and cannot disagree about content.
  */
 export function rowsToXlsx(rows: string[][], options: { sheetName?: string } = {}): Uint8Array {
-  return zip([
-    { path: "[Content_Types].xml", xml: CONTENT_TYPES_XML },
-    { path: "_rels/.rels", xml: ROOT_RELS_XML },
-    { path: "xl/workbook.xml", xml: workbookXml(sheetName(options.sheetName ?? "Sheet1")) },
-    { path: "xl/_rels/workbook.xml.rels", xml: WORKBOOK_RELS_XML },
-    { path: "xl/worksheets/sheet1.xml", xml: sheetXml(rows) },
-  ]);
+  return sheetsToXlsx([{ name: options.sheetName ?? "Sheet1", rows }]);
 }

@@ -12,6 +12,7 @@
  */
 
 import type { Configuration } from "@azure/msal-browser";
+import { APPS_GRAPH_PERMISSION } from "@intune-preflight/shared";
 
 /**
  * Delegated Graph scopes for a read-only tenant inspection. All five require
@@ -24,6 +25,19 @@ export const GRAPH_SCOPES = [
   "DeviceManagementScripts.Read.All",
   "Group.Read.All",
 ] as const;
+
+/**
+ * Read by the Apps view, and deliberately NOT in GRAPH_SCOPES.
+ *
+ * Asking for it at sign-in would put a consent prompt -- or, for an admin who
+ * cannot consent, a failed sign-in -- in front of every tenant that has not
+ * granted it, to enable a view that is optional. It does not need asking for:
+ * Entra issues a Graph token carrying every delegated Graph permission the app
+ * has been consented to, not only the ones named in the request. So granting
+ * this in the app registration is enough for the apps read to succeed, and
+ * without it that one read comes back 403 and the Apps view says why.
+ */
+export const OPTIONAL_GRAPH_SCOPES = [APPS_GRAPH_PERMISSION] as const;
 
 export interface RedirectUriInputs {
   /** `VITE_REDIRECT_URI`, when the deploy sets one. */

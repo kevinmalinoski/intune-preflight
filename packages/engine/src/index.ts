@@ -23,6 +23,8 @@ export {
   listAssignmentFilters,
   listGroupSummaries,
   listUnassignedPolicies,
+  simulationAppsToCsv,
+  simulationAppsToXlsx,
   simulationToCsv,
   simulationToXlsx,
 } from "./baseline.js";
@@ -30,7 +32,8 @@ export {
 // The minimal .xlsx writer behind those two, and the media type its bytes are
 // served and saved under -- one constant so the server's Content-Type and the
 // browser builds' Blob cannot drift apart.
-export { rowsToXlsx, XLSX_MIME } from "./xlsx.js";
+export { rowsToXlsx, sheetsToXlsx, XLSX_MIME } from "./xlsx.js";
+export type { XlsxSheet } from "./xlsx.js";
 
 // Graph -> CSP-setting normalizers, platform classification, assignment-target
 // parsing, and the flat dynamic-membership-rule helpers.
@@ -54,6 +57,20 @@ export {
   VIRTUAL_GROUP_ALL_USERS,
 } from "./normalize.js";
 export type { IntentSettingDef } from "./normalize.js";
+
+// Apps: Graph app-type classification, assignment normalizing, and resolving
+// which apps reach a simulated endpoint under which intent.
+export {
+  appFamilyFromOdataType,
+  appPlatformFromOdataType,
+  appPlatforms,
+  appProductKey,
+  appTypeLabel,
+  isLobMsiType,
+  normalizeAppAssignments,
+  normalizeAppDetection,
+  simulateApps,
+} from "./apps.js";
 
 // The canonical CSP crosswalk behind cross-model collision detection.
 export { crosswalkTemplateSetting, normalizeCspNode } from "./crosswalk.js";

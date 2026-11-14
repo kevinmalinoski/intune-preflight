@@ -12,6 +12,8 @@ import {
   listAssignmentFilters,
   listGroupSummaries,
   listUnassignedPolicies,
+  simulationAppsToCsv,
+  simulationAppsToXlsx,
   simulationToCsv,
   narrowSimulation,
   simulationToXlsx,
@@ -212,6 +214,23 @@ export async function buildServer({ logger = true }: { logger?: boolean } = {}) 
         reply.header("Content-Type", "text/csv; charset=utf-8");
         reply.header("Content-Disposition", `attachment; filename="endpoint-baseline.csv"`);
         return simulationToCsv(simulation);
+      }
+
+      // The endpoint's apps as their own CSV: a CSV is one table, and apps
+      // don't share the baseline's columns. (The .xlsx carries them as a sheet.)
+      if (req.query.format === "apps-xlsx") {
+        const workbook = simulationAppsToXlsx(simulation);
+        if (workbook === null) return reply.status(404).send({ error: "No app data is available to export." });
+        reply.header("Content-Type", XLSX_MIME);
+        reply.header("Content-Disposition", `attachment; filename="endpoint-apps.xlsx"`);
+        return Buffer.from(workbook);
+      }
+      if (req.query.format === "apps-csv") {
+        const csv = simulationAppsToCsv(simulation);
+        if (csv === null) return reply.status(404).send({ error: "No app data is available to export." });
+        reply.header("Content-Type", "text/csv; charset=utf-8");
+        reply.header("Content-Disposition", `attachment; filename="endpoint-apps.csv"`);
+        return csv;
       }
 
       reply.header("Content-Type", "application/json");

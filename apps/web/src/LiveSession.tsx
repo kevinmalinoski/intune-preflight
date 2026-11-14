@@ -9,7 +9,7 @@
  */
 
 import { useState, useSyncExternalStore } from "react";
-import { GRAPH_SCOPES } from "./authConfig.ts";
+import { GRAPH_SCOPES, OPTIONAL_GRAPH_SCOPES } from "./authConfig.ts";
 import { liveRedirectUri } from "./auth.ts";
 import { getLoadProgress, subscribeLoadProgress } from "./loadProgress.ts";
 import { isValidClientId, isValidTenantId } from "./liveConfig.ts";
@@ -134,6 +134,10 @@ function LiveSetupPanel({ onUseSampleTenant }: { onUseSampleTenant: () => void }
             <li>
               These <span className="text-slate-300">delegated</span> Graph permissions, admin-consented:{" "}
               {GRAPH_SCOPES.join(", ")}. All read-only.
+            </li>
+            <li>
+              {OPTIONAL_GRAPH_SCOPES.join(", ")}, also read-only, for the apps an endpoint gets. Without it the Apps tab
+              asks for it and the baseline still loads.
             </li>
           </ul>
           <p className="mt-2">

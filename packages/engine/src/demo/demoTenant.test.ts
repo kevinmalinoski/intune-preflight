@@ -136,4 +136,44 @@ describe("demo tenant", () => {
       expect(buildAssignmentReport(data, platform).rows.length).toBeGreaterThan(0);
     }
   });
+
+  it("shows every app finding once a corporate Windows device is simulated", () => {
+    const sim = computeSimulation(demoTenantData(), { selectedGroupIds: ["grp-corp-win"], platform: "windows" });
+    const apps = sim.apps;
+    expect(apps?.unavailable).toBeUndefined();
+    // Install + uninstall on one app object.
+    expect(apps?.conflicts.map((c) => c.displayName)).toEqual(["Legacy VPN Client"]);
+    // Required with Available, and one intent through two groups.
+    expect(apps?.redundant.map((r) => `${r.kind}:${r.displayName}`).sort()).toEqual([
+      "multiple-groups:Microsoft Teams",
+      "required-and-available:Notepad++",
+    ]);
+    // Two products that each exist as two app objects; 7-Zip pulls both ways.
+    expect(apps?.sameProduct.map((f) => `${f.product}:${f.opposing}`)).toEqual([
+      "7 zip:true",
+      "adobe acrobat reader dc:false",
+    ]);
+    // A line-of-business .msi, beside Win32 apps.
+    expect(apps?.lobMsi.map((l) => l.displayName)).toEqual(["Contoso ERP Client"]);
+    expect(apps?.lobMixedWithWin32).toBe(true);
+    // The VPN client is carved out until the device matches the include filter.
+    expect(apps?.excluded.map((a) => a.displayName)).toEqual(["GlobalProtect"]);
+    const eligible = computeSimulation(demoTenantData(), {
+      selectedGroupIds: ["grp-corp-win"],
+      platform: "windows",
+      deviceFilterIds: ["flt-vpn-eligible"],
+    });
+    expect(eligible.apps?.apps.map((a) => a.displayName)).toContain("GlobalProtect");
+  });
+
+  it("has apps on every platform", () => {
+    for (const [platform, group] of [
+      ["macos", "grp-mac"],
+      ["ios", "grp-ios"],
+      ["android", "grp-android"],
+    ] as const) {
+      const sim = computeSimulation(demoTenantData(), { selectedGroupIds: [group], platform });
+      expect(sim.apps?.apps.length, platform).toBeGreaterThan(0);
+    }
+  });
 });

@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import type { PolicyKind } from "@intune-preflight/shared";
 import type { BaselineScope } from "./SimulationBaselinePanel.tsx";
 import type { PolicyTypeGroup, VisiblePolicy } from "./diagram/policyGroups.ts";
-import { STATUS_DOT, isPayloadKind, kindCountLabel, policyPayloadLabel } from "./diagram/theme.ts";
+import { STATUS_DOT, isAppKind, isPayloadKind, kindCountLabel, policyPayloadLabel } from "./diagram/theme.ts";
 
 /**
  * One policy type's policies, over the diagram, below `lg`.
@@ -99,9 +99,11 @@ export function PolicyPopOut({
             onClick={() => onOpenBaseline({ kind: group.kind as PolicyKind, label: `${group.label} policies` })}
             className="flex w-full items-center gap-2 border-b border-ink-800 px-4 py-2.5 text-left text-[11px] text-emerald-300 transition-colors hover:bg-ink-800/60"
           >
-            {isPayloadKind(group.kind)
-              ? `View all ${group.count} ${group.count === 1 ? "script" : "scripts"} in the merged baseline`
-              : `View all ${settings} settings from ${group.label}`}
+            {isAppKind(group.kind)
+              ? `View ${group.label} in the Apps list`
+              : isPayloadKind(group.kind)
+                ? `View all ${group.count} ${group.count === 1 ? "script" : "scripts"} in the merged baseline`
+                : `View all ${settings} settings from ${group.label}`}
             <span aria-hidden>↗</span>
           </button>
         )}
@@ -127,7 +129,13 @@ function PolicyRow({ policy, onOpen }: { policy: VisiblePolicy; onOpen?: (scope:
           {policy.name}
         </span>
         <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-slate-500">
-          <span className="tabular-nums">{policyPayloadLabel(policy.kind, policy.settingsCount)}</span>
+          {policy.section ? (
+            <span className="font-medium" style={{ color: policy.section.color }}>
+              {policy.section.label}
+            </span>
+          ) : (
+            <span className="tabular-nums">{policyPayloadLabel(policy.kind, policy.settingsCount)}</span>
+          )}
           {policy.status === "excluded" && (
             <span className="text-rose-300">{policy.excludedReason ?? "excluded for this selection"}</span>
           )}
@@ -146,7 +154,7 @@ function PolicyRow({ policy, onOpen }: { policy: VisiblePolicy; onOpen?: (scope:
   return (
     <button
       onClick={() => onOpen({ policyId: policy.id, label: policy.name })}
-      title="Open this policy's settings in the merged baseline"
+      title={isAppKind(policy.kind) ? "Open it in the Apps list" : "Open this policy's settings in the merged baseline"}
       className="flex w-full items-start gap-2 border-b border-ink-800 px-4 py-3 text-left transition-colors hover:bg-ink-800/60"
     >
       {body}

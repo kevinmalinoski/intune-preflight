@@ -14,7 +14,8 @@ import type { BaselineScope } from "./SimulationBaselinePanel.tsx";
 import { PolicyPopOut } from "./PolicyPopOut.tsx";
 import { toggled } from "./collections.ts";
 import { isCompact, subscribeLayout } from "./viewport.ts";
-import { buildGraph } from "./diagram/buildGraph.ts";
+import { appObjects, countAvailableOnly } from "./appsView.ts";
+import { buildGraph, type DiagramContent } from "./diagram/buildGraph.ts";
 import { EndpointStackNode, GroupNode, PolicyNode, PolicyTypeNode } from "./diagram/nodes.tsx";
 import {
   AUTOPILOT_COLOR,
@@ -26,6 +27,8 @@ import {
   KIND_COLOR,
   KIND_LABEL,
   KIND_ORDER,
+  appKind,
+  isAppKind,
   STATUS_DOT,
 } from "./diagram/theme.ts";
 
@@ -44,7 +47,16 @@ const nodeTypes = {
 // diagram/buildGraph.ts (the layout engine that turns a simulation into nodes
 // and edges).
 
-function Legend({ compact }: { compact: boolean }) {
+function Legend({
+  compact,
+  content,
+  appKinds,
+}: {
+  compact: boolean;
+  content: DiagramContent;
+  /** The app types this endpoint actually gets -- ten are possible, and a key for seven absent ones is noise. */
+  appKinds: Set<string>;
+}) {
   // A key for the policy colors only. Group nodes label themselves (Selected /
   // Always applies / Implied / Hidden badges), so they don't belong here.
   // Derived from the same theme the nodes render with, in the same order the
@@ -53,10 +65,17 @@ function Legend({ compact }: { compact: boolean }) {
   // here by hand.
   const items: { color: string; label: string }[] = [
     { color: AUTOPILOT_COLOR, label: "Autopilot enrollment" },
-    ...KIND_ORDER.map((kind) => ({ color: KIND_COLOR[kind], label: KIND_LABEL[kind] })),
+    // Only the kinds the canvas is drawing right now: the diagram shows
+    // policies or apps, and a key for the other half would describe nothing.
+    ...KIND_ORDER.filter((kind) => (content === "apps" ? appKinds.has(kind) : !isAppKind(kind))).map((kind) => ({
+      color: KIND_COLOR[kind],
+      label: KIND_LABEL[kind],
+    })),
     { color: STATUS_DOT.excluded, label: "Excluded" },
-    { color: STATUS_DOT.unassigned, label: "Unassigned (Waitlist)" },
+    // The waitlist holds policies; there is no such thing as an unassigned app here.
+    ...(content === "apps" ? [] : [{ color: STATUS_DOT.unassigned, label: "Unassigned (Waitlist)" }]),
   ];
+  const heading = content === "apps" ? "App types" : "Policy types";
   const [open, setOpen] = useState(false);
 
   const chips = (
@@ -77,7 +96,7 @@ function Legend({ compact }: { compact: boolean }) {
       <div className="absolute bottom-3 left-3 z-10 flex max-w-[calc(100%-5rem)] flex-col items-start gap-2">
         {open && (
           <div className="rounded-lg border border-ink-700 bg-ink-900/95 px-3 py-2 shadow-2xl backdrop-blur">
-            <div className="mb-1 text-[9px] font-medium uppercase tracking-wide text-slate-500">Policy types</div>
+            <div className="mb-1 text-[9px] font-medium uppercase tracking-wide text-slate-500">{heading}</div>
             {chips}
           </div>
         )}
@@ -95,7 +114,7 @@ function Legend({ compact }: { compact: boolean }) {
 
   return (
     <div className="pointer-events-none absolute bottom-3 left-3 z-10 max-w-xs rounded-lg border border-ink-700 bg-ink-900/90 px-3 py-2 backdrop-blur">
-      <div className="mb-1 text-[9px] font-medium uppercase tracking-wide text-slate-500">Policy types</div>
+      <div className="mb-1 text-[9px] font-medium uppercase tracking-wide text-slate-500">{heading}</div>
       {chips}
     </div>
   );
@@ -107,9 +126,23 @@ export function SimulationDiagram({
   onOpenBaseline,
   focus = false,
   baselineOpen = false,
+  content: requestedContent = "policies",
+  onContentChange,
+  showAvailableApps = false,
+  onShowAvailableAppsChange,
 }: {
   simulation: SimulationResult;
   deviceFilterNames?: string[];
+  /**
+   * Whether the canvas draws the endpoint's policies or its apps. Owned by the
+   * simulator, because the rail's Baseline / Apps tabs are the same choice and
+   * the two have to move together.
+   */
+  content?: DiagramContent;
+  onContentChange?: (content: DiagramContent) => void;
+  /** Whether Available-only apps are drawn. Shared with the Apps list, which has the same switch. */
+  showAvailableApps?: boolean;
+  onShowAvailableAppsChange?: (show: boolean) => void;
   onOpenBaseline?: (scope: BaselineScope) => void;
   /** Focus mode: the diagram has the whole window and the pickers are gone. */
   focus?: boolean;
@@ -117,6 +150,24 @@ export function SimulationDiagram({
   baselineOpen?: boolean;
 }) {
   const compact = useSyncExternalStore(subscribeLayout, isCompact, () => false);
+  // Apps can only be drawn where they were read. Without app data, or with the
+  // permission missing, the canvas stays on policies whatever was asked for --
+  // an empty right-hand column would look like a device that gets nothing.
+  const appsDrawable = !!simulation.apps && !simulation.apps.unavailable;
+  const content: DiagramContent = appsDrawable ? requestedContent : "policies";
+  const availableOnly = useMemo(
+    () => (simulation.apps && !simulation.apps.unavailable ? countAvailableOnly(simulation.apps) : 0),
+    [simulation.apps]
+  );
+  const appKinds = useMemo(
+    () =>
+      new Set(
+        (simulation.apps ? appObjects(simulation.apps) : [])
+          .filter((o) => showAvailableApps || o.intent !== "available")
+          .map((o) => appKind(o.app.family))
+      ),
+    [simulation.apps, showAvailableApps]
+  );
   // Dragging nodes and panning the canvas are the same gesture on a touch
   // screen, and panning is the one you actually want -- a tap still hides a
   // group, which is the only thing a node needs to be good for here.
@@ -181,6 +232,8 @@ export function SimulationDiagram({
         simulation,
         deviceFilterNames,
         hiddenGroupIds,
+        content,
+        showAvailableApps,
         grouped,
         compact,
         expandedKinds,
@@ -196,6 +249,8 @@ export function SimulationDiagram({
       simulation,
       deviceFilterNames,
       hiddenGroupIds,
+      content,
+      showAvailableApps,
       grouped,
       compact,
       expandedKinds,
@@ -345,7 +400,7 @@ export function SimulationDiagram({
         <Background color="#1e293b" gap={28} size={1} />
         <Controls showInteractive={false} position="bottom-right" />
       </ReactFlow>
-      <Legend compact={compact} />
+      <Legend compact={compact} content={content} appKinds={appKinds} />
       {popped && (
         <PolicyPopOut
           group={popped}
@@ -355,15 +410,59 @@ export function SimulationDiagram({
         />
       )}
       <div className="absolute left-3 top-3 z-10 flex flex-col items-start gap-2">
+        {/* Only where there are apps to switch to. Mirrors the rail's tabs, and
+            is the only way to switch where there is no rail (below `lg`, and in
+            focus mode). */}
+        {appsDrawable && onContentChange && (
+          <div
+            role="group"
+            aria-label="What the diagram shows"
+            className="flex overflow-hidden rounded-md border border-ink-700 bg-ink-900/90 backdrop-blur"
+          >
+            {(["policies", "apps"] as const).map((option) => (
+              <button
+                key={option}
+                onClick={() => onContentChange(option)}
+                aria-pressed={content === option}
+                title={
+                  option === "policies" ? "Draw the policies this endpoint gets" : "Draw the apps this endpoint gets"
+                }
+                className={`px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                  content === option
+                    ? "bg-sky-500/20 text-sky-200"
+                    : "text-slate-400 hover:bg-ink-800 hover:text-slate-200"
+                }`}
+              >
+                {option === "policies" ? "Policies" : "Apps"}
+              </button>
+            ))}
+          </div>
+        )}
         <button
           onClick={() => setGrouped((g) => !g)}
           title={
-            grouped ? "Zoom in: show every policy as its own node" : "Back to the summary: one bubble per policy type"
+            content === "apps"
+              ? grouped
+                ? "Zoom in: show every app as its own node"
+                : "Back to the summary: one bubble per app type"
+              : grouped
+                ? "Zoom in: show every policy as its own node"
+                : "Back to the summary: one bubble per policy type"
           }
           className="rounded-md border border-ink-700 bg-ink-900/90 px-2.5 py-1 text-[11px] font-medium text-slate-200 backdrop-blur hover:bg-ink-800"
         >
           {grouped ? "⧉ Detail view" : "▤ Group by type"}
         </button>
+        {content === "apps" && onShowAvailableAppsChange && availableOnly > 0 && (
+          <button
+            onClick={() => onShowAvailableAppsChange(!showAvailableApps)}
+            aria-pressed={showAvailableApps}
+            title="Available apps are only offered in Company Portal, so they are hidden until asked for"
+            className="rounded-md border border-ink-700 bg-ink-900/90 px-2.5 py-1 text-[11px] text-slate-300 backdrop-blur hover:bg-ink-800"
+          >
+            {showAvailableApps ? `Hide Available (${availableOnly})` : `Show Available (${availableOnly})`}
+          </button>
+        )}
         {hiddenGroupIds.size > 0 ? (
           <button
             onClick={() => setHiddenGroupIds(new Set())}
@@ -375,7 +474,7 @@ export function SimulationDiagram({
           // Desktop only: it costs canvas a phone hasn't got, and "click" is
           // the wrong verb on the device that can least afford the advice.
           <div className="pointer-events-none hidden rounded-md border border-ink-700/60 bg-ink-900/70 px-2.5 py-1 text-[10px] text-slate-500 backdrop-blur lg:block">
-            Tip: click a group to hide its policies
+            Tip: click a group to hide its {content === "apps" ? "apps" : "policies"}
           </div>
         )}
       </div>

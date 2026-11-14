@@ -1,6 +1,5 @@
 import type {
   AssignmentFilter,
-  AssignmentFilterRef,
   AssignmentReport,
   AssignmentReportRow,
   BaselineSetting,
@@ -21,28 +20,24 @@ import type {
   SimulationResult,
   UnassignedPolicy,
 } from "@intune-preflight/shared";
-import { resolutionRuleLabel, UNASSIGNED_SOURCE_GROUP } from "@intune-preflight/shared";
+import {
+  APP_DETECTION_METHOD_LABEL,
+  APP_FINDING_RULES,
+  APP_FAMILY_LABEL,
+  APP_LOB_LEARN_URL,
+  appIntentLabel,
+  resolutionRuleLabel,
+  UNASSIGNED_SOURCE_GROUP,
+} from "@intune-preflight/shared";
 import type { TenantData } from "./tenantData.js";
+import { appPlatforms, simulateApps } from "./apps.js";
+import { passesAssignmentFilter } from "./assignmentFilter.js";
 import { ruleImplies, VIRTUAL_GROUP_ALL_DEVICES, VIRTUAL_GROUP_ALL_USERS } from "./normalize.js";
-import { rowsToXlsx } from "./xlsx.js";
+import { rowsToXlsx, sheetsToXlsx } from "./xlsx.js";
 
 /** A policy with no include assignment is deployed nowhere -- not to any group, nor All Devices/All Users. */
 function isUnassigned(policy: IntunePolicy): boolean {
   return policy.assignedGroupIds.length === 0;
-}
-
-/**
- * Whether a single group assignment's filter allows it to apply, given which
- * filter(s) (if any) are selected as representing the simulated device. A
- * device can match more than one Assignment Filter at once (e.g. "Kiosk
- * Devices" AND "Corporate Owned"), so this checks set membership rather than
- * equality. A missing entry means the assignment has no filter, so it always
- * passes.
- */
-function passesAssignmentFilter(filterRef: AssignmentFilterRef | undefined, selectedFilterIds: string[]): boolean {
-  if (!filterRef) return true;
-  if (filterRef.filterType === "exclude") return !selectedFilterIds.includes(filterRef.filterId);
-  return selectedFilterIds.includes(filterRef.filterId);
 }
 
 /**
@@ -134,7 +129,18 @@ function mergeSettings(policies: IntunePolicy[]): {
       sourceKind: e.sourceKind,
     }));
     if (disagrees && rule) {
-      layered.push({ ...common, rule, values: contributors });
+      // List a layered setting's values in ascending natural order (24H2, 25H2,
+      // 26H2; ISO dates oldest first), ties broken by policy name. Merge order
+      // is just the order Graph happened to return the policies, which reads as
+      // random next to a rule called "latest version". Ordering is NOT ranking:
+      // no winner is implied, the list is only made scannable. Sorted here, not
+      // in a renderer, so the exports agree with the screen.
+      const ordered = [...contributors].sort(
+        (a, b) =>
+          String(a.value).localeCompare(String(b.value), undefined, { numeric: true, sensitivity: "base" }) ||
+          a.sourcePolicyName.localeCompare(b.sourcePolicyName, undefined, { numeric: true, sensitivity: "base" })
+      );
+      layered.push({ ...common, rule, values: ordered });
     } else if (disagrees) {
       conflicts.push({ ...common, values: contributors });
     } else if (entries.length > 1) {
@@ -183,6 +189,7 @@ export function listGroupSummaries(data: TenantData): GroupSummary[] {
       (g) =>
         !g.isVirtual ||
         data.policies.some((p) => p.assignedGroupIds.includes(g.id)) ||
+        (data.apps ?? []).some((a) => a.assignments.some((x) => !x.exclude && x.groupId === g.id)) ||
         data.autopilotProfiles.some((a) => a.assignedGroupIds.includes(g.id))
     )
     .map((group) => {
@@ -205,6 +212,11 @@ export function listGroupSummaries(data: TenantData): GroupSummary[] {
         )
       )
         platforms.add("windows");
+      // A group that only delivers apps is still one an admin may simulate, so
+      // it has to count toward its apps' platforms or the picker would hide it.
+      for (const app of data.apps ?? []) {
+        if (app.assignments.some((a) => a.groupId === group.id)) for (const p of appPlatforms(app)) platforms.add(p);
+      }
       return {
         id: group.id,
         displayName: group.displayName,
@@ -623,6 +635,10 @@ export function computeSimulation(
     }
   }
 
+  // Apps resolve against the same groups and device filters as policies, but
+  // never enter the merged baseline -- see apps.ts.
+  const apps = simulateApps(data, { groupIds, platform: options.platform, deviceFilterIds });
+
   const appliedPolicyObjs = candidatePolicies.filter((p) => policies.some((sp) => sp.id === p.id));
   const { settings, conflicts, layered, overlaps } = mergeSettings(appliedPolicyObjs);
 
@@ -663,6 +679,7 @@ export function computeSimulation(
     layered: platformLayered,
     overlaps: platformOverlaps,
     crossModel,
+    ...(apps ? { apps } : {}),
   };
 }
 
@@ -845,7 +862,161 @@ export function simulationToCsv(simulation: SimulationResult): string {
   return toCsv(simulationRows(simulation));
 }
 
-/** The same baseline as an .xlsx workbook -- the format mobile Excel will open. */
+/**
+ * The apps half of a simulation as rows: one per (app, intent), the ones that
+ * land first and the carved-out ones after, in the order the Apps view lists
+ * them. Null when there is nothing to tabulate -- no app data in the source, or
+ * a tenant whose apps could not be read -- so a caller can leave the sheet out
+ * rather than ship an empty one that reads as "this device gets no apps".
+ */
+function simulationAppRows(simulation: SimulationResult): string[][] | null {
+  const apps = simulation.apps;
+  if (!apps || apps.unavailable) return null;
+  const header = [
+    "App",
+    "Publisher",
+    "App Type",
+    "Family",
+    "Intent",
+    "Applies",
+    "Delivered Via",
+    "Not Applied Because",
+    // Blank unless the app also lands under another intent. Names the other
+    // intents and nothing more: like "Resolution" on the baseline sheet, it
+    // reports the overlap and leaves the outcome to Intune's documented rule.
+    "Also Assigned As",
+    // "yes" when this app lands both to install and to uninstall.
+    "Intent Conflict",
+    // Why an assignment on this row is doing no work, when one is.
+    "Redundant",
+    // Other app objects that look like the same product. A name match, so a
+    // prompt to check rather than a finding to act on unread.
+    "Same Product As",
+    // Microsoft's packaging guidance, where it applies to this row.
+    "Recommendation",
+    // How Intune decides the app is installed: the app's own detection rule,
+    // as configured. Several rules must ALL pass. A custom script is named as
+    // one and its content is left out.
+    "Detection Method",
+    "Detection Rule",
+    "Without Enrollment",
+  ];
+  const groupName = new Map(simulation.groups.map((g) => [g.id, g.displayName]));
+  const names = (ids: string[]) => ids.map((id) => groupName.get(id) ?? id).join("; ");
+
+  const landedIntents = new Map<string, string[]>();
+  for (const a of apps.apps) landedIntents.set(a.id, [...(landedIntents.get(a.id) ?? []), a.intent]);
+  const conflicted = new Set(apps.conflicts.map((c) => c.appId));
+  const requiredAndAvailable = new Set(
+    apps.redundant.filter((r) => r.kind === "required-and-available").map((r) => r.appId)
+  );
+  const multiGroup = new Set(
+    apps.redundant.filter((r) => r.kind === "multiple-groups").map((r) => `${r.appId}:${r.intent}`)
+  );
+  const lobMsi = new Set(apps.lobMsi.map((l) => l.appId));
+  const sameProduct = new Map<string, string>();
+  for (const finding of apps.sameProduct) {
+    for (const app of finding.apps) {
+      const others = finding.apps.filter((o) => o.appId !== app.appId).map((o) => o.displayName);
+      sameProduct.set(app.appId, `${others.join("; ")}${finding.opposing ? " (opposing intents)" : ""}`);
+    }
+  }
+
+  const rows = [...apps.apps, ...apps.excluded].map((a) => {
+    const landed = a.status === "included";
+    const reason = landed
+      ? ""
+      : a.excludedByFilter
+        ? `Assignment filter “${a.excludedByFilter.filterName}” (${a.excludedByFilter.filterType})`
+        : `Excluded group: ${names(a.excludedViaGroupIds)}`;
+    const also = landed
+      ? (landedIntents.get(a.id) ?? [])
+          .filter((i) => i !== a.intent)
+          .map((i) => appIntentLabel(i as typeof a.intent))
+          .join("; ")
+      : "";
+    const redundant: string[] = [];
+    // The Available assignment is the surplus one, so it carries the note.
+    if (landed && a.intent === "available" && requiredAndAvailable.has(a.id)) redundant.push("Already Required");
+    if (landed && multiGroup.has(`${a.id}:${a.intent}`)) redundant.push("Delivered by more than one group");
+    return [
+      a.displayName,
+      a.publisher ?? "",
+      a.appType,
+      APP_FAMILY_LABEL[a.family].tag,
+      appIntentLabel(a.intent),
+      landed ? "yes" : "no",
+      names(a.viaGroupIds),
+      reason,
+      also,
+      landed && conflicted.has(a.id) ? "yes" : "no",
+      redundant.join("; "),
+      landed ? (sameProduct.get(a.id) ?? "") : "",
+      landed && lobMsi.has(a.id) ? `Convert to a Win32 app (${APP_LOB_LEARN_URL})` : "",
+      [...new Set((a.detection ?? []).map((d) => APP_DETECTION_METHOD_LABEL[d.method]))].join(" + "),
+      (a.detection ?? []).map((d) => d.summary).join(" AND "),
+      a.withoutEnrollment ? "yes" : "no",
+    ];
+  });
+  return [header, ...rows];
+}
+
+/**
+ * How every app finding is detected, as a sheet. The rows come straight from
+ * APP_FINDING_RULES, which is what the engine's own comments and the UI's
+ * explanations are written against -- so the definitions that travel with an
+ * exported workbook are the ones that produced its flags.
+ */
+function appFindingRows(): string[][] {
+  return [
+    ["Finding", "Column", "Kind", "Detected when", "What it means", "What to do", "Microsoft reference"],
+    ...APP_FINDING_RULES.map((r) => [r.finding, r.column, r.kind, r.detectedWhen, r.meaning, r.action, r.reference]),
+    [],
+    [
+      "Scope",
+      "",
+      "",
+      "Everything on the Apps sheet is for ONE simulated endpoint: the groups, platform and Assignment Filters selected when it was exported. A finding means that endpoint is affected; it is not a tenant-wide audit.",
+    ],
+    [
+      "Not read",
+      "",
+      "",
+      "Win32 supersedence and dependencies, app protection and app configuration policies, and install status. Whether a group holds users or devices is not known, so user-versus-device rules are stated, not applied.",
+    ],
+  ];
+}
+
+const APPS_SHEETS = (appRows: string[][]) => [
+  { name: "Apps", rows: appRows },
+  { name: "Finding definitions", rows: appFindingRows() },
+];
+
+/** The simulated endpoint's apps as CSV, or null when there is no app data to export. */
+export function simulationAppsToCsv(simulation: SimulationResult): string | null {
+  const rows = simulationAppRows(simulation);
+  return rows ? toCsv(rows) : null;
+}
+
+/**
+ * The simulated endpoint's apps as a workbook of their own: the Apps sheet and
+ * the detection logic behind its flags. Null when there is no app data.
+ */
+export function simulationAppsToXlsx(simulation: SimulationResult): Uint8Array | null {
+  const rows = simulationAppRows(simulation);
+  return rows ? sheetsToXlsx(APPS_SHEETS(rows)) : null;
+}
+
+/**
+ * The same baseline as an .xlsx workbook -- the format mobile Excel will open.
+ * A workbook can hold what a CSV cannot, so the endpoint's apps ride along as a
+ * second sheet whenever the simulation has them, with a third explaining how
+ * their flags are detected.
+ */
 export function simulationToXlsx(simulation: SimulationResult): Uint8Array {
-  return rowsToXlsx(simulationRows(simulation), { sheetName: "Endpoint baseline" });
+  const appRows = simulationAppRows(simulation);
+  return sheetsToXlsx([
+    { name: "Endpoint baseline", rows: simulationRows(simulation) },
+    ...(appRows ? APPS_SHEETS(appRows) : []),
+  ]);
 }

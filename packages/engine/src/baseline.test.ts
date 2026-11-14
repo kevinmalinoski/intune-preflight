@@ -251,6 +251,24 @@ describe("computeSimulation", () => {
     expect(row?.sourcePolicyName).toBe("FU 24H2");
   });
 
+  it("lists a layered setting's values in ascending natural order, whatever order the policies loaded in", () => {
+    // Graph returned 24H2, 26H2, 25H2 on a real tenant, and the list read as
+    // unsorted. The order is for scanning only -- it ranks nothing.
+    const fu = (v: string) => setting("windowsFeatureUpdateProfile:featureUpdateVersion", v, "latest-version-wins");
+    const data = tenant({
+      groups: [group("g1")],
+      policies: [
+        policy({ id: "fu-24h2", displayName: "FU 24H2", assignedGroupIds: ["g1"], settings: [fu("24H2")] }),
+        policy({ id: "fu-26h2", displayName: "FU 26H2", assignedGroupIds: ["g1"], settings: [fu("26H2")] }),
+        policy({ id: "fu-25h2", displayName: "FU 25H2", assignedGroupIds: ["g1"], settings: [fu("25H2")] }),
+      ],
+    });
+    const sim = computeSimulation(data, { selectedGroupIds: ["g1"], platform: "windows" });
+
+    expect(sim.layered[0]?.values.map((v) => v.value)).toEqual(["24H2", "25H2", "26H2"]);
+    expect(sim.layered[0]?.values.map((v) => v.sourcePolicyName)).toEqual(["FU 24H2", "FU 25H2", "FU 26H2"]);
+  });
+
   it("reports compliance policies that disagree as layered, under the most-restrictive rule", () => {
     const data = tenant({
       groups: [group("g1")],

@@ -1,4 +1,11 @@
-import type { AssignmentFilter, AutopilotProfile, IntuneGroup, IntunePolicy } from "@intune-preflight/shared";
+import type {
+  AppsUnavailable,
+  AssignmentFilter,
+  AutopilotProfile,
+  IntuneApp,
+  IntuneGroup,
+  IntunePolicy,
+} from "@intune-preflight/shared";
 
 /**
  * Everything the engine needs to compute a baseline: the whole tenant's
@@ -15,6 +22,13 @@ export interface TenantData {
   groups: IntuneGroup[];
   autopilotProfiles: AutopilotProfile[];
   assignmentFilters: AssignmentFilter[];
+  /**
+   * Assigned apps. Optional because apps sit outside the baseline: a source
+   * with no app data (the demo tenant) simply has no Apps view.
+   */
+  apps?: IntuneApp[];
+  /** Set instead of `apps` when a real tenant's apps could not be read. Not a warning -- see AppsUnavailable. */
+  appsUnavailable?: AppsUnavailable;
   /** Non-empty when the load was incomplete (a category or item failed after retries). */
   warnings?: string[];
 }

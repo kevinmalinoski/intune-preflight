@@ -1,6 +1,8 @@
 import type { SimulationResult } from "@intune-preflight/shared";
 import { filterExclusionReason } from "@intune-preflight/shared";
-import { KIND_COLOR, KIND_LABEL, KIND_ORDER, type PolicyStatus } from "./theme.ts";
+import { appIntentLabel } from "@intune-preflight/shared";
+import { APP_INTENT_COLOR, appObjects } from "../appsView.ts";
+import { KIND_COLOR, KIND_LABEL, KIND_ORDER, appKind, type PolicyStatus } from "./theme.ts";
 
 /**
  * Which policies a simulated endpoint gets, and how they group by type.
@@ -34,6 +36,13 @@ export type VisiblePolicy = {
   settingsCount: number;
   /** Ids of the still-visible groups bringing this policy in. */
   sources: string[];
+  /**
+   * A heading this entry sits under inside its type's bubble. Apps only: a
+   * type's apps are sectioned Required / Available / Uninstall. Entries arrive
+   * already ordered by section, so a renderer starts a new heading wherever the
+   * label changes.
+   */
+  section?: { label: string; color: string };
 };
 
 /** Policies of one kind, in the order the type bubbles are laid out. */
@@ -53,7 +62,11 @@ export type PolicyTypeGroup = {
  * never hidden this way, which is why the emptiness check is on
  * `sourceGroupIds` rather than on the filtered list.
  */
-export function visiblePolicies(simulation: SimulationResult, hiddenGroupIds: Set<string>): VisiblePolicy[] {
+export function visiblePolicies(
+  simulation: SimulationResult,
+  hiddenGroupIds: Set<string>,
+  options: { showAvailableApps?: boolean } = {}
+): VisiblePolicy[] {
   const visible: VisiblePolicy[] = [];
   for (const p of [...simulation.policies, ...simulation.excludedPolicies]) {
     const excluded = simulation.excludedPolicies.includes(p);
@@ -75,6 +88,29 @@ export function visiblePolicies(simulation: SimulationResult, hiddenGroupIds: Se
       // profile deduped under 24H2, say) still reports its real count.
       settingsCount: p.settingsCount,
       sources: visibleSources,
+    });
+  }
+  // Apps join the same list under their `app:<type>` kinds, by the same rule:
+  // an app stays while one group delivering it is still visible. They carry no
+  // settings. Each app OBJECT is one entry, under its primary intent (see
+  // appObjects), and they arrive ordered Required, Uninstall, Available so a
+  // type's bubble can section them. Available-only apps are left out unless
+  // asked for: an offer changes nothing on the device by itself.
+  for (const { app: a, intent, excluded, viaGroupIds } of simulation.apps ? appObjects(simulation.apps) : []) {
+    if (intent === "available" && !options.showAvailableApps) continue;
+    const visibleSources = viaGroupIds.filter((id) => !hiddenGroupIds.has(id));
+    if (visibleSources.length === 0) continue;
+    visible.push({
+      id: `${appKind(a.family)}:${a.id}`,
+      name: a.displayName,
+      kind: appKind(a.family),
+      status: excluded ? "excluded" : "included",
+      excludedReason: a.excludedByFilter
+        ? filterExclusionReason(a.excludedByFilter.filterName, a.excludedByFilter.filterType)
+        : undefined,
+      settingsCount: 0,
+      sources: visibleSources,
+      section: { label: appIntentLabel(intent), color: APP_INTENT_COLOR[intent] },
     });
   }
   return visible;

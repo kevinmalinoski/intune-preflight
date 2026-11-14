@@ -1,5 +1,13 @@
-import type { CspSetting, IntuneGroup, IntunePolicy } from "@intune-preflight/shared";
+import type {
+  AppAssignment,
+  AppDetection,
+  CspSetting,
+  IntuneApp,
+  IntuneGroup,
+  IntunePolicy,
+} from "@intune-preflight/shared";
 import type { TenantData } from "../tenantData.js";
+import { appFamilyFromOdataType, appPlatformFromOdataType, appTypeLabel, isLobMsiType } from "../apps.js";
 import { cspAreaForDefinition, VIRTUAL_GROUP_ALL_DEVICES, VIRTUAL_GROUP_ALL_USERS } from "../normalize.js";
 
 // Synthetic sample tenant for demo mode -- no real tenant identifiers, and no
@@ -20,6 +28,8 @@ import { cspAreaForDefinition, VIRTUAL_GROUP_ALL_DEVICES, VIRTUAL_GROUP_ALL_USER
 //   * legacy Endpoint Security intents  (the older template model)
 //   * a Policy Waitlist     (unassigned OIB rings/policies)
 //   * Autopilot v1 + v2
+//   * apps                  (see `apps` below: one of each finding the Apps
+//                            view reports, on plausible app names)
 // The demoTenant test asserts those cases still hold as the engine evolves.
 
 const ALL_DEVICES = VIRTUAL_GROUP_ALL_DEVICES.id;
@@ -978,9 +988,201 @@ const policies: IntunePolicy[] = [
   },
 ];
 
+// Apps. Authored, like the assignment layer: there is no community baseline of
+// app assignments to quote, so these are ordinary, recognisable titles arranged
+// to produce each thing the Apps view reports exactly once or twice --
+//   * an install + uninstall conflict   (Legacy VPN Client: Required for the
+//                                        corporate group, Uninstall for All Devices)
+//   * a redundant Available             (Notepad++: Required AND Available)
+//   * one intent through two groups     (Microsoft Teams)
+//   * the same product as two apps      (Adobe Acrobat Reader: Store + Win32)
+//   * ... with opposing intents         (7-Zip: catalog app installs, an old
+//                                        Win32 package uninstalls)
+//   * a line-of-business .msi           (Contoso ERP Client), beside Win32 apps
+//   * an include filter that carves out (GlobalProtect, VPN-Eligible only)
+//   * every detection method            (file, registry, MSI code, script, Store)
+// The type, family and platform are derived from the Graph type name by the
+// same functions a real load uses, so the demo cannot drift from them.
+const req = (groupId: string, over: Partial<AppAssignment> = {}): AppAssignment => ({
+  intent: "required",
+  groupId,
+  exclude: false,
+  ...over,
+});
+const avail = (groupId: string): AppAssignment => ({ intent: "available", groupId, exclude: false });
+const uninstall = (groupId: string): AppAssignment => ({ intent: "uninstall", groupId, exclude: false });
+const demoApp = (
+  id: string,
+  graphType: string,
+  displayName: string,
+  publisher: string,
+  assignments: AppAssignment[],
+  detection: AppDetection[] = []
+): IntuneApp => {
+  const odataType = `#microsoft.graph.${graphType}`;
+  return {
+    id,
+    displayName,
+    publisher,
+    appType: appTypeLabel(odataType),
+    family: appFamilyFromOdataType(odataType),
+    ...(isLobMsiType(odataType) ? { lobMsi: true } : {}),
+    platform: appPlatformFromOdataType(odataType),
+    assignments,
+    ...(detection.length > 0 ? { detection } : {}),
+  };
+};
+const file = (summary: string): AppDetection => ({ method: "file", summary: `File ${summary}` });
+const registry = (summary: string): AppDetection => ({ method: "registry", summary: `Registry ${summary}` });
+const msi = (code: string): AppDetection => ({ method: "msi", summary: `MSI product code ${code}` });
+const script: AppDetection = { method: "script", summary: "Custom detection script (not exported)" };
+const store = (id: string): AppDetection => ({ method: "store", summary: `Store package ${id}` });
+
+const apps: IntuneApp[] = [
+  // Built in
+  demoApp("app-m365", "officeSuiteApp", "Microsoft 365 Apps for Windows 10 and later", "Microsoft", [req(ALL_DEVICES)]),
+  demoApp("app-edge", "windowsMicrosoftEdgeApp", "Microsoft Edge for Windows 10 and later", "Microsoft", [
+    req(ALL_DEVICES),
+  ]),
+  // Store
+  demoApp(
+    "app-portal",
+    "winGetApp",
+    "Company Portal",
+    "Microsoft Corporation",
+    [req(ALL_DEVICES)],
+    [store("9WZDNCRFJ3PZ")]
+  ),
+  demoApp(
+    "app-acrobat-store",
+    "winGetApp",
+    "Adobe Acrobat Reader DC",
+    "Adobe Inc.",
+    [req(ALL_DEVICES)],
+    [store("XPDP273C0XHQH2")]
+  ),
+  demoApp(
+    "app-vscode",
+    "winGetApp",
+    "Visual Studio Code",
+    "Microsoft Corporation",
+    [avail(ALL_USERS)],
+    [store("XP9KHM4BK9FZ7Q")]
+  ),
+  demoApp(
+    "app-kiosk-browser",
+    "winGetApp",
+    "Kiosk Browser",
+    "Microsoft Corporation",
+    [req("grp-kiosk")],
+    [store("9NGB5S5XG2KP")]
+  ),
+  // Enterprise App Catalog
+  demoApp(
+    "app-7zip-catalog",
+    "win32CatalogApp",
+    "7-Zip (x64)",
+    "Igor Pavlov",
+    [req(ALL_DEVICES)],
+    [
+      registry(
+        "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\7-Zip “DisplayVersion” version ≥ 24.08"
+      ),
+    ]
+  ),
+  // Win32
+  demoApp(
+    "app-7zip-old",
+    "win32LobApp",
+    "7-Zip 23.01",
+    "Igor Pavlov",
+    [uninstall("grp-corp-win")],
+    [file("C:\\Program Files\\7-Zip\\7z.exe version < 24.0")]
+  ),
+  demoApp("app-chrome", "win32LobApp", "Google Chrome", "Google", [req("grp-corp-win")], [script]),
+  demoApp(
+    "app-notepad",
+    "win32LobApp",
+    "Notepad++",
+    "Don Ho",
+    [req("grp-corp-win"), avail(ALL_USERS)],
+    [file("C:\\Program Files\\Notepad++\\notepad++.exe version ≥ 8.6")]
+  ),
+  demoApp(
+    "app-teams",
+    "win32LobApp",
+    "Microsoft Teams",
+    "Microsoft",
+    [req(ALL_DEVICES), req("grp-corp-win")],
+    [script]
+  ),
+  demoApp(
+    "app-acrobat-win32",
+    "win32LobApp",
+    "Adobe Acrobat Reader DC (Win32)",
+    "Adobe Inc.",
+    [avail(ALL_USERS)],
+    [msi("{AC76BA86-7AD7-1033-7B44-AC0F074E4100}")]
+  ),
+  demoApp(
+    "app-vpn-legacy",
+    "win32LobApp",
+    "Legacy VPN Client",
+    "Contoso IT",
+    [req("grp-corp-win"), uninstall(ALL_DEVICES)],
+    [registry("HKEY_LOCAL_MACHINE\\SOFTWARE\\Contoso\\LegacyVPN exists")]
+  ),
+  demoApp(
+    "app-globalprotect",
+    "win32LobApp",
+    "GlobalProtect",
+    "Palo Alto Networks",
+    [req("grp-corp-win", { filter: { filterId: "flt-vpn-eligible", filterType: "include" } })],
+    [msi("{2B0B2B1F-7C0E-4E3A-9C1D-6A1D5E0F4C21}")]
+  ),
+  demoApp(
+    "app-zoom",
+    "win32LobApp",
+    "Zoom Workplace",
+    "Zoom",
+    [avail(ALL_USERS)],
+    [file("C:\\Program Files\\Zoom\\bin\\Zoom.exe exists")]
+  ),
+  demoApp(
+    "app-av-removal",
+    "win32LobApp",
+    "Legacy Antivirus Removal Tool",
+    "Contoso IT",
+    [uninstall(ALL_DEVICES)],
+    [registry("HKEY_LOCAL_MACHINE\\SOFTWARE\\LegacyAV exists")]
+  ),
+  // Line-of-business .msi
+  demoApp(
+    "app-erp",
+    "windowsMobileMSI",
+    "Contoso ERP Client",
+    "Contoso",
+    [req("grp-corp-win")],
+    [msi("{5F1C2A70-93B4-4C5E-8E2B-0D9A7B6C1E33}, version 4.2.0")]
+  ),
+  // Other platforms
+  demoApp("app-mac-defender", "macOSMicrosoftDefenderApp", "Microsoft Defender for Endpoint", "Microsoft", [
+    req("grp-mac"),
+  ]),
+  demoApp("app-mac-portal", "macOSPkgApp", "Company Portal", "Microsoft", [req("grp-mac")]),
+  demoApp("app-ios-outlook", "iosVppApp", "Microsoft Outlook", "Microsoft Corporation", [req("grp-ios")]),
+  demoApp("app-ios-authenticator", "iosStoreApp", "Microsoft Authenticator", "Microsoft Corporation", [
+    avail(ALL_USERS),
+  ]),
+  demoApp("app-android-outlook", "androidManagedStoreApp", "Microsoft Outlook", "Microsoft Corporation", [
+    req("grp-android"),
+  ]),
+];
+
 const demoData: TenantData = {
   policies,
   groups,
+  apps,
   autopilotProfiles: [
     {
       id: "ap-win11",

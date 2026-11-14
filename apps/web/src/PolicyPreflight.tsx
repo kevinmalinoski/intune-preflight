@@ -1,4 +1,4 @@
-import { useMemo, useState, type KeyboardEvent } from "react";
+import { useMemo, useState } from "react";
 import type { Platform, UnassignedPolicy } from "@intune-preflight/shared";
 
 const KIND_SHORT: Record<string, string> = {
@@ -11,12 +11,14 @@ const KIND_SHORT: Record<string, string> = {
 };
 
 /**
- * A standalone, independently-collapsible bar for "preflighting" unassigned
- * policies: policies that exist in the tenant but are deployed to no group, so
- * they never surface through normal group selection. Adding one injects it into
- * the simulation ("what would this do if I assigned it to this endpoint?").
- * Kept separate from the endpoint picker so collapsing the picker doesn't hide
- * it, and vice versa.
+ * The Policy Waitlist: policies that exist in the tenant but are assigned to no
+ * group, so they never surface through group selection. Ticking one injects it
+ * into the simulation -- "what would this do if I assigned it here?".
+ *
+ * It is the last section of the Endpoint sidebar, because that is what it is:
+ * one more input to the endpoint, like a group. It used to be a full-width bar
+ * of its own between the inputs and the diagram, where it read as a separate
+ * tool and cost the canvas height every time it was opened.
  */
 export function PolicyPreflight({
   policies,
@@ -55,93 +57,67 @@ export function PolicyPreflight({
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.includes(id));
 
   return (
-    <div className="border-b border-ink-700 bg-ink-900 px-4 py-2">
-      {/* The whole header bar toggles the panel -- a big, forgiving click target. */}
-      <div
-        className={`-mx-4 -mt-2 flex items-center gap-2 px-4 py-2 ${none ? "" : "cursor-pointer hover:bg-ink-800/50 rounded-b-md"} ${open ? "mb-2" : "-mb-2"}`}
+    <div className="shrink-0 border-t border-ink-700">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        disabled={none}
+        aria-expanded={open && !none}
         title="Policies with no group assignment (deployed nowhere in Intune). Add them to simulate what they would do if assigned to this endpoint."
-        {...(none
-          ? {}
-          : {
-              role: "button" as const,
-              tabIndex: 0,
-              "aria-expanded": open,
-              onClick: () => setOpen((o) => !o),
-              onKeyDown: (e: KeyboardEvent) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  setOpen((o) => !o);
-                }
-              },
-            })}
+        className="flex w-full items-center gap-2 px-3 py-2.5 text-left enabled:hover:bg-ink-800/50 disabled:cursor-default"
       >
-        <span className="text-base" aria-hidden>
-          🎫
+        <span
+          className={`shrink-0 text-[10px] text-slate-600 transition-transform ${open && !none ? "rotate-90" : ""}`}
+        >
+          ▶
         </span>
-        <span className="text-sm font-semibold text-orange-300">Policy Waitlist</span>
-        {none ? (
-          <span className="text-xs text-slate-600">— no unassigned policies for this OS</span>
-        ) : (
-          <>
-            <span className="rounded bg-orange-500/15 px-1.5 py-0.5 text-[11px] text-orange-300">
-              {forPlatform.length}
-            </span>
-            {selectedCount > 0 && (
-              <span className="rounded bg-orange-500/25 px-1.5 py-0.5 text-[11px] text-orange-200">
-                {selectedCount} added
-              </span>
-            )}
-            {/* Once something is added, WHICH policies beats the pitch -- the
-                bar is collapsed by default, so this line is the only place the
-                selection is visible without opening it. The pitch is dropped
-                below `lg` rather than shortened: at 375px even "add one to
-                simulate it" truncated mid-word, and half a hint is worse than
-                the title attribute it duplicates. */}
-            <span className="min-w-0 flex-1 truncate text-xs text-slate-500">
-              {selectedCount > 0 ? (
-                <>— {selectedNames}</>
-              ) : (
-                <span className="hidden lg:inline">
-                  — unassigned policies waiting to board; add one to simulate “what if I assigned this?”
-                </span>
-              )}
-            </span>
-          </>
-        )}
+        <span className="min-w-0 flex-1">
+          <span className="block text-xs font-semibold text-orange-300">Policy Waitlist</span>
+          <span className="block truncate text-[10px] text-slate-500">
+            {none
+              ? "No unassigned policies for this OS"
+              : selectedCount > 0
+                ? selectedNames
+                : "What if I assigned these?"}
+          </span>
+        </span>
         {!none && (
-          <span className="ml-auto shrink-0 rounded-md border border-ink-700 px-2.5 py-1 text-xs text-slate-300">
-            {open ? "Collapse ▴" : "Edit ▾"}
+          <span
+            className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] tabular-nums ${
+              selectedCount > 0 ? "bg-orange-500/25 text-orange-200" : "bg-orange-500/15 text-orange-300"
+            }`}
+          >
+            {selectedCount > 0 ? `${selectedCount} of ${forPlatform.length}` : forPlatform.length}
           </span>
         )}
-      </div>
+      </button>
 
       {open && !none && (
-        <div className="mt-2">
-          <div className="mb-1 flex flex-wrap items-center gap-2">
+        <div className="px-3 pb-3">
+          <div className="mb-1 flex items-center gap-1.5">
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search unassigned policies…"
-              className="w-full max-w-md rounded-md border border-ink-700 bg-ink-800 px-2.5 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 focus:border-orange-400 focus:outline-none"
+              placeholder="Search unassigned…"
+              className="min-w-0 flex-1 rounded-md border border-ink-700 bg-ink-800 px-2 py-1.5 text-xs text-slate-200 placeholder:text-slate-500 focus:border-orange-400 focus:outline-none"
             />
             <button
               onClick={() => onSelectMany(visibleIds)}
               disabled={allVisibleSelected}
-              className="shrink-0 rounded-md border border-ink-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-ink-800 disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent"
+              className="shrink-0 rounded-md border border-ink-700 px-2 py-1.5 text-[11px] text-slate-300 hover:bg-ink-800 disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent"
               title={search ? "Add every policy matching the search" : "Add every unassigned policy for this OS"}
             >
-              Select all{search && filtered.length !== forPlatform.length ? ` (${filtered.length})` : ""}
+              All{search && filtered.length !== forPlatform.length ? ` (${filtered.length})` : ""}
             </button>
             <button
               onClick={() => onDeselectMany(forPlatform.map((p) => p.id))}
               disabled={selectedCount === 0}
-              className="shrink-0 rounded-md border border-ink-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-ink-800 disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent"
+              className="shrink-0 rounded-md border border-ink-700 px-2 py-1.5 text-[11px] text-slate-300 hover:bg-ink-800 disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent"
               title="Uncheck every added policy for this OS"
             >
               Clear
             </button>
           </div>
-          <div className="grid max-h-[45vh] grid-cols-1 gap-x-4 overflow-y-auto rounded-md border border-ink-700 sm:grid-cols-2 lg:max-h-40 lg:grid-cols-3">
+          <div className="max-h-[38vh] overflow-y-auto rounded-md border border-ink-700 lg:max-h-56">
             {filtered.map((p) => (
               <label
                 key={p.id}

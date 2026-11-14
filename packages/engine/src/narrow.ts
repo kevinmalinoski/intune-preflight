@@ -124,8 +124,14 @@ export function narrowSimulation(sim: SimulationResult, criteria: BaselineCriter
   // setting has been filtered away would otherwise still be counted in the
   // header and still expand to rows in the export.
   const kept = new Set(settings.map((s) => s.settingId));
+  // Apps go too. A narrowed view is a question about SETTINGS -- one policy's,
+  // or only the conflicts -- and apps have none, so they are not part of any
+  // answer to it. Kept, a "conflicts only" workbook would carry an Apps sheet
+  // listing every app on the device.
+  const { apps: _apps, ...rest } = sim;
+  void _apps;
   return {
-    ...sim,
+    ...rest,
     settings,
     conflicts: sim.conflicts.filter((c) => kept.has(c.settingId)),
     layered: sim.layered.filter((l) => kept.has(l.settingId)),

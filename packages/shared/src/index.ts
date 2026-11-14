@@ -434,6 +434,419 @@ export interface AssignmentReport {
   totals: { policies: number; assigned: number; unassigned: number; groupsTargeted: number };
 }
 
+/**
+ * What an app assignment asks Intune to do with the app. Graph's fourth intent,
+ * `availableWithoutEnrollment`, is folded into "available" with a flag (see
+ * AppAssignment.withoutEnrollment): to an enrolled device it IS an available
+ * assignment, and a preflight only ever simulates an enrolled device.
+ */
+export type AppIntent = "required" | "available" | "uninstall";
+
+/** Section order for anything that lists apps by intent. */
+export const APP_INTENTS: readonly AppIntent[] = ["required", "available", "uninstall"];
+
+export function appIntentLabel(intent: AppIntent): string {
+  switch (intent) {
+    case "required":
+      return "Required";
+    case "available":
+      return "Available";
+    case "uninstall":
+      return "Uninstall";
+  }
+}
+
+/** One assignment edge of an app: an intent, a group, and whether it includes or excludes. */
+export interface AppAssignment {
+  intent: AppIntent;
+  /** Graph's `availableWithoutEnrollment` -- "Available with or without enrollment" in the portal. */
+  withoutEnrollment?: boolean;
+  /** Real group id, or the virtual All Devices / All Users id. */
+  groupId: string;
+  /** True for an exclusion. Exclusions sit under an intent, as they do in the portal. */
+  exclude: boolean;
+  filter?: { filterId: string; filterType: "include" | "exclude" };
+}
+
+/**
+ * Which OS an app installs on. "all" is a web link, which Intune offers on every
+ * platform; "other" is a type this tool can't place, kept out of a
+ * platform-scoped simulation rather than guessed into one.
+ */
+export type AppPlatform = Platform | "all";
+
+/**
+ * How an app is packaged and delivered, reduced to the handful of families an
+ * admin actually thinks in. `appType` is the precise name ("Windows
+ * line-of-business app (MSI)"); this is what a tag or a tally groups by.
+ *
+ * "catalog" is the Enterprise App Catalog (Enterprise App Management); "lob" is
+ * a line-of-business upload on any platform; "package" is a macOS PKG or DMG.
+ * "builtin" is the apps Intune ships its own app type for, with no installer
+ * to upload -- Microsoft 365 Apps, Microsoft Edge, Microsoft Defender. One
+ * family, because there are only ever one or two of each and they are the same
+ * kind of thing: Microsoft's own, configured rather than packaged.
+ */
+export type AppFamily = "win32" | "store" | "catalog" | "lob" | "builtin" | "web" | "vpp" | "package" | "other";
+
+/** Display order for anything that tallies apps by family. */
+export const APP_FAMILIES: readonly AppFamily[] = [
+  "win32",
+  "catalog",
+  "store",
+  "lob",
+  "builtin",
+  "vpp",
+  "package",
+  "web",
+  "other",
+];
+
+/** The short tag for a family, and the name it abbreviates. */
+export const APP_FAMILY_LABEL: Record<AppFamily, { tag: string; name: string }> = {
+  win32: { tag: "Win32", name: "Win32 app (.intunewin)" },
+  catalog: { tag: "EAM", name: "Enterprise App Catalog (Enterprise App Management)" },
+  store: { tag: "Store", name: "Store app" },
+  lob: { tag: "LOB", name: "Line-of-business app" },
+  builtin: { tag: "Built-in", name: "Built-in Microsoft apps" },
+  vpp: { tag: "VPP", name: "Apple volume-purchased app" },
+  package: { tag: "PKG", name: "macOS package (PKG / DMG)" },
+  web: { tag: "Web", name: "Web link" },
+  other: { tag: "Other", name: "Other app type" },
+};
+
+/**
+ * One of the checks Intune uses to decide whether an app is installed -- the
+ * app's own detection rule, as configured on the app in Intune.
+ *
+ * `summary` is the rule in words ("File C:\\Program Files\\7-Zip\\7z.exe exists").
+ * A custom detection script is reported as a script and nothing more: its
+ * content is code, not a rule that reads as one line, and it is never loaded
+ * into the simulation or an export.
+ */
+export interface AppDetection {
+  method: "file" | "registry" | "msi" | "script" | "store" | "other";
+  summary: string;
+}
+
+/** What each detection method is called in an export. */
+export const APP_DETECTION_METHOD_LABEL: Record<AppDetection["method"], string> = {
+  file: "File",
+  registry: "Registry",
+  msi: "MSI product code",
+  script: "Custom script",
+  store: "Store package",
+  other: "Other",
+};
+
+/** An Intune app (deviceAppManagement/mobileApps) that has at least one assignment. */
+export interface IntuneApp {
+  id: string;
+  displayName: string;
+  publisher?: string;
+  /** Human-readable app type, e.g. "Windows app (Win32)". */
+  appType: string;
+  family: AppFamily;
+  /**
+   * True for a Windows line-of-business app uploaded as an .msi
+   * (`windowsMobileMSI`) -- the one type Microsoft's guidance says to repackage
+   * as a Win32 app. See AppLobMsiFinding. Not set for MSIX/AppX line-of-business
+   * apps, which install by a different mechanism and are not part of that advice.
+   */
+  lobMsi?: boolean;
+  /**
+   * How Intune detects the app as installed. Every rule must pass. Absent for
+   * app types that have no configurable detection (Microsoft 365 Apps, Edge,
+   * web links, ...).
+   */
+  detection?: AppDetection[];
+  platform: AppPlatform;
+  assignments: AppAssignment[];
+}
+
+/**
+ * Why the tenant's apps are not in a load. Deliberately NOT a load warning:
+ * warnings mean the BASELINE is incomplete, and apps are not part of the
+ * baseline. A tenant that never granted the apps permission has a complete
+ * baseline and no Apps view, which is a state to explain, not an alarm to raise.
+ */
+export interface AppsUnavailable {
+  /** "permission": Graph refused the read (403). "error": anything else. */
+  reason: "permission" | "error";
+  detail: string;
+}
+
+/** The Graph permission the Apps view needs, named once so every message agrees. */
+export const APPS_GRAPH_PERMISSION = "DeviceManagementApps.Read.All";
+
+/** One app under one intent, as it lands on the simulated endpoint. */
+export interface SimulationApp {
+  id: string;
+  displayName: string;
+  publisher?: string;
+  appType: string;
+  family: AppFamily;
+  /** See IntuneApp.lobMsi. */
+  lobMsi?: boolean;
+  /** See IntuneApp.detection. */
+  detection?: AppDetection[];
+  platform: AppPlatform;
+  intent: AppIntent;
+  /** Set when every assignment delivering it is "available with or without enrollment". */
+  withoutEnrollment?: boolean;
+  status: "included" | "excluded";
+  /** Group ids (within this simulation) whose assignment delivers the app under this intent. */
+  viaGroupIds: string[];
+  /** Group ids (within this simulation) excluded under this intent -- only set when status is "excluded". */
+  excludedViaGroupIds: string[];
+  /** Set when an Assignment Filter is why it doesn't land (see SimulationPolicy.excludedByFilter). */
+  excludedByFilter?: { filterId: string; filterName: string; filterType: "include" | "exclude" };
+}
+
+/** An app's landed intents and the groups behind each, as a finding lists them. */
+export interface AppIntentVia {
+  intent: AppIntent;
+  viaGroupIds: string[];
+}
+
+/**
+ * The three things the Apps view detects, each the counterpart of a settings
+ * finding. The aim they all serve: one product should reach a device once,
+ * under one intent.
+ *
+ *   Conflict     -- one app lands to be installed AND to be uninstalled.
+ *                   (Settings: a conflict.)
+ *   Redundant    -- one app lands under Required and Available, or under one
+ *                   intent through several groups. Nothing is contested; an
+ *                   assignment is doing no work. (Settings: an overlap.)
+ *   Same product -- DIFFERENT app objects that look like one product. Intune
+ *                   never compares these, so it reports nothing however they
+ *                   are assigned. (Settings: a cross-model collision.)
+ */
+
+/**
+ * One app reaching the endpoint both to be installed (Required or Available)
+ * and to be uninstalled, with no exclusion keeping the two apart.
+ *
+ * Intune resolves this by a documented table rather than refusing to act --
+ * Required always beats Uninstall -- but Available against Uninstall depends on
+ * whether each assignment targets a USER group or a DEVICE group, which this
+ * tool cannot tell apart. So, as with LayeredSetting, it names the rule and
+ * lists every assignment with equal standing. It does not pick.
+ * learn.microsoft.com/intune/intune-service/apps/apps-deploy#how-conflicts-between-app-intents-are-resolved
+ */
+export interface AppIntentConflict {
+  appId: string;
+  displayName: string;
+  intents: AppIntentVia[];
+}
+
+export const APP_INTENT_CONFLICT_DETAIL =
+  "This app is assigned both to install and to uninstall on this device, and nothing excludes one from the other. Intune resolves it by a documented table: Required always wins over Uninstall, but Available against Uninstall depends on whether each group holds users or devices, which this tool can't see. Every assignment is listed — this tool doesn't work out which wins. To settle it, exclude one group from the other assignment (exclusions only take precedence between groups of the same kind).";
+
+/**
+ * An assignment that changes nothing about what the device gets.
+ *
+ * "required-and-available": the app is Required, so it installs regardless, and
+ * is also Available. Every row of Microsoft's table resolves that pairing to
+ * "Required and Available", so it is supported -- but the Available assignment
+ * adds only a Company Portal listing.
+ *
+ * "multiple-groups": one intent delivered through several of the endpoint's
+ * groups (All Devices and a specific group, say). `intent` names which.
+ */
+export interface AppRedundancy {
+  appId: string;
+  displayName: string;
+  kind: "required-and-available" | "multiple-groups";
+  /** Set for "multiple-groups": the intent that arrives more than once. */
+  intent?: AppIntent;
+  intents: AppIntentVia[];
+}
+
+export function appRedundancyDetail(redundancy: AppRedundancy): string {
+  return redundancy.kind === "required-and-available"
+    ? "Assigned as both Required and Available. The app installs either way, so the Available assignment isn't needed to deliver it — it only keeps the app listed in Company Portal. Keep it if you want that; otherwise it is one assignment more than this needs."
+    : "The same intent reaches this device through more than one group. Any one of them would deliver the app, so the others change nothing here — though they may matter for devices that are in only one of those groups.";
+}
+
+/**
+ * Several DIFFERENT app objects that appear to be one product -- a Store app
+ * and a Win32 package of the same title, or three versions of one installer.
+ *
+ * Intune's intent rules apply within one app object and never across two, so
+ * it reports no conflict here whatever the assignments are: a device can be
+ * told to install one object and uninstall another of the same product. That
+ * is `opposing`.
+ *
+ * Matched on NAME, after stripping versions, architecture and packaging words
+ * (see appProductKey in the engine). That is a heuristic and is reported as
+ * one: "verify", never "conflict". A package whose whole job is to remove
+ * something will pair with the thing it removes, and that is often deliberate.
+ */
+export interface AppProductFinding {
+  /** The normalized name the apps matched on. */
+  product: string;
+  /** True when one of the apps lands as Uninstall and a different one as Required or Available. */
+  opposing: boolean;
+  apps: { appId: string; displayName: string; appType: string; intents: AppIntent[] }[];
+}
+
+export const APP_SAME_PRODUCT_DETAIL =
+  "These are separate apps in Intune that look like the same product. Intune only compares assignments within one app, never across two, so it reports nothing here — even when one is set to install and another to uninstall. Matched on name, which is a guess: check whether they really are the same thing and whether the device should get more than one.";
+
+/**
+ * A Windows line-of-business .msi that lands on the endpoint. A recommendation
+ * rather than a fault: the app works, but Microsoft's guidance is to deploy
+ * Windows apps through the Win32 app type exclusively.
+ *
+ * The reason is concrete. An LOB .msi is installed by the MDM agent and a Win32
+ * app by the Intune Management Extension, and both go through the Windows
+ * TrustedInstaller service, which runs one installation at a time. During
+ * Windows Autopilot's Enrollment Status Page the two collide, the Win32 install
+ * fails with "Another installation is in progress", and ESP fails with it.
+ * Windows Autopilot device preparation does not use ESP and supports the mix.
+ * learn.microsoft.com/intune/app-management/deployment/win32
+ * learn.microsoft.com/intune/device-enrollment/windows/setup-status-page#esp-tracking
+ */
+export interface AppLobMsiFinding {
+  appId: string;
+  displayName: string;
+  intents: AppIntent[];
+}
+
+/** Microsoft's Win32 app management article, which carries the recommendation. */
+export const APP_LOB_LEARN_URL = "https://learn.microsoft.com/intune/app-management/deployment/win32";
+/** The Enrollment Status Page article, which states the "don't mix" rule outright. */
+export const APP_LOB_ESP_LEARN_URL =
+  "https://learn.microsoft.com/intune/device-enrollment/windows/setup-status-page#esp-tracking";
+
+export const APP_LOB_MSI_DETAIL =
+  "A line-of-business .msi. Microsoft recommends deploying Windows apps as Win32 apps exclusively: repackage the .msi as an .intunewin with the Win32 Content Prep Tool. Win32 apps add detection rules, requirements, dependencies, supersedence and Delivery Optimization, and avoid the install clash described below.";
+
+export const APP_LOB_MIXED_DETAIL =
+  "This endpoint gets line-of-business .msi apps and Win32 apps together. Both install through the Windows TrustedInstaller service, which runs one installation at a time, so during Windows Autopilot enrollment a Win32 install can fail with “Another installation is in progress” and take the Enrollment Status Page down with it. Windows Autopilot device preparation supports the mix; classic Autopilot does not.";
+
+/**
+ * How each app finding is detected, written out once.
+ *
+ * A flag nobody can check is a flag nobody should act on. These are the exact
+ * conditions the engine tests (see simulateApps), in plain words, and they are
+ * the single source for both the "Finding definitions" sheet in the Excel export
+ * and anything in the UI that explains a finding -- so the definition an admin
+ * reads is the one the code runs, not a paraphrase that can drift from it.
+ */
+export interface AppFindingRule {
+  id: "conflict" | "redundant-available" | "redundant-groups" | "same-product" | "lob-msi" | "lob-mixed";
+  finding: string;
+  /** The export column this finding appears in. */
+  column: string;
+  /** How much weight to give it. */
+  kind: "Conflict" | "Redundant" | "Verify" | "Recommendation";
+  detectedWhen: string;
+  meaning: string;
+  action: string;
+  reference: string;
+}
+
+const APPS_DEPLOY_URL =
+  "https://learn.microsoft.com/intune/intune-service/apps/apps-deploy#how-conflicts-between-app-intents-are-resolved";
+
+export const APP_FINDING_RULES: readonly AppFindingRule[] = [
+  {
+    id: "conflict",
+    finding: "Install + uninstall conflict",
+    column: "Intent Conflict",
+    kind: "Conflict",
+    detectedWhen:
+      "One app object lands on the endpoint under Uninstall AND under Required or Available. Only assignments that actually land are compared: an intent removed by an exclusion group or an Assignment Filter does not count.",
+    meaning:
+      "The device is told to install and to remove the same app. Intune resolves it by rule: Required always beats Uninstall; Available against Uninstall depends on whether each group holds users or devices, which this tool cannot see. No winner is computed.",
+    action:
+      "Exclude one group from the other assignment. Exclusions only take precedence between groups of the same kind (user with user, device with device).",
+    reference: APPS_DEPLOY_URL,
+  },
+  {
+    id: "redundant-available",
+    finding: "Redundant: Available on a Required app",
+    column: "Redundant",
+    kind: "Redundant",
+    detectedWhen: "One app object lands on the endpoint under both Required and Available.",
+    meaning:
+      "Supported, and Intune treats it as “Required and Available”. The app installs either way; the Available assignment only keeps it listed in Company Portal.",
+    action: "Remove the Available assignment unless you want the app shown in Company Portal.",
+    reference: APPS_DEPLOY_URL,
+  },
+  {
+    id: "redundant-groups",
+    finding: "Redundant: one intent through several groups",
+    column: "Redundant",
+    kind: "Redundant",
+    detectedWhen: "One app object lands under a single intent through two or more of the endpoint’s groups.",
+    meaning:
+      "Any one of those groups would deliver the app to this endpoint. The others change nothing here, though they may matter to devices in only one of the groups.",
+    action: "Check whether every one of those assignments is still needed.",
+    reference: APPS_DEPLOY_URL,
+  },
+  {
+    id: "same-product",
+    finding: "Same product, several apps",
+    column: "Same Product As",
+    kind: "Verify",
+    detectedWhen:
+      "Two or more DIFFERENT app objects that land on the endpoint have the same name once bracketed text, dotted version numbers and packaging words (x64, msi, win32, store, auto-update, installer, uninstaller, …) are removed. Marked “opposing intents” when one lands as Uninstall and another as Required or Available.",
+    meaning:
+      "Intune compares assignments within one app object and never across two, so it reports no conflict here even when one object installs and another removes the same product. A name match is a guess: an uninstaller package pairs with the app it removes, often on purpose.",
+    action: "Confirm they are the same product and decide which one object the device should get.",
+    reference: APPS_DEPLOY_URL,
+  },
+  {
+    id: "lob-msi",
+    finding: "Line-of-business .msi",
+    column: "Recommendation",
+    kind: "Recommendation",
+    detectedWhen:
+      "An app of Intune type “Windows line-of-business app (MSI)” (Graph: windowsMobileMSI) lands under Required or Available. MSIX/AppX line-of-business apps, and apps assigned only to uninstall, are not flagged.",
+    meaning:
+      "It works, but Microsoft recommends deploying Windows apps through the Win32 app type exclusively. Win32 apps add detection rules, requirements, dependencies, supersedence and Delivery Optimization.",
+    action:
+      "Repackage the .msi as an .intunewin with the Microsoft Win32 Content Prep Tool and deploy it as a Win32 app.",
+    reference: "https://learn.microsoft.com/intune/app-management/deployment/win32",
+  },
+  {
+    id: "lob-mixed",
+    finding: "Line-of-business .msi mixed with Win32",
+    column: "Recommendation",
+    kind: "Recommendation",
+    detectedWhen:
+      "At least one line-of-business .msi is flagged (above) AND a Win32 or Enterprise App Catalog app also lands under Required or Available.",
+    meaning:
+      "Both install through the Windows TrustedInstaller service, one at a time. During classic Windows Autopilot a Win32 install can fail with “Another installation is in progress” and fail the Enrollment Status Page. Autopilot device preparation supports the mix.",
+    action: "Convert the line-of-business apps to Win32, or enroll with Autopilot device preparation.",
+    reference: "https://learn.microsoft.com/intune/device-enrollment/windows/setup-status-page#esp-tracking",
+  },
+];
+
+/** The Apps half of a simulation. */
+export interface SimulationApps {
+  /** Set when the tenant's apps could not be read; every list is then empty. */
+  unavailable?: AppsUnavailable;
+  /** Apps that land, one entry per (app, intent), ordered by intent then name. */
+  apps: SimulationApp[];
+  /** Apps a selected group would deliver but an exclusion or Assignment Filter carves out. */
+  excluded: SimulationApp[];
+  /** One app assigned to install and to uninstall. See AppIntentConflict. */
+  conflicts: AppIntentConflict[];
+  /** Assignments that change nothing. See AppRedundancy. */
+  redundant: AppRedundancy[];
+  /** Different app objects that look like one product. Best-effort. See AppProductFinding. */
+  sameProduct: AppProductFinding[];
+  /** Line-of-business .msi apps that land -- a "convert to Win32" recommendation. See AppLobMsiFinding. */
+  lobMsi: AppLobMsiFinding[];
+  /** True when `lobMsi` apps land alongside Win32-family apps, which is the combination that breaks ESP. */
+  lobMixedWithWin32: boolean;
+}
+
 /** Why a group is part of an endpoint simulation. */
 export type SimulationGroupSource = "selected" | "all-devices" | "all-users" | "implied" | "unassigned";
 
@@ -503,6 +916,12 @@ export interface SimulationResult {
    * common-settings only. Windows-only, like conflicts/overlaps.
    */
   crossModel: CrossModelFinding[];
+  /**
+   * Apps the endpoint's groups deliver, by intent. Absent when the data source
+   * carries no app data at all (the bundled demo tenant), which is different
+   * from `apps.unavailable` -- a real tenant whose apps could not be read.
+   */
+  apps?: SimulationApps;
 }
 
 /**

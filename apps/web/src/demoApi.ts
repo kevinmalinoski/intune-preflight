@@ -14,12 +14,14 @@ import {
   listGroupSummaries,
   listUnassignedPolicies,
   narrowSimulation,
+  simulationAppsToCsv,
+  simulationAppsToXlsx,
   simulationToCsv,
   simulationToXlsx,
   XLSX_MIME,
   type BaselineCriteria,
 } from "@intune-preflight/engine";
-import type { BaselineExportFormat, ManifestExportFormat, SimulationInputs } from "./api.ts";
+import type { SimulationExportFormat, ManifestExportFormat, SimulationInputs } from "./api.ts";
 import type { Download } from "./download.ts";
 
 const data = () => demoTenantData();
@@ -55,13 +57,15 @@ export const demoApi = {
   },
   refresh: () => ok({ warnings: [] as string[] }),
   simulate: (inputs: SimulationInputs) => ok(computeSimulation(data(), toInputs(inputs))),
-  simulateExport: (inputs: SimulationInputs, format: BaselineExportFormat, criteria?: BaselineCriteria) => {
+  simulateExport: (inputs: SimulationInputs, format: SimulationExportFormat, criteria?: BaselineCriteria) => {
     // Narrowed in the tab, because the tab already holds the simulation. The
     // server build sends the criteria over the wire instead; both end up in
     // narrowSimulation, so a filtered export is the same rows wherever it is
     // produced.
     const sim = narrowSimulation(computeSimulation(data(), toInputs(inputs)), criteria);
     if (format === "xlsx") return xlsxFile(simulationToXlsx(sim));
+    if (format === "apps-xlsx") return xlsxFile(simulationAppsToXlsx(sim) ?? new Uint8Array());
+    if (format === "apps-csv") return textFile("text/csv", simulationAppsToCsv(sim) ?? "");
     return format === "csv"
       ? textFile("text/csv", simulationToCsv(sim))
       : textFile("application/json", JSON.stringify(sim, null, 2));

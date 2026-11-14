@@ -1,4 +1,6 @@
-import type { SimulationGroup } from "@intune-preflight/shared";
+import type { AppFamily, SimulationGroup } from "@intune-preflight/shared";
+import { APP_FAMILIES, APP_FAMILY_LABEL } from "@intune-preflight/shared";
+import { APP_FAMILY_COLOR } from "../appsView.ts";
 
 /**
  * The diagram's shared vocabulary: what each policy type looks like, and the
@@ -27,6 +29,34 @@ export const KIND_LABEL: Record<string, string> = {
   platformScript: "Platform Script",
   endpointSecurity: "Endpoint Security (Legacy)",
 };
+
+/**
+ * Apps ride the policy column as extra "kinds", one per app TYPE (Win32, Store,
+ * Enterprise App Catalog, ...), so the layout, the chips, the pop-out and the
+ * legend all pick them up without a second code path. A type's bubble is
+ * sectioned Required / Available / Uninstall inside -- the same shape as the
+ * Apps list, and the same idea as the policy bubbles: what KIND of thing it is
+ * first, what it does second. The `app:` prefix is what tells a click on one
+ * apart from a click on a policy type -- see `isAppKind`.
+ */
+export function appKind(family: AppFamily): string {
+  return `app:${family}`;
+}
+for (const family of APP_FAMILIES) {
+  KIND_COLOR[appKind(family)] = APP_FAMILY_COLOR[family];
+  KIND_LABEL[appKind(family)] = `${APP_FAMILY_LABEL[family].tag} apps`;
+}
+
+/** True for a diagram kind, or a diagram policy id, that stands for apps rather than a policy. */
+export function isAppKind(kindOrId: string): boolean {
+  return kindOrId.startsWith("app:");
+}
+
+/** The app type behind an app kind (`app:win32`) or app row id (`app:win32:required:<id>`). */
+export function appFamilyOf(kindOrId: string): AppFamily | undefined {
+  const family = kindOrId.split(":")[1] as AppFamily;
+  return APP_FAMILIES.includes(family) ? family : undefined;
+}
 
 export const SOURCE_STYLE: Record<SimulationGroup["source"], { border: string; bg: string; label: string }> = {
   selected: { border: "#34d399", bg: "rgba(52,211,153,0.10)", label: "Selected group" },
@@ -73,6 +103,8 @@ export const KIND_ORDER = [
   "endpointSecurity",
   "adminTemplate",
   "platformScript",
+  // Apps last: what the device is configured to be, then what is put on it.
+  ...APP_FAMILIES.map(appKind),
 ];
 
 // A type bubble lists at most this many policies before collapsing the rest
@@ -162,6 +194,8 @@ export function isPayloadKind(kind: string): boolean {
 
 /** A type's headline count: "2 scripts", or "13 · 665 settings". */
 export function kindCountLabel(kind: string, policyCount: number, settingsCount: number): string {
+  // An app has no settings at all, so the only count there is to give is apps.
+  if (isAppKind(kind)) return pluralize(policyCount, "app");
   const noun = PAYLOAD_KIND_NOUN[kind];
   if (noun) return pluralize(policyCount, noun);
   return `${policyCount} · ${settingsCount} settings`;
@@ -169,6 +203,7 @@ export function kindCountLabel(kind: string, policyCount: number, settingsCount:
 
 /** What one policy of this kind carries: "script config", or "4 settings". */
 export function policyPayloadLabel(kind: string, settingsCount: number): string {
+  if (isAppKind(kind)) return "";
   if (isPayloadKind(kind)) return "script config";
   return pluralize(settingsCount, "setting");
 }

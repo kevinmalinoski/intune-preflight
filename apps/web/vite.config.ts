@@ -14,7 +14,7 @@ import react from "@vitejs/plugin-react";
 const SITE = "https://kevinmalinoski.github.io";
 
 const OG_IMAGE_ALT =
-  "The Intune Preflight simulator: a configured endpoint resolving through Autopilot and Entra groups to the policies that apply to it.";
+  "The Intune Preflight card: a cropped view of the resolution graph — one endpoint resolving through Entra groups into the policy categories that target it, stacked down the right.";
 
 const PUBLIC_PAGES: Record<string, { title: string; description: string }> = {
   "/intune-preflight/app/": {
@@ -32,7 +32,12 @@ const PUBLIC_PAGES: Record<string, { title: string; description: string }> = {
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
 
 // og-card.png ships in public/, so it lands at the root of whichever base the
-// bundle was built for and needs no separate deploy step.
+// bundle was built for and needs no separate deploy step. It is 2400x1260
+// rather than the 1200x630 LinkedIn documents as its floor for the large-card
+// layout: sitting exactly on a threshold is a bad place to be, and the card is
+// also rendered on high-DPI screens where 1200 wide is only 600 CSS px. These
+// width/height values have to match the file -- some scrapers trust the tags
+// over the bytes, so a card that lies about being small gets laid out small.
 function socialCards(): Plugin {
   let base = "/";
   return {
@@ -67,8 +72,8 @@ function socialCards(): Plugin {
             "og:description": page.description,
             "og:image": image,
             "og:image:type": "image/png",
-            "og:image:width": "1200",
-            "og:image:height": "630",
+            "og:image:width": "2400",
+            "og:image:height": "1260",
             "og:image:alt": OG_IMAGE_ALT,
           }).map(([property, content]) => ({
             tag: "meta",

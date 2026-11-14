@@ -20,7 +20,17 @@ import {
   UNASSIGNED_EDGE,
   estimateChipHeight,
   estimateRowHeight,
+  isAppKind,
 } from "./theme.ts";
+
+/**
+ * What the right-hand column of the diagram is drawing: the endpoint's
+ * policies, or its apps. One or the other, never both -- with both, a tenant of
+ * any size had ten bubbles stacked in one column, the fit-to-view scale dropped
+ * until no name was readable, and the policies and the apps each got in the way
+ * of reading the other.
+ */
+export type DiagramContent = "policies" | "apps";
 
 /**
  * Turns a simulation into the nodes and edges React Flow draws: the endpoint
@@ -43,6 +53,8 @@ export function buildGraph({
   simulation,
   deviceFilterNames,
   hiddenGroupIds,
+  content,
+  showAvailableApps,
   grouped,
   compact,
   expandedKinds,
@@ -57,6 +69,9 @@ export function buildGraph({
   simulation: SimulationResult;
   deviceFilterNames: string[];
   hiddenGroupIds: Set<string>;
+  content: DiagramContent;
+  /** Whether apps that are only Available are drawn. Off by default -- see countAvailableOnly. */
+  showAvailableApps: boolean;
   grouped: boolean;
   /** Below `lg`: type bubbles become chips and their policies move to a pop-out. */
   compact: boolean;
@@ -128,25 +143,36 @@ export function buildGraph({
   // Derived in policyGroups.ts, not here: everything below this line is
   // geometry, and the drill-down list reads the same two functions.
   const policyX = groupX + GROUP_NODE_WIDTH + COLUMN_GAP;
-  const visible = visiblePolicies(simulation, hiddenGroupIds);
+  const visible = visiblePolicies(simulation, hiddenGroupIds, { showAvailableApps }).filter(
+    (vp) => isAppKind(vp.kind) === (content === "apps")
+  );
 
   // --- Enrollment edges: one line per (profile, targeted group) ---
-  // The device and its profiles are a single node, so enrollment adds no edge of
-  // its own -- only profile -> target group lines, leaving from that profile's
-  // own card. Those groups carry ONWARD to their policies, so the direct
-  // device -> group edge is dropped for them (below) to avoid a duplicate line.
-  // Exclusions are shown on the card text, not as extra edges.
-  const apTargetedGroupIds = new Set<string>();
+  // Two different relations meet at a group, and they are drawn as two
+  // different lines. The device is a MEMBER of each of its groups: a solid line
+  // from the device card, for every group (below). An Autopilot profile is
+  // ASSIGNED to some of those groups: a dotted line from that profile's own
+  // card, leaving from its name.
+  //
+  // It used to be one line doing both jobs. A group a profile targeted lost its
+  // line from the device and hung off the Autopilot card instead, so the
+  // endpoint appeared not to belong to exactly the groups that enrolled it,
+  // and a reader had to know the convention to see otherwise.
+  //
+  // An excluded profile's line is the dashed rose every other exclusion uses:
+  // it is assigned to that group and will not deploy, which is the catch.
   for (const ap of visibleAps) {
+    const excluded = ap.status === "excluded";
     for (const gid of ap.viaGroupIds) {
-      apTargetedGroupIds.add(gid);
       edges.push({
         id: `ap-${ap.id}->${gid}`,
         source: "endpoint",
         sourceHandle: `ap:${ap.id}`,
         target: `group:${gid}`,
         type: "default",
-        style: { stroke: AUTOPILOT_COLOR, opacity: 0.55, strokeWidth: 1.5 },
+        style: excluded
+          ? { stroke: "#fb7185", strokeDasharray: "5 5", opacity: 0.55, strokeWidth: 1.5 }
+          : { stroke: AUTOPILOT_COLOR, strokeDasharray: "2 4", opacity: 0.8, strokeWidth: 1.5 },
       });
     }
   }
@@ -166,7 +192,11 @@ export function buildGraph({
       // otherwise the capped rows plus the "+N more / Show fewer" footer row
       // when the list exceeds the cap.
       const capped = list.length > TYPE_BUBBLE_CAP;
-      const shownRows = (expanded ? list.length : Math.min(list.length, TYPE_BUBBLE_CAP)) + (capped ? 1 : 0);
+      const shownList = expanded ? list : list.slice(0, TYPE_BUBBLE_CAP);
+      // A section heading (apps: Required / Available / Uninstall) is drawn at
+      // the same height as a row, so it simply counts as one.
+      const headings = shownList.filter((vp, i) => vp.section && vp.section.label !== shownList[i - 1]?.section?.label);
+      const shownRows = shownList.length + headings.length + (capped ? 1 : 0);
       nodes.push({
         id: `type:${kind}`,
         type: "policyType",
@@ -181,6 +211,7 @@ export function buildGraph({
             name: vp.name,
             status: vp.status,
             settingsCount: vp.settingsCount,
+            section: vp.section,
           })),
           expanded,
           onToggleExpand: () => onToggleKind(kind),
@@ -281,10 +312,6 @@ export function buildGraph({
     data: { groupNames, filterNames: deviceFilterNames, profiles: visibleAps, expandedAps, onToggleAp, onHeight },
   });
   for (const g of simulation.groups) {
-    // Groups an Autopilot profile targets get their line FROM the profile card
-    // (profile -> group), so skip the direct device -> group edge for them to
-    // avoid a duplicate line. Every other group hangs directly off the device.
-    if (apTargetedGroupIds.has(g.id)) continue;
     const off = hiddenGroupIds.has(g.id);
     // The "No assignment" bucket isn't a real membership path -- draw it dashed
     // orange so it doesn't read like the device belongs to it.

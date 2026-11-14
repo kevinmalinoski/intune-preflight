@@ -67,7 +67,22 @@ export default function App() {
     return () => clearTimeout(t);
   }, []);
 
+  // Refreshing remounts both views so they refetch, which also throws away the
+  // simulated endpoint -- its groups, filters, Autopilot settings and waitlist
+  // picks -- and whatever the Manifest had selected. That is a lot to lose to a
+  // stray click on a button that sounds harmless, so it asks first.
+  const [confirmingRefresh, setConfirmingRefresh] = useState(false);
+  useEffect(() => {
+    if (!confirmingRefresh) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setConfirmingRefresh(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [confirmingRefresh]);
+
   const handleRefresh = async () => {
+    setConfirmingRefresh(false);
     setRefreshing(true);
     setRefreshed(false);
     try {
@@ -247,34 +262,77 @@ export default function App() {
               {LIVE_MODE && !demo && <SessionLock />}
               <LayoutToggle />
 
-              <button
-                onClick={handleRefresh}
-                disabled={refreshing}
-                title={
-                  demo
-                    ? "Reloads the bundled demo data."
-                    : LIVE_MODE
-                      ? "Re-reads every policy, assignment and group from Microsoft Graph in this tab — use this after making changes in the Intune admin center."
-                      : "Clears the server-side cache and re-fetches all policies, assignments and groups from Intune — use this after making changes in the Intune admin center."
-                }
-                className={`flex shrink-0 items-center gap-2 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
-                  refreshed
-                    ? "border-emerald-400/50 bg-emerald-500/10 text-emerald-300"
-                    : "border-ink-700 text-slate-300 hover:bg-ink-800"
-                } disabled:cursor-wait disabled:opacity-60`}
-              >
-                <span className={refreshing ? "animate-spin" : ""}>{refreshing ? "⟳" : refreshed ? "✓" : "⟳"}</span>
-                {/* Label only once there's room for it; the glyph carries it below. */}
-                <span className="hidden sm:inline">
-                  {refreshing
-                    ? "Refreshing…"
-                    : refreshed
-                      ? "Data refreshed"
-                      : demo
-                        ? "Reload demo data"
-                        : "Refresh from Intune"}
-                </span>
-              </button>
+              <div className="relative shrink-0">
+                <button
+                  onClick={() => setConfirmingRefresh((open) => !open)}
+                  disabled={refreshing}
+                  aria-haspopup="dialog"
+                  aria-expanded={confirmingRefresh}
+                  title={
+                    demo
+                      ? "Reloads the bundled demo data."
+                      : LIVE_MODE
+                        ? "Re-reads every policy, assignment and group from Microsoft Graph in this tab — use this after making changes in the Intune admin center."
+                        : "Clears the server-side cache and re-fetches all policies, assignments and groups from Intune — use this after making changes in the Intune admin center."
+                  }
+                  className={`flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+                    refreshed
+                      ? "border-emerald-400/50 bg-emerald-500/10 text-emerald-300"
+                      : "border-ink-700 text-slate-300 hover:bg-ink-800"
+                  } disabled:cursor-wait disabled:opacity-60`}
+                >
+                  <span className={refreshing ? "animate-spin" : ""}>{refreshing ? "⟳" : refreshed ? "✓" : "⟳"}</span>
+                  {/* Label only once there's room for it; the glyph carries it below. */}
+                  <span className="hidden sm:inline">
+                    {refreshing
+                      ? "Refreshing…"
+                      : refreshed
+                        ? "Data refreshed"
+                        : demo
+                          ? "Reload demo data"
+                          : "Refresh from Intune"}
+                  </span>
+                </button>
+                {confirmingRefresh && (
+                  <>
+                    {/* Click-away backdrop, the same pattern as the export menu. */}
+                    <div className="fixed inset-0 z-30" onClick={() => setConfirmingRefresh(false)} />
+                    <div
+                      role="dialog"
+                      aria-label="Confirm refresh"
+                      className="absolute right-0 top-full z-40 mt-1 w-72 max-w-[calc(100vw-1rem)] rounded-lg border border-amber-400/40 bg-ink-900 p-3 text-left shadow-2xl"
+                    >
+                      <div className="text-xs font-semibold text-amber-200">
+                        {demo ? "Reload the demo data?" : "Refresh from Intune?"}
+                      </div>
+                      <p className="mt-1 text-[11px] leading-relaxed text-slate-300">
+                        This resets what you have set up here: the simulated endpoint’s groups, device filters,
+                        Autopilot settings and Policy Waitlist picks, and any selection in the Manifest.
+                      </p>
+                      {!demo && (
+                        <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
+                          It re-reads every policy, app, assignment and group, which can take a little while.
+                        </p>
+                      )}
+                      <div className="mt-2.5 flex justify-end gap-2">
+                        <button
+                          onClick={() => setConfirmingRefresh(false)}
+                          className="rounded-md border border-ink-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-ink-800"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          autoFocus
+                          onClick={handleRefresh}
+                          className="rounded-md border border-amber-400/50 bg-amber-500/15 px-2.5 py-1.5 text-xs font-medium text-amber-200 hover:bg-amber-500/25"
+                        >
+                          {demo ? "Reload and reset" : "Refresh and reset"}
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
           </header>
 

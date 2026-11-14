@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { rowsToXlsx, XLSX_MIME } from "./xlsx.js";
+import { rowsToXlsx, sheetsToXlsx, XLSX_MIME } from "./xlsx.js";
 
 /**
  * These tests unzip the bytes rather than snapshot them, because a snapshot
@@ -193,6 +193,34 @@ describe("xlsx cells are typed, so nothing is reinterpreted", () => {
     // cell is neither, so no `t="n"` and no style index on any cell.
     expect(sheet).not.toContain('t="n"');
     expect(sheet).not.toMatch(/<c [^>]*\ss="/);
+  });
+});
+
+describe("sheetsToXlsx", () => {
+  const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+
+  it("writes one worksheet part per sheet and wires each into the workbook", () => {
+    const out = text(
+      sheetsToXlsx([
+        { name: "One", rows: [["a"]] },
+        { name: "Two", rows: [["b"]] },
+      ])
+    );
+    expect(out).toContain('<sheet name="One" sheetId="1" r:id="rId1"/><sheet name="Two" sheetId="2" r:id="rId2"/>');
+    expect(out).toContain('<Override PartName="/xl/worksheets/sheet2.xml"');
+    expect(out).toContain('<Relationship Id="rId2"');
+    expect(out).toContain('Target="worksheets/sheet2.xml"/>');
+  });
+
+  it("renames a sheet whose name Excel would call a duplicate", () => {
+    const out = text(
+      sheetsToXlsx([
+        { name: "Apps", rows: [] },
+        { name: "apps", rows: [] },
+      ])
+    );
+    expect(out).toContain('<sheet name="Apps" sheetId="1"');
+    expect(out).toContain('<sheet name="apps (2)" sheetId="2"');
   });
 });
 

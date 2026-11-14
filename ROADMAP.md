@@ -1,26 +1,23 @@
 # Roadmap
 
-Intune Preflight is at **v2.1**. The core is complete: endpoint simulation,
-assignment resolution (include/exclude, filters, inherited All Devices / All
-Users), the Autopilot V1/V2 enrollment layer, the Windows merged CSP baseline
-with human-readable Settings Catalog **and legacy Endpoint Security** names and
-values, **cross-model "legacy policy collision" detection**, the **"Legacy
-template" migration flag**, honest **Group Tag** surfacing in the picker, a
-tightly integrated Assignment Manifest (send groups to the simulator, per-group
-"seating charts"), and a **public, zero-backend demo**.
+Intune Preflight is at **v3.0**. v2 finished the settings side: endpoint
+simulation, assignment resolution (include/exclude, filters, inherited All
+Devices / All Users), the Autopilot V1/V2 enrollment layer, the Windows merged
+CSP baseline with human-readable names and values, conflict / overlap /
+cross-model detection, the Assignment Manifest, and a backend-free browser
+build. v3 adds the other half of what lands on a device — its **apps** — and
+rearranges the simulator around the way it is used.
 
 This page tracks the **honest edges that remain** and the work planned to close
 them. None of the known limitations block the core use — they're documented so you
 know exactly where to double-check against Entra and the Intune admin center. See
 [CHANGELOG.md](CHANGELOG.md) for what shipped when.
 
-**Where v2 stands.** v2 is feature-complete and intended to stay that way. What
-remains for the 2.x line is **maintenance** — accuracy, correctness and polish
-within the capabilities already shipped, which is what [v2 maintenance](#v2-maintenance)
-lists. The bigger swings that would change what the tool *is* are collected under
-[v3 bets](#v3-bets); they are deliberately not 2.x work, and none of them is a
-prerequisite for trusting what v2 already does. If you rely on this tool, 2.x
-should feel boring.
+**Where v3 stands.** The first v3 bet has landed: [apps for the
+endpoint](#whats-next). What remains is split the same way as before —
+**maintenance**, which makes what already ships more accurate without adding a
+capability, and the **bigger bets**, each of which would change what the tool
+is and carries real design risk.
 
 ## Known limitations
 
@@ -106,6 +103,37 @@ deliberate choice without a per-property default map, so it may still show. Type
 where a `false` is genuinely meaningful (e.g. Update rings' `allowWindows11Upgrade`)
 are deliberately left untouched.
 
+### Apps are listed by assignment, not by outcome
+The Apps view resolves which apps a simulated endpoint's groups deliver, under
+which intent, through the same include/exclude and Assignment Filter logic as
+policies. Three edges, all stated in the UI:
+
+- **Available is mostly user-targeted.** For almost every app type Intune only
+  honours an *Available* assignment made to a user group (Win32 apps, and Android
+  Enterprise fully managed / COPE devices, are the exceptions). An available app
+  is listed when a selected group or All Users delivers it; with no specific user
+  modelled (below), that means "offered if the user is in that group".
+- **Install-versus-uninstall is flagged, not resolved.** Microsoft documents a
+  table for intent conflicts, but its outcome turns on whether each assignment
+  targets a user group or a device group — *Available* against *Uninstall* goes
+  either way — and the tool cannot tell the two kinds of group apart. Every
+  assignment is listed and no winner is named. *Required* with *Available* is
+  reported as **redundant** rather than as a conflict: every row of the table
+  resolves it to "Required and Available".
+- **"Same product, several apps" is a name match.** Intune compares assignments
+  within one app object and never across two, so two objects for one product can
+  be assigned to install and to uninstall with nothing reported. The tool pairs
+  them on a normalized name (versions, architecture and packaging words
+  dropped). That will pair things that are fine — an uninstaller package with
+  the app it removes — so it is shown as "verify", and it will miss the same
+  product under two unrelated names.
+- **Exclusions are scoped to their intent**, as the admin center and Graph record
+  them. Microsoft's include/exclude documentation does not state this outright;
+  verify against the admin center if a result depends on it.
+
+Not covered: Win32 dependencies and supersedence, app protection (MAM) and app
+configuration policies, and install status.
+
 ### No specific-user modelling
 Assignments to Entra *user* groups resolve normally — user groups are selectable
 like any other, and the **All Users** virtual group always applies. What's absent
@@ -114,10 +142,10 @@ user belongs to a group, so nothing is inferred from a sign-in. Autopilot V2 (a
 user-driven flow) is therefore resolved by its configured just-in-time device
 group rather than its user assignment.
 
-## v2 maintenance
+## Maintenance
 
-Work that makes what v2 already claims more accurate or more pleasant, without
-adding a capability. This is the whole intended scope of the 2.x line.
+Work that makes what already ships more accurate or more pleasant, without
+adding a capability.
 
 - **Expand the cross-model crosswalk** — the best-shaped maintenance item there
   is: purely additive data, each entry independently testable, no architectural
@@ -142,12 +170,23 @@ adding a capability. This is the whole intended scope of the 2.x line.
   dialogs are keyboard-navigable; the React Flow canvas and the resizable data
   grid are the parts that still assume a mouse.
 
-## v3 bets
+## What's next
 
-Bigger swings. Each would change what the tool is capable of, carries real design
-risk, and is **deliberately not 2.x work** — v2's honesty about its edges is what
-makes them upgrades rather than corrections.
+Bigger swings. Each would change what the tool is capable of and carries real
+design risk. The tool's honesty about its edges is what makes them upgrades
+rather than corrections.
 
+- **Apps for the endpoint** — *shipped in v3.0.* The
+  Required, Available and Uninstall apps a simulated endpoint's groups deliver,
+  in a tab of their own beside the baseline, with the diagram switching to draw them,
+  with an Apps sheet in the Excel export. It changes what the tool is — a
+  preflight of what is put *on* the device, not only how it is configured — and
+  needs a new optional permission (`DeviceManagementApps.Read.All`). Its honest edges are under
+  [Known limitations](#apps-are-listed-by-assignment-not-by-outcome). Still to
+  do: classifying user versus device groups so
+  intent conflicts and Available targeting can be read more precisely; and
+  reading Win32 supersedence and dependencies, which install or remove apps no
+  assignment mentions.
 - **Combined/nested dynamic-group rule evaluation** — the headline bet. Replace
   the regex-based clause extraction (`parsePhysicalIdClauses`,
   `groupTagMatchesRule`, `isAutopilotJoinedRule` in
