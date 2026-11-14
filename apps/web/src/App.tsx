@@ -126,9 +126,10 @@ export default function App() {
     }
   };
 
-  const MODES: { value: "demo" | "connected"; label: string }[] = [
-    { value: "connected", label: "Connected" },
-    { value: "demo", label: "Demo" },
+  // `short` is what a phone shows: "Connected" alone is a fifth of its header.
+  const MODES: { value: "demo" | "connected"; label: string; short: string }[] = [
+    { value: "connected", label: "Connected", short: "Live" },
+    { value: "demo", label: "Demo", short: "Demo" },
   ];
 
   const views =
@@ -162,17 +163,28 @@ export default function App() {
           would just be the part we forgot. */}
       {!focus && (
         <>
-          <header className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-ink-700 bg-ink-900 px-3 py-2 sm:px-5 sm:py-2.5">
+          <header className="flex flex-wrap items-center gap-x-2 gap-y-2 border-b border-ink-700 bg-ink-900 px-2 py-2 sm:gap-x-5 sm:px-5 sm:py-2.5">
             {/* The wordmark gives up size before the controls do: below `lg` it
                 is a label, not a banner, so the tabs can sit on its row instead
-                of claiming one of their own. On a phone that row was the single
-                most expensive piece of chrome above the canvas. */}
-            <div className="flex items-baseline gap-2">
-              <h1 className="whitespace-nowrap text-sm font-semibold text-slate-100 lg:text-base">Intune Preflight</h1>
-              <span className="hidden text-[11px] text-slate-500 xl:inline">read-only · no device required</span>
+                of claiming one of their own. On a phone it goes altogether.
+                Two tabs and five controls are 340px at their tightest, a phone
+                is 360 to 390 wide, and with the wordmark the header wrapped to
+                a second row -- the most expensive chrome above the canvas, to
+                repeat a name the browser's own bar is already showing. The mark
+                stays where there is room for it: 390px and up, which is every
+                current iPhone but not the 360 and 375 wide phones, where it
+                would push the controls back onto a second row. */}
+            <div className="hidden items-center gap-2 min-[390px]:flex">
+              <Logo />
+              <div className="hidden items-baseline gap-2 sm:flex">
+                <h1 className="whitespace-nowrap text-sm font-semibold text-slate-100 lg:text-base">
+                  Intune Preflight
+                </h1>
+                <span className="hidden text-[11px] text-slate-500 xl:inline">read-only · no device required</span>
+              </div>
             </div>
 
-            <nav className="flex min-w-0 items-center gap-1">
+            <nav className="flex min-w-0 items-center gap-0.5 sm:gap-1">
               {TABS.map((t) => (
                 <button
                   key={t.value}
@@ -180,13 +192,16 @@ export default function App() {
                     setFocus(false);
                     setTab(t.value);
                   }}
-                  className={`flex min-h-[36px] items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors lg:px-3 ${
+                  className={`flex min-h-[36px] items-center justify-center gap-1.5 rounded-md px-1.5 py-1.5 text-xs font-medium transition-colors sm:px-2 lg:px-3 ${
                     tab === t.value
                       ? "bg-sky-500/15 text-sky-300"
                       : "text-slate-400 hover:bg-ink-800 hover:text-slate-200"
                   }`}
                 >
-                  <span aria-hidden>{t.icon}</span>
+                  {/* Decoration, so it is the first thing a phone drops. */}
+                  <span aria-hidden className="hidden sm:inline">
+                    {t.icon}
+                  </span>
                   {/* "Endpoint Preflight" and "Assignment Manifest" do not fit
                       beside a wordmark and four controls at 375px. The short
                       forms are still the nouns people use for these two
@@ -201,7 +216,7 @@ export default function App() {
             {/* The two right-hand controls travel together, so a header that wraps
             moves both or neither -- rather than stranding Refresh on a row of
             its own under them. */}
-            <div className="ml-auto flex items-center gap-2">
+            <div className="ml-auto flex items-center gap-1 sm:gap-2">
               {demo !== null && (
                 <div className="flex items-center rounded-md border border-ink-700 bg-ink-800 p-0.5">
                   {MODES.map((m) => {
@@ -217,9 +232,10 @@ export default function App() {
                           target="_blank"
                           rel="noreferrer"
                           title="Connect your own Intune tenant by self-hosting — see the setup on GitHub."
-                          className="rounded px-2.5 py-1 text-xs font-medium text-slate-400 transition-colors hover:text-emerald-300"
+                          className="whitespace-nowrap rounded px-2 py-1 text-xs font-medium text-slate-400 transition-colors hover:text-emerald-300 sm:px-2.5"
                         >
-                          Connect your tenant ↗
+                          <span className="sm:hidden">Connect ↗</span>
+                          <span className="hidden sm:inline">Connect your tenant ↗</span>
                         </a>
                       );
                     }
@@ -239,7 +255,8 @@ export default function App() {
                                 ? "Sign in with your own admin account and read your tenant from Microsoft Graph."
                                 : "Use your connected Intune tenant."
                         }
-                        className={`rounded px-2.5 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                        aria-label={m.label}
+                        className={`rounded px-2 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 sm:px-2.5 ${
                           active
                             ? m.value === "demo"
                               ? "bg-amber-500/20 text-amber-300"
@@ -247,7 +264,8 @@ export default function App() {
                             : "text-slate-400 hover:text-slate-200"
                         }`}
                       >
-                        {m.label}
+                        <span className="sm:hidden">{m.short}</span>
+                        <span className="hidden sm:inline">{m.label}</span>
                       </button>
                     );
                   })}
@@ -275,7 +293,7 @@ export default function App() {
                         ? "Re-reads every policy, assignment and group from Microsoft Graph in this tab — use this after making changes in the Intune admin center."
                         : "Clears the server-side cache and re-fetches all policies, assignments and groups from Intune — use this after making changes in the Intune admin center."
                   }
-                  className={`flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
+                  className={`flex h-8 min-w-8 items-center justify-center gap-2 rounded-md border px-2 text-xs font-medium transition-colors sm:px-3 ${
                     refreshed
                       ? "border-emerald-400/50 bg-emerald-500/10 text-emerald-300"
                       : "border-ink-700 text-slate-300 hover:bg-ink-800"
@@ -426,5 +444,22 @@ export default function App() {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * The aircraft from the favicon, so the tab and the page carry the same mark.
+ * Drawn inline for the reason the favicon is: nothing to request, and nothing
+ * to 404 when the app is served from a sub-path.
+ */
+function Logo() {
+  return (
+    <svg viewBox="0 0 32 32" className="h-6 w-6 shrink-0" role="img" aria-label="Intune Preflight">
+      <rect width="32" height="32" rx="7" className="fill-ink-950 stroke-ink-700" strokeWidth="1" />
+      <path
+        d="M16 4.5c1.05 0 1.9 1.6 1.9 3.6v3.3l6.6 4v2.4l-6.6-2v4.3l2.5 1.9v1.9L16 22.7l-4.4 1.2v-1.9l2.5-1.9v-4.3l-6.6 2v-2.4l6.6-4V8.1c0-2 .85-3.6 1.9-3.6z"
+        className="fill-sky-400"
+      />
+    </svg>
   );
 }

@@ -6,6 +6,24 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [3.0.1] — 2026-11-14
+
+The top bar on a phone, which v3.0.0 left two rows tall.
+
+### Changed
+- **The top bar fits one row on phones.** Two tabs and five controls beside the
+  wordmark wrapped to a second row below 640px, the most expensive chrome above
+  the canvas. At those widths the wordmark and the tab icons are dropped,
+  **Connected** reads **Live**, "Connect your tenant" reads "Connect", and the
+  spacing is tighter. The header goes from 93px to 53px at 375 wide. Nothing
+  moved into a menu, and 640px and wider is unchanged.
+
+### Added
+- **A mark in the top bar.** The aircraft from the favicon now leads the bar:
+  beside the wordmark on wider screens, and alone on phones 390px and wider,
+  where the wordmark is gone. It is hidden on narrower phones, where it would
+  wrap the controls back onto a second row.
+
 ## [3.0.0] — 2026-11-14
 
 The simulator now answers what is put *on* a device, not only how it is
