@@ -25,3 +25,13 @@ jobs:
       # build it here -- a server-only import would otherwise surface for the
       # first time during a manual deploy.
       - run: npm run build:demo
+
+  # The images are built from a hand-picked list of COPY lines, so a new
+  # workspace package breaks them without breaking anything above: adding
+  # packages/graph stopped the Docker path building, unnoticed, until v3.0.2.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f apps/server/Dockerfile -t preflight-server .
+      - run: docker build -f apps/web/Dockerfile -t preflight-web .

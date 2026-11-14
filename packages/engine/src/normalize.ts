@@ -604,6 +604,41 @@ export function flattenSettingsCatalogEntries(
 }
 
 /**
+ * Decodes base64 to text with what a browser and Node both have: `atob` and
+ * `TextDecoder`.
+ *
+ * This used `Buffer`, which only Node has. The engine also runs in the browser
+ * builds, where the call threw a ReferenceError, the caller's fallback kept the
+ * raw value, and every script was shown as base64 -- while the self-hosted
+ * server, the only place it was ever looked at, decoded them fine.
+ *
+ * PowerShell scripts are routinely saved as UTF-16, which read as UTF-8 comes
+ * out with a NUL between every character. A byte-order mark settles it; without
+ * one, NULs in every other byte of the opening stretch do.
+ */
+export function decodeBase64Text(base64: string): string {
+  const binary = atob(base64.replace(/\s+/g, ""));
+  const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+
+  let encoding = "utf-8";
+  if (bytes[0] === 0xff && bytes[1] === 0xfe) encoding = "utf-16le";
+  else if (bytes[0] === 0xfe && bytes[1] === 0xff) encoding = "utf-16be";
+  else {
+    const sample = Math.min(bytes.length - (bytes.length % 2), 200);
+    let oddNuls = 0;
+    let evenNuls = 0;
+    for (let i = 0; i < sample; i += 2) {
+      if (bytes[i] === 0) evenNuls++;
+      if (bytes[i + 1] === 0) oddNuls++;
+    }
+    if (sample >= 8 && oddNuls > sample / 4 && evenNuls === 0) encoding = "utf-16le";
+    else if (sample >= 8 && evenNuls > sample / 4 && oddNuls === 0) encoding = "utf-16be";
+  }
+  // TextDecoder drops a leading byte-order mark itself.
+  return new TextDecoder(encoding).decode(bytes);
+}
+
+/**
  * Platform Scripts (Windows PowerShell `deviceManagementScripts`, macOS shell
  * `deviceShellScripts`) don't have CSP-style settings -- they're a script
  * plus a handful of execution options. `scriptContent` is base64-encoded in
@@ -622,7 +657,7 @@ export function flattenScriptToCspSettings(raw: Record<string, unknown>, policyI
     let stringValue: string | undefined;
     if (key === "scriptContent" && typeof value === "string") {
       try {
-        stringValue = Buffer.from(value, "base64").toString("utf-8");
+        stringValue = decodeBase64Text(value);
       } catch {
         stringValue = value;
       }

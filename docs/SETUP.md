@@ -130,7 +130,7 @@ if ($existing) {
 }
 ```
 
-Open the consent URL it prints, review the four permissions, and accept. The script deliberately
+Open the consent URL it prints, review the five permissions, and accept. The script deliberately
 does **not** grant consent for you: consenting is the one step where an admin should see exactly
 what they are approving, and granting it programmatically skips that screen.
 

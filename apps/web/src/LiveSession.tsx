@@ -133,11 +133,7 @@ function LiveSetupPanel({ onUseSampleTenant }: { onUseSampleTenant: () => void }
             </li>
             <li>
               These <span className="text-slate-300">delegated</span> Graph permissions, admin-consented:{" "}
-              {GRAPH_SCOPES.join(", ")}. All read-only.
-            </li>
-            <li>
-              {OPTIONAL_GRAPH_SCOPES.join(", ")}, also read-only, for the apps an endpoint gets. Without it the Apps tab
-              asks for it and the baseline still loads.
+              {[...GRAPH_SCOPES, ...OPTIONAL_GRAPH_SCOPES].join(", ")}. All read-only.
             </li>
           </ul>
           <p className="mt-2">

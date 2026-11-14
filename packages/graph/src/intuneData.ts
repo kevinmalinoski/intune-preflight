@@ -446,7 +446,7 @@ function resolveGroupAssignmentIds(assignments: RawGroupAssignment[]): string[] 
  * Proactive Remediations (`deviceHealthScripts`, detection+remediation
  * script pairs) -- a separate, broader feature out of scope for now.
  */
-async function fetchPlatformScripts(ctx: LoadContext): Promise<IntunePolicy[]> {
+export async function fetchPlatformScripts(ctx: LoadContext): Promise<IntunePolicy[]> {
   const sources: { path: string; platform: "windows" | "macos"; assignmentStyle: "standard" | "groupOnly" }[] = [
     { path: "/deviceManagement/deviceManagementScripts", platform: "windows", assignmentStyle: "standard" },
     { path: "/deviceManagement/deviceShellScripts", platform: "macos", assignmentStyle: "groupOnly" },
@@ -494,13 +494,30 @@ async function fetchPlatformScripts(ctx: LoadContext): Promise<IntunePolicy[]> {
           ({ includedGroupIds, excludedGroupIds, assignmentFilters } = resolveAssignmentGroupIds(assignments));
         }
 
+        // A list call returns `scriptContent` as null for every script: Graph
+        // only includes the script itself when one is read by id. Without this
+        // read the baseline showed a script's run options and file name and
+        // never the script. A failure here costs the content, not the policy.
+        let scriptContent: unknown = item.scriptContent;
+        if (typeof scriptContent !== "string" || scriptContent === "") {
+          try {
+            const detail = await ctx.client.graphGetObject<{ scriptContent?: string | null }>(
+              `${source.path}/${id}`,
+              useBeta
+            );
+            scriptContent = detail.scriptContent;
+          } catch (err) {
+            console.warn(`Could not read the content of script "${displayName}": ${(err as Error).message}`);
+          }
+        }
+
         return {
           id,
           kind: "platformScript",
           displayName,
           description: item.description as string | undefined,
           platform: source.platform,
-          settings: flattenScriptToCspSettings(item, id),
+          settings: flattenScriptToCspSettings({ ...item, scriptContent }, id),
           assignedGroupIds: includedGroupIds,
           excludedGroupIds,
           assignmentFilters,

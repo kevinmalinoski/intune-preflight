@@ -3,6 +3,7 @@ import { resolutionRuleDetail, resolutionRuleLabel } from "@intune-preflight/sha
 import { toggled } from "./collections.ts";
 import { cspRef, isLegacyRow, type DisplayRow } from "./baselineRow.ts";
 import { CspRef } from "./CspRef.tsx";
+import { SettingValue } from "./SettingValue.tsx";
 
 /**
  * The merged baseline for a narrow window: the same rows the desktop data grid
@@ -199,7 +200,11 @@ function SettingCard({ row }: { row: DisplayRow }) {
                 {row.kind === "layered" ? "⧫" : "⚠"}
               </span>
               <span className="min-w-0 flex-1">
-                <span className="text-xs font-semibold text-slate-200">{v.value}</span>
+                <SettingValue
+                  value={v.value}
+                  title={`${row.displayName} — ${v.sourcePolicyName}`}
+                  className="text-xs font-semibold text-slate-200"
+                />
                 <span className="mt-0.5 block break-words text-[11px] leading-snug text-slate-500">
                   {v.sourcePolicyName}
                 </span>
@@ -209,7 +214,7 @@ function SettingCard({ row }: { row: DisplayRow }) {
         </div>
       ) : (
         <div className="mt-1 text-[11px] leading-snug">
-          <span className="font-semibold text-emerald-300">{row.value}</span>
+          <SettingValue value={row.value} title={row.displayName} className="font-semibold text-emerald-300" />
           <span className="text-slate-500">
             {" · "}
             {row.kind === "overlap" ? row.sources.join(" · ") : row.sourcePolicyName}

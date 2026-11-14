@@ -15,6 +15,7 @@ import { BaselineSettingList } from "./BaselineSettingList.tsx";
 import { buildRows, cspRef, isLegacyRow, type DisplayRow } from "./baselineRow.ts";
 import { CspRef } from "./CspRef.tsx";
 import { saveDownload } from "./download.ts";
+import { SettingValue } from "./SettingValue.tsx";
 import { ExportMenu } from "./ExportMenu.tsx";
 import { readStored, readStoredJson, writeStored } from "./storage.ts";
 import { toggled } from "./collections.ts";
@@ -284,7 +285,11 @@ export function SimulationBaselinePanel({
             ""
           )
         )}
-        {cell("value", "truncate px-3 py-2 align-top text-slate-300", <span title={v.value}>{v.value}</span>)}
+        {cell(
+          "value",
+          "truncate px-3 py-2 align-top text-slate-300",
+          <SettingValue value={v.value} title={`${r.displayName} — ${v.sourcePolicyName}`} />
+        )}
         {cell(
           "source",
           "px-3 py-2 align-top text-slate-400",
@@ -305,7 +310,11 @@ export function SimulationBaselinePanel({
         <tr key={r.settingId} className="border-t border-ink-800">
           {cell("cspArea", "px-3 py-2 align-top text-slate-400", r.cspArea)}
           {cell("setting", "px-3 py-2 align-top text-slate-200", r.displayName)}
-          {cell("value", "truncate px-3 py-2 align-top text-slate-300", <span title={r.value}>{r.value}</span>)}
+          {cell(
+            "value",
+            "truncate px-3 py-2 align-top text-slate-300",
+            <SettingValue value={r.value} title={r.displayName} />
+          )}
           {cell(
             "source",
             "px-3 py-2 align-top text-slate-400",
@@ -330,7 +339,11 @@ export function SimulationBaselinePanel({
         <tr key={`${r.settingId}-c-${i}`} className="border-t border-ink-800 bg-amber-500/10">
           {cell("cspArea", "px-3 py-2 align-top text-slate-400", i === 0 ? r.cspArea : "")}
           {cell("setting", "px-3 py-2 align-top text-slate-200", i === 0 ? r.displayName : "")}
-          {cell("value", "truncate px-3 py-2 align-top text-slate-300", <span title={v.value}>{v.value}</span>)}
+          {cell(
+            "value",
+            "truncate px-3 py-2 align-top text-slate-300",
+            <SettingValue value={v.value} title={`${r.displayName} — ${v.sourcePolicyName}`} />
+          )}
           {cell(
             "source",
             "px-3 py-2 align-top text-slate-400",
@@ -354,7 +367,11 @@ export function SimulationBaselinePanel({
       >
         {cell("cspArea", "px-3 py-2 align-top text-slate-400", r.cspArea)}
         {cell("setting", "px-3 py-2 align-top text-slate-200", r.displayName)}
-        {cell("value", "truncate px-3 py-2 align-top text-slate-300", <span title={r.value}>{r.value}</span>)}
+        {cell(
+          "value",
+          "truncate px-3 py-2 align-top text-slate-300",
+          <SettingValue value={r.value} title={r.displayName} />
+        )}
         {cell(
           "source",
           "px-3 py-2 align-top text-sky-300",
@@ -418,7 +435,11 @@ export function SimulationBaselinePanel({
           i === 0 ? <span className={`rounded px-1.5 py-0.5 text-[9px] font-medium ${badge.c}`}>{badge.t}</span> : ""
         )}
         {cell("setting", "px-3 py-2 align-top text-slate-200", i === 0 ? f.displayName : "")}
-        {cell("value", "truncate px-3 py-2 align-top text-slate-300", <span title={e.value}>{e.value}</span>)}
+        {cell(
+          "value",
+          "truncate px-3 py-2 align-top text-slate-300",
+          <SettingValue value={e.value} title={`${f.displayName} — ${e.sourcePolicyName}`} />
+        )}
         {cell(
           "source",
           "px-3 py-2 align-top text-slate-400",

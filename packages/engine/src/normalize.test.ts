@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   flattenIntentSettings,
+  flattenScriptToCspSettings,
   flattenSettingsCatalogEntries,
   flattenToCspSettings,
   indexIntentSettingDefinitions,
@@ -645,5 +646,46 @@ describe("parseAssignmentTarget (well-known virtual targets)", () => {
 
   it("passes through a plain group id", () => {
     expect(parseAssignmentTarget({ target: { groupId: "g2" } }).groupId).toBe("g2");
+  });
+});
+
+describe("flattenScriptToCspSettings (script content decoding)", () => {
+  const b64 = (bytes: number[]) => btoa(String.fromCharCode(...bytes));
+  const utf16le = (text: string) => [...text].flatMap((c) => [c.charCodeAt(0) & 0xff, c.charCodeAt(0) >> 8]);
+  const content = (scriptContent: string) =>
+    flattenScriptToCspSettings({ scriptContent }, "p1").find((s) => s.displayName === "Script content")?.value;
+
+  it("decodes UTF-8, including characters outside ASCII", () => {
+    const bytes = [...new TextEncoder().encode('Write-Host "héllo — ✓"')];
+    expect(content(b64(bytes))).toBe('Write-Host "héllo — ✓"');
+  });
+
+  it("drops a UTF-8 byte-order mark", () => {
+    expect(content(b64([0xef, 0xbb, 0xbf, ...new TextEncoder().encode("#!/bin/sh")]))).toBe("#!/bin/sh");
+  });
+
+  it("decodes UTF-16 with a byte-order mark, as PowerShell ISE saves it", () => {
+    expect(content(b64([0xff, 0xfe, ...utf16le("Get-Process")]))).toBe("Get-Process");
+  });
+
+  it("decodes UTF-16 that has no byte-order mark", () => {
+    expect(content(b64(utf16le("Get-Service | Stop-Service")))).toBe("Get-Service | Stop-Service");
+  });
+
+  it("decodes without Node's Buffer, which the browser builds do not have", () => {
+    // The regression: `Buffer.from` threw in the browser, the fallback kept the
+    // raw value, and every script was displayed as base64.
+    const g = globalThis as { Buffer?: unknown };
+    const saved = g.Buffer;
+    g.Buffer = undefined;
+    try {
+      expect(content(btoa("echo hello"))).toBe("echo hello");
+    } finally {
+      g.Buffer = saved;
+    }
+  });
+
+  it("keeps the raw value when it is not base64 at all", () => {
+    expect(content("not base64 !!!")).toBe("not base64 !!!");
   });
 });

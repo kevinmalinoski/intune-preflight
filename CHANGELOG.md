@@ -6,6 +6,37 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [3.0.2] — 2026-11-14
+
+Platform Scripts show their script, the Docker self-host path builds again, and
+every setup surface names the apps permission.
+
+### Fixed
+- **Platform Scripts show the script.** They never did: a script's run options
+  and file name were listed and its content was missing. Graph leaves
+  `scriptContent` out of a list call and only returns it when a script is read
+  by id, so each script is now read individually (one extra Graph call per
+  script). Separately, the decoder used Node's `Buffer`, which a browser does
+  not have, so the browser builds would have shown raw base64; it now uses
+  `atob` and `TextDecoder` and reads UTF-16 scripts, as PowerShell ISE saves
+  them, as well as UTF-8.
+- **The Docker images build again.** Neither Dockerfile copied
+  `packages/graph`, so `docker compose up --build` failed compiling the server
+  with "Cannot find module '@intune-preflight/graph'". Both now copy and build
+  it, the web app declares the dependency it already imported, and CI builds
+  both images so this cannot go unnoticed again.
+
+### Added
+- **A viewer for long values.** A value with more than one line, or longer
+  than 240 characters, is a **View** button in the baseline table and list
+  instead of a truncated cell. It opens the full text in a scrolling,
+  monospaced window with a Copy button. In practice this is how a script is
+  read.
+
+### Changed
+- **The sign-in screen lists all five permissions together**, apps included,
+  instead of four and a separate note. The setup guide's consent step says five.
+
 ## [3.0.1] — 2026-11-14
 
 The top bar on a phone, which v3.0.0 left two rows tall.

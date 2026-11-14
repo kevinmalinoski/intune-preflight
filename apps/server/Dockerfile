@@ -5,14 +5,17 @@ COPY package.json package-lock.json ./
 COPY apps/server/package.json apps/server/package.json
 COPY packages/shared/package.json packages/shared/package.json
 COPY packages/engine/package.json packages/engine/package.json
+COPY packages/graph/package.json packages/graph/package.json
 # `npm ci` (not `npm install`) so the image is built from the committed lockfile
 # and is reproducible -- an `install` can silently resolve newer minors.
 RUN npm ci --workspaces --include-workspace-root
 COPY packages/shared packages/shared
 COPY packages/engine packages/engine
+COPY packages/graph packages/graph
 COPY apps/server apps/server
 RUN npm run build -w packages/shared \
  && npm run build -w packages/engine \
+ && npm run build -w packages/graph \
  && npm run build -w apps/server
 
 # Dependency stage: the runtime tree only, so TypeScript, tsx and the test
@@ -23,6 +26,7 @@ COPY package.json package-lock.json ./
 COPY apps/server/package.json apps/server/package.json
 COPY packages/shared/package.json packages/shared/package.json
 COPY packages/engine/package.json packages/engine/package.json
+COPY packages/graph/package.json packages/graph/package.json
 RUN npm ci --omit=dev --workspaces --include-workspace-root
 
 FROM node:20-alpine
@@ -35,6 +39,8 @@ COPY --from=build /repo/packages/shared/dist packages/shared/dist
 COPY --from=build /repo/packages/shared/package.json packages/shared/package.json
 COPY --from=build /repo/packages/engine/dist packages/engine/dist
 COPY --from=build /repo/packages/engine/package.json packages/engine/package.json
+COPY --from=build /repo/packages/graph/dist packages/graph/dist
+COPY --from=build /repo/packages/graph/package.json packages/graph/package.json
 # Drop root -- the server only reads its own files and talks to Graph.
 USER node
 EXPOSE 4000
