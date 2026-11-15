@@ -24,6 +24,7 @@ import {
   primaryIntent,
 } from "./appsView.ts";
 import { toggled } from "./collections.ts";
+import { PortalLink } from "./PortalLink.tsx";
 
 /**
  * The apps a simulated endpoint gets, and what is wrong with how they are
@@ -92,6 +93,7 @@ const ruleDetail = (id: string) => {
 type AppRow = {
   id: string;
   displayName: string;
+  portalUrl?: string;
   publisher?: string;
   appType: string;
   family: AppFamily;
@@ -105,6 +107,7 @@ function buildAppRows(apps: SimulationApps): AppRow[] {
     const row = byId.get(a.id) ?? {
       id: a.id,
       displayName: a.displayName,
+      portalUrl: a.portalUrl,
       publisher: a.publisher,
       appType: a.appType,
       family: a.family,
@@ -442,6 +445,7 @@ export function AppsList({
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="min-w-0 break-words font-medium text-slate-100" title={r.appType}>
             {r.displayName}
+            <PortalLink url={r.portalUrl} name={r.displayName} className="ml-1 align-[-3px]" />
           </span>
           {conflicted && (
             <AlertButton
@@ -651,7 +655,10 @@ export function AppsList({
                 return (
                   <div key={a.appId} className="border-b border-ink-800/60 py-2 pl-6 pr-3 last:border-b-0">
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="min-w-0 break-words font-medium text-slate-100">{a.displayName}</span>
+                      <span className="min-w-0 break-words font-medium text-slate-100">
+                        {a.displayName}
+                        <PortalLink url={row?.portalUrl} name={a.displayName} className="ml-1 align-[-3px]" />
+                      </span>
                       {row && <FamilyTag family={row.family} appType={a.appType} />}
                     </div>
                     {(row?.intents ?? a.intents.map((intent) => ({ intent, viaGroupIds: [] as string[] }))).map((i) => (
@@ -800,6 +807,7 @@ export function AppsList({
                     <span className="min-w-0 break-words font-medium text-slate-400 line-through decoration-slate-600">
                       {a.displayName}
                     </span>
+                    <PortalLink url={a.portalUrl} name={a.displayName} />
                     <FamilyTag family={a.family} appType={a.appType} />
                     <span className="text-[11px] font-medium" style={{ color: APP_INTENT_COLOR[a.intent] }}>
                       {appIntentLabel(a.intent)}

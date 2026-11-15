@@ -14,6 +14,7 @@ import { SimulationDiagram } from "./SimulationDiagram.tsx";
 import { SimulationBaselinePanel, type BaselineScope } from "./SimulationBaselinePanel.tsx";
 import { saveDownload } from "./download.ts";
 import { readStored, writeStored } from "./storage.ts";
+import { PolicyLinksContext } from "./portalDemo.ts";
 import { isCompact, subscribeLayout } from "./viewport.ts";
 
 const RAIL_TAB_KEY = "simulatorRailTab";
@@ -260,158 +261,174 @@ export function EndpointSimulator({
     </>
   );
 
-  return (
-    <div className="flex h-full flex-col">
-      {/* Below `lg` there is no room for a sidebar beside the canvas, so the
-          endpoint is one line that opens the same controls as a slide-over. */}
-      {compact && !focus && (
-        <EndpointSummary
-          groups={groups}
-          selectedGroupIds={selectedGroupIds}
-          platform={platform}
-          filters={filters}
-          deviceFilterIds={deviceFilterIds}
-          isAutopilotDevice={isAutopilotDevice}
-          groupTag={groupTag}
-          onOpen={() => setEndpointSheetOpen(true)}
-        />
-      )}
+  // Name -> admin-center address, for the baseline's source column. A name
+  // shared by two policies is dropped: the link could be to either.
+  const policyLinks = useMemo(() => {
+    const links = new Map<string, string>();
+    const shared = new Set<string>();
+    for (const p of [...(simulation?.policies ?? []), ...(simulation?.excludedPolicies ?? [])]) {
+      if (!p.portalUrl) continue;
+      const seen = links.get(p.displayName);
+      if (seen && seen !== p.portalUrl) shared.add(p.displayName);
+      links.set(p.displayName, p.portalUrl);
+    }
+    for (const name of shared) links.delete(name);
+    return links;
+  }, [simulation]);
 
-      {/* Three columns at `lg`, in the order the tool is used and the diagram
+  return (
+    <PolicyLinksContext.Provider value={policyLinks}>
+      <div className="flex h-full flex-col">
+        {/* Below `lg` there is no room for a sidebar beside the canvas, so the
+          endpoint is one line that opens the same controls as a slide-over. */}
+        {compact && !focus && (
+          <EndpointSummary
+            groups={groups}
+            selectedGroupIds={selectedGroupIds}
+            platform={platform}
+            filters={filters}
+            deviceFilterIds={deviceFilterIds}
+            isAutopilotDevice={isAutopilotDevice}
+            groupTag={groupTag}
+            onOpen={() => setEndpointSheetOpen(true)}
+          />
+        )}
+
+        {/* Three columns at `lg`, in the order the tool is used and the diagram
           is drawn: define the endpoint, watch it resolve, read the result.
           The inputs used to be full-width bars ABOVE the canvas, so every
           control that was open took its height from the diagram and the graph
           refitted each time. Beside it, nothing in the sidebar can resize it.
           `min-h-0` throughout, or a flex child refuses to shrink under its own
           content and pushes its neighbours off the bottom of the window. */}
-      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-        {!compact &&
-          !focus &&
-          (sidebarCollapsed ? (
-            <button
-              onClick={() => setSidebarCollapsed(false)}
-              title="Show the endpoint controls"
-              aria-label="Show the endpoint controls"
-              aria-expanded={false}
-              className="flex w-9 shrink-0 flex-col items-center gap-3 border-r border-ink-700 bg-ink-900 py-3 text-slate-400 hover:bg-ink-800/60 hover:text-slate-200"
-            >
-              <span aria-hidden>»</span>
-              <span className="text-[10px] font-medium uppercase tracking-wide [writing-mode:vertical-rl]">
-                Endpoint · {selectedGroupIds.length} group{selectedGroupIds.length === 1 ? "" : "s"}
-              </span>
-            </button>
-          ) : (
-            <aside
-              aria-label="Simulated endpoint"
-              className="flex min-h-0 w-80 shrink-0 flex-col border-r border-ink-700 bg-ink-900"
-            >
-              <div className="flex shrink-0 items-center gap-2 border-b border-ink-700 px-3 py-2">
-                <span className="text-sm" aria-hidden>
-                  💻
+        <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+          {!compact &&
+            !focus &&
+            (sidebarCollapsed ? (
+              <button
+                onClick={() => setSidebarCollapsed(false)}
+                title="Show the endpoint controls"
+                aria-label="Show the endpoint controls"
+                aria-expanded={false}
+                className="flex w-9 shrink-0 flex-col items-center gap-3 border-r border-ink-700 bg-ink-900 py-3 text-slate-400 hover:bg-ink-800/60 hover:text-slate-200"
+              >
+                <span aria-hidden>»</span>
+                <span className="text-[10px] font-medium uppercase tracking-wide [writing-mode:vertical-rl]">
+                  Endpoint · {selectedGroupIds.length} group{selectedGroupIds.length === 1 ? "" : "s"}
                 </span>
-                <span className="min-w-0 flex-1 text-xs font-semibold text-slate-200">Simulated endpoint</span>
-                <button
-                  onClick={() => setSidebarCollapsed(true)}
-                  title="Collapse the endpoint controls to give the diagram the width"
-                  aria-label="Collapse the endpoint controls"
-                  aria-expanded
-                  className="shrink-0 rounded-md border border-ink-700 px-2 py-0.5 text-xs text-slate-400 hover:bg-ink-800 hover:text-slate-200"
-                >
-                  «
-                </button>
-              </div>
-              {endpointControls}
-            </aside>
-          ))}
+              </button>
+            ) : (
+              <aside
+                aria-label="Simulated endpoint"
+                className="flex min-h-0 w-80 shrink-0 flex-col border-r border-ink-700 bg-ink-900"
+              >
+                <div className="flex shrink-0 items-center gap-2 border-b border-ink-700 px-3 py-2">
+                  <span className="text-sm" aria-hidden>
+                    💻
+                  </span>
+                  <span className="min-w-0 flex-1 text-xs font-semibold text-slate-200">Simulated endpoint</span>
+                  <button
+                    onClick={() => setSidebarCollapsed(true)}
+                    title="Collapse the endpoint controls to give the diagram the width"
+                    aria-label="Collapse the endpoint controls"
+                    aria-expanded
+                    className="shrink-0 rounded-md border border-ink-700 px-2 py-0.5 text-xs text-slate-400 hover:bg-ink-800 hover:text-slate-200"
+                  >
+                    «
+                  </button>
+                </div>
+                {endpointControls}
+              </aside>
+            ))}
 
-        {/* `overflow-hidden` contains the floating overlays: the legend is taller
+          {/* `overflow-hidden` contains the floating overlays: the legend is taller
             than this area gets once the picker is open on a phone, and without
             this it spills upwards over the bars above instead of being clipped
             to the canvas it belongs to. */}
-        <div className="relative min-h-0 flex-1 overflow-hidden bg-ink-950">
-          {error && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center p-8 text-center text-sm text-red-400">
-              {error}
-            </div>
-          )}
-          {!error && loading && (
-            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 text-center">
-              <span
-                className="h-8 w-8 animate-spin rounded-full border-2 border-ink-700 border-t-sky-400"
-                aria-hidden
-              />
-              <div className="text-sm text-slate-300">Loading tenant data from Intune…</div>
-              <div className="max-w-xs text-xs text-slate-600">
-                The first load reads every policy and assignment in the tenant — this can take a little while.
+          <div className="relative min-h-0 flex-1 overflow-hidden bg-ink-950">
+            {error && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center p-8 text-center text-sm text-red-400">
+                {error}
               </div>
-            </div>
-          )}
-          {!error && !loading && simulation && (
-            <>
-              <SimulationDiagram
-                simulation={simulation}
-                deviceFilterNames={deviceFilterNames}
-                onOpenBaseline={openBaseline}
-                content={railTab === "apps" ? "apps" : "policies"}
-                onContentChange={(next) => selectRailTab(next === "apps" ? "apps" : "baseline")}
-                showAvailableApps={showAvailableApps}
-                onShowAvailableAppsChange={setShowAvailableApps}
-                focus={focus}
-                baselineOpen={showBaseline}
-              />
-              {/* Capped so these can't run off a narrow canvas -- the excluded-
+            )}
+            {!error && loading && (
+              <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 text-center">
+                <span
+                  className="h-8 w-8 animate-spin rounded-full border-2 border-ink-700 border-t-sky-400"
+                  aria-hidden
+                />
+                <div className="text-sm text-slate-300">Loading tenant data from Intune…</div>
+                <div className="max-w-xs text-xs text-slate-600">
+                  The first load reads every policy and assignment in the tenant — this can take a little while.
+                </div>
+              </div>
+            )}
+            {!error && !loading && simulation && (
+              <>
+                <SimulationDiagram
+                  simulation={simulation}
+                  deviceFilterNames={deviceFilterNames}
+                  onOpenBaseline={openBaseline}
+                  content={railTab === "apps" ? "apps" : "policies"}
+                  onContentChange={(next) => selectRailTab(next === "apps" ? "apps" : "baseline")}
+                  showAvailableApps={showAvailableApps}
+                  onShowAvailableAppsChange={setShowAvailableApps}
+                  focus={focus}
+                  baselineOpen={showBaseline}
+                />
+                {/* Capped so these can't run off a narrow canvas -- the excluded-
               policies note is a full sentence. Below `lg` they also drop to a
               band of their own under the diagram's own top-left controls, which
               is the only arrangement that holds however many cards are
               showing. */}
-              <div className="absolute right-4 top-14 z-10 flex max-w-[calc(100%-2rem)] flex-col items-end gap-2 lg:top-4">
-                <div className="flex items-start gap-2">
-                  {/* Autopilot is a Windows-only enrollment path, so off Windows
+                <div className="absolute right-4 top-14 z-10 flex max-w-[calc(100%-2rem)] flex-col items-end gap-2 lg:top-4">
+                  <div className="flex items-start gap-2">
+                    {/* Autopilot is a Windows-only enrollment path, so off Windows
                   there is no Group Tag to keep and the pill isn't rendered. */}
-                  {focus && platform === "windows" && (
-                    <GroupTagPill
-                      groups={groups}
-                      isAutopilotDevice={isAutopilotDevice}
-                      onToggleAutopilotDevice={() => dispatch({ type: "toggleAutopilotDevice" })}
-                      groupTag={groupTag}
-                      onGroupTagChange={(value) => dispatch({ type: "setGroupTag", groupTag: value })}
-                      selectedGroupCount={selectedGroupIds.length}
-                      settingsCount={simulation.settings.length}
-                      conflictsCount={simulation.conflicts.length}
-                    />
-                  )}
-                  {onToggleFocus && (
-                    <button
-                      onClick={onToggleFocus}
-                      title={
-                        focus
-                          ? "Leave focus mode and bring the pickers back"
-                          : "Focus mode: hide every picker and give the diagram the whole window"
-                      }
-                      aria-pressed={focus}
-                      className="flex min-h-[36px] items-center rounded-lg border border-ink-700 bg-ink-900/90 px-2.5 py-1.5 text-xs text-slate-300 shadow-lg backdrop-blur transition-colors hover:bg-ink-800"
-                    >
-                      {focus ? "✕" : "⛶"}
-                    </button>
-                  )}
-                </div>
-                {/* Focus mode keeps these top-right, where the canvas is wide
+                    {focus && platform === "windows" && (
+                      <GroupTagPill
+                        groups={groups}
+                        isAutopilotDevice={isAutopilotDevice}
+                        onToggleAutopilotDevice={() => dispatch({ type: "toggleAutopilotDevice" })}
+                        groupTag={groupTag}
+                        onGroupTagChange={(value) => dispatch({ type: "setGroupTag", groupTag: value })}
+                        selectedGroupCount={selectedGroupIds.length}
+                        settingsCount={simulation.settings.length}
+                        conflictsCount={simulation.conflicts.length}
+                      />
+                    )}
+                    {onToggleFocus && (
+                      <button
+                        onClick={onToggleFocus}
+                        title={
+                          focus
+                            ? "Leave focus mode and bring the pickers back"
+                            : "Focus mode: hide every picker and give the diagram the whole window"
+                        }
+                        aria-pressed={focus}
+                        className="flex min-h-[36px] items-center rounded-lg border border-ink-700 bg-ink-900/90 px-2.5 py-1.5 text-xs text-slate-300 shadow-lg backdrop-blur transition-colors hover:bg-ink-800"
+                      >
+                        {focus ? "✕" : "⛶"}
+                      </button>
+                    )}
+                  </div>
+                  {/* Focus mode keeps these top-right, where the canvas is wide
                 and nothing competes. Below `lg` they move to the bottom-left
                 corner instead -- the viewport aims the policy column just
                 right of centre, so a top-right button lands squarely on the
                 chips. */}
-                {focus && baselineOverlay}
-              </div>
-              {compact && !focus && (
-                <div className="absolute bottom-14 left-3 z-10 flex max-w-[calc(100%-5rem)] flex-col items-start gap-2">
-                  {baselineOverlay}
+                  {focus && baselineOverlay}
                 </div>
-              )}
-            </>
-          )}
-        </div>
+                {compact && !focus && (
+                  <div className="absolute bottom-14 left-3 z-10 flex max-w-[calc(100%-5rem)] flex-col items-start gap-2">
+                    {baselineOverlay}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
 
-        {/* The rail, at `lg` and up only.
+          {/* The rail, at `lg` and up only.
             Below it this was a collapsed bar that opened a 45vh accordion of
             the baseline by CSP area, over the canvas. It was the fourth list
             on a phone -- after the policy types, their policies, and the
@@ -424,67 +441,68 @@ export function EndpointSimulator({
 
             The rail stays at `lg`, where it costs nothing and cause and effect
             being on screen together is the whole argument for it. */}
-        {hasRail && !error && simulation && (
-          <SimulationRail
+          {hasRail && !error && simulation && (
+            <SimulationRail
+              simulation={simulation}
+              tab={simulation.apps ? railTab : "baseline"}
+              onSelectTab={selectRailTab}
+              appsFocus={appsFocus}
+              onExportApps={exportApps}
+              showAvailableApps={showAvailableApps}
+              onShowAvailableAppsChange={setShowAvailableApps}
+              onOpenBaseline={() => openBaseline(null)}
+            />
+          )}
+        </div>
+
+        {compact && endpointSheetOpen && !focus && (
+          <>
+            <div className="fixed inset-0 z-30 bg-black/50" onClick={() => setEndpointSheetOpen(false)} />
+            <div
+              role="dialog"
+              aria-label="Simulated endpoint"
+              className="fixed inset-y-0 left-0 z-40 flex w-[min(22rem,92vw)] flex-col border-r border-ink-700 bg-ink-900 shadow-2xl"
+            >
+              <div className="flex shrink-0 items-center gap-2 border-b border-ink-700 px-3 py-2">
+                <span className="min-w-0 flex-1 text-xs font-semibold text-slate-200">Simulated endpoint</span>
+                <button
+                  onClick={() => setEndpointSheetOpen(false)}
+                  aria-label="Close the endpoint controls"
+                  className="shrink-0 rounded-md border border-ink-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-ink-800"
+                >
+                  Done
+                </button>
+              </div>
+              {endpointControls}
+            </div>
+          </>
+        )}
+
+        {showApps && !hasRail && simulation?.apps && (
+          <AppsPanel
             simulation={simulation}
-            tab={simulation.apps ? railTab : "baseline"}
-            onSelectTab={selectRailTab}
-            appsFocus={appsFocus}
-            onExportApps={exportApps}
-            showAvailableApps={showAvailableApps}
-            onShowAvailableAppsChange={setShowAvailableApps}
-            onOpenBaseline={() => openBaseline(null)}
+            focus={appsFocus}
+            onClose={() => setShowApps(false)}
+            onExport={exportApps}
+            showAvailable={showAvailableApps}
+            onShowAvailableChange={setShowAvailableApps}
+          />
+        )}
+
+        {showBaseline && simulation && (
+          <SimulationBaselinePanel
+            simulation={simulation}
+            groupIds={selectedGroupIds}
+            platform={platform}
+            deviceFilterIds={deviceFilterIds}
+            unassignedPolicyIds={unassignedPolicyIds}
+            scope={baselineScope}
+            onClearScope={() => setBaselineScope(null)}
+            onClose={() => setShowBaseline(false)}
           />
         )}
       </div>
-
-      {compact && endpointSheetOpen && !focus && (
-        <>
-          <div className="fixed inset-0 z-30 bg-black/50" onClick={() => setEndpointSheetOpen(false)} />
-          <div
-            role="dialog"
-            aria-label="Simulated endpoint"
-            className="fixed inset-y-0 left-0 z-40 flex w-[min(22rem,92vw)] flex-col border-r border-ink-700 bg-ink-900 shadow-2xl"
-          >
-            <div className="flex shrink-0 items-center gap-2 border-b border-ink-700 px-3 py-2">
-              <span className="min-w-0 flex-1 text-xs font-semibold text-slate-200">Simulated endpoint</span>
-              <button
-                onClick={() => setEndpointSheetOpen(false)}
-                aria-label="Close the endpoint controls"
-                className="shrink-0 rounded-md border border-ink-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-ink-800"
-              >
-                Done
-              </button>
-            </div>
-            {endpointControls}
-          </div>
-        </>
-      )}
-
-      {showApps && !hasRail && simulation?.apps && (
-        <AppsPanel
-          simulation={simulation}
-          focus={appsFocus}
-          onClose={() => setShowApps(false)}
-          onExport={exportApps}
-          showAvailable={showAvailableApps}
-          onShowAvailableChange={setShowAvailableApps}
-        />
-      )}
-
-      {showBaseline && simulation && (
-        <SimulationBaselinePanel
-          simulation={simulation}
-          groupIds={selectedGroupIds}
-          platform={platform}
-          deviceFilterIds={deviceFilterIds}
-          unassignedPolicyIds={unassignedPolicyIds}
-          scope={baselineScope}
-          onClearScope={() => setBaselineScope(null)}
-          onClose={() => setShowBaseline(false)}
-        />
-      )}
-    </div>
+    </PolicyLinksContext.Provider>
   );
 }
 

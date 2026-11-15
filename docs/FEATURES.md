@@ -122,7 +122,7 @@ _Every setting from every applied policy, merged, filterable, and traceable back
 
 - **Drill down from anywhere** — click a policy type bubble or an individual policy in the diagram to open the baseline scoped to it.
 - **Resizable columns and a column picker** — show and hide columns Intune-style; your layout persists.
-- **Source tracing** — every setting shows which policy set it.
+- **Source tracing** — every setting shows which policy set it, and where that policy has a page in the admin center its name is a link to it (see [Open in Intune](#open-in-intune)).
 - **Human-readable names and values** — Settings Catalog settings resolve to their real display names and option labels (e.g. "Enabled") rather than raw definition IDs.
 - **Export** — an Excel workbook, CSV or JSON of the full merged baseline, from one **Export ▾** menu.
 
@@ -231,6 +231,16 @@ _A line-of-business `.msi` flagged for conversion, with the Enrollment Status Pa
 **Export** offers an Excel workbook or a CSV. Each app's row carries its own **detection rule** as configured in Intune — the file, registry key or MSI product code Intune checks to decide the app is installed, with every rule listed when there are several. A custom detection script is named as one and its content is left out; a Store app shows its package id. The workbook also carries a **Finding definitions** sheet, stating for every finding exactly what is tested, what it means, what to do and the Microsoft reference — the same definitions the alerts show on hover, so a flag in a spreadsheet can be checked rather than taken on trust.
 
 The Apps view needs one more read-only permission, `DeviceManagementApps.Read.All`, which [SETUP.md](SETUP.md) has you grant with the others. If it is missing, the Apps tab is marked **Needs setup** and names it; the baseline still loads.
+
+## Open in Intune
+
+Finding a problem here usually means going to fix it there. A small arrow beside a policy, app or group opens that exact object in the admin center, in a new tab: Intune for policies and apps, Entra for groups.
+
+- **Where** — group rows in the sidebar, app rows in the Apps list, policy and app rows in the diagram (both the grouped bubbles and Detail view). In the merged baseline, the source policy's name is itself the link.
+- **Separate from the row** — the arrow never ticks a group or opens the baseline; the row's own click still does that.
+- **Only where the address is known** — Microsoft documents no per-object address for the admin center, so a link is shown only for object types whose address has been confirmed: apps, Entra groups, Settings Catalog policies (including the Endpoint Security policies built on it), administrative templates, Windows PowerShell scripts, Windows compliance policies, feature update profiles, update rings, and custom (OMA-URI) and health monitoring profiles. Other device configuration profile types, compliance policies for other platforms, macOS shell scripts and legacy endpoint security policies have no arrow, rather than one that might land somewhere wrong.
+- **Read-only, as ever** — the link opens the admin center in your own session. Preflight itself still never writes to the tenant.
+- **In the sample tenant** — its objects are made up, so the arrow is shown inactive and says on hover what it does against a real tenant.
 
 ## Platform support
 

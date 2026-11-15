@@ -18,7 +18,7 @@ _**New in v3:** switch to **Apps** and the same endpoint shows what gets install
 
 ## Try it now
 
-**▶️ [Open Intune Preflight](https://kevinmalinoski.github.io/intune-preflight/app/)** — sign in with your own admin account to read your tenant, or explore the bundled sample tenant with no sign-in at all. Best on a desktop-sized screen.
+**▶️ [Open Intune Preflight](https://kevinmalinoski.github.io/intune-preflight/app/)** — sign in with your own admin account to read your tenant, or explore the bundled sample tenant with no sign-in at all. It works on a phone and has the most room on a desktop.
 
 Connecting your own tenant takes one PowerShell script and about three minutes: **[walkthrough →](https://kevinmalinoski.github.io/intune-preflight/connect/)**
 
@@ -83,6 +83,10 @@ The normal loop is deploy-and-pray: assign a policy, wait for devices to check i
 - 🚨 **App assignment findings** — the counterparts of the baseline's: **install + uninstall conflicts**, **redundant assignments** (Required *and* Available), and the **same product added as several apps**, which Intune itself never compares. Every alert is a button that narrows the list to it.
 - 📦 **Line-of-business `.msi` → Win32** — LOB `.msi` apps are flagged with Microsoft's guidance to repackage them, and called out when they reach an endpoint that also gets Win32 apps: the combination that can fail the Autopilot Enrollment Status Page.
 - 🔎 **How each app is detected** — the export lists every app's own detection rule (file, registry key, MSI product code) so you don't open each app in the admin center to find out.
+
+**Into the admin center** _(new in v3.1)_
+
+- ↗️ **Open in Intune** — a small arrow beside a policy, app or group opens that exact object in the Intune or Entra admin center, in a new tab. In the merged baseline the source policy's name is the link. Shown only where the address is known to be right.
 
 **Across the tenant**
 

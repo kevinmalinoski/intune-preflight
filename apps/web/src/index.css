@@ -152,3 +152,15 @@ html.desktop-layout #root {
 .react-flow__controls-button svg {
   fill: #cbd5e1;
 }
+
+/* The top bar stays the window's width while the console under it is 1280px
+   and pans. Without this the bar panned too, and the layout switch -- the only
+   way back to the compact layout -- sat at the far right of it, off screen: an
+   admin who switched on a narrow window saw no way to switch back. */
+html.desktop-layout .app-header {
+  position: sticky;
+  left: 0;
+  z-index: 20;
+  width: 100vw;
+  max-width: 100%;
+}

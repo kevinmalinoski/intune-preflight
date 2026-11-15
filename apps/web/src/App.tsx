@@ -5,6 +5,7 @@ import { EndpointSimulator } from "./EndpointSimulator.tsx";
 import { AssignmentReport } from "./AssignmentReport.tsx";
 import { LayoutToggle } from "./LayoutToggle.tsx";
 import { LiveFirstRunGate, SessionLock } from "./LiveSession.tsx";
+import { PortalDemoContext } from "./portalDemo.ts";
 
 // Public repo, for the "deploy your own / self-host" nudges shown in demo mode.
 const REPO_URL = "https://github.com/kevinmalinoski/intune-preflight";
@@ -163,7 +164,7 @@ export default function App() {
           would just be the part we forgot. */}
       {!focus && (
         <>
-          <header className="flex flex-wrap items-center gap-x-2 gap-y-2 border-b border-ink-700 bg-ink-900 px-2 py-2 sm:gap-x-5 sm:px-5 sm:py-2.5">
+          <header className="app-header flex flex-wrap items-center gap-x-2 gap-y-2 border-b border-ink-700 bg-ink-900 px-2 py-2 sm:gap-x-5 sm:px-5 sm:py-2.5">
             {/* The wordmark gives up size before the controls do: below `lg` it
                 is a label, not a banner, so the tabs can sit on its row instead
                 of claiming one of their own. On a phone it goes altogether.
@@ -437,10 +438,10 @@ export default function App() {
             sampleTenantChosen={sampleTenantChosen}
             onUseSampleTenant={() => setSampleTenantChosen(true)}
           >
-            {views}
+            <PortalDemoContext.Provider value={demo === true}>{views}</PortalDemoContext.Provider>
           </LiveFirstRunGate>
         ) : (
-          views
+          <PortalDemoContext.Provider value={demo === true}>{views}</PortalDemoContext.Provider>
         )}
       </div>
     </div>

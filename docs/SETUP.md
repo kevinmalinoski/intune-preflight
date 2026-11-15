@@ -39,9 +39,9 @@ Docker, no host.
 The app uses **application (app-only) permissions**, which require **admin consent**. Granting that consent is a privileged action:
 
 - **Reading the data** afterwards only needs the read-only Graph scopes below — well within what an **Intune Administrator** can see.
-- **Creating the app registration and granting admin consent** needs a higher role: **Global Administrator**, or **Privileged Role Administrator** / **Cloud Application Administrator** / **Application Administrator**.
+- **Granting admin consent** needs **Global Administrator** or **Privileged Role Administrator**. These are Microsoft Graph *application* permissions, and those two are the only roles that can consent to them. A **Cloud Application Administrator** or **Application Administrator** can create the app registration, but cannot grant this consent. (Browser mode is different: its permissions are *delegated*, which those two roles can consent to.)
 
-So if you are *only* an Intune Administrator, you'll need a Global Admin (or one of the roles above) to create the app registration and click **Grant admin consent** once. After that, day-to-day use needs no elevated role.
+So if you are *only* an Intune Administrator, you'll need a Global Administrator or Privileged Role Administrator to click **Grant admin consent** once. After that, day-to-day use needs no elevated role.
 
 ## 1. Create an Entra app registration
 
@@ -232,7 +232,7 @@ Fill in `TENANT_ID`, `CLIENT_ID`, and `CLIENT_SECRET` from step 1.
 
 > On Windows, save `.env` with **LF** line endings and bare `KEY=value` (no quotes) so Docker reads the values cleanly.
 
-With no `.env` present the app still starts — in **Demo** mode against bundled sample data.
+With no `.env` present the app still starts — in **Demo** mode against bundled sample data. That is for `npm run dev`: Docker Compose reads `.env` as a required file, so for Docker create it first, even if you leave the three credentials blank.
 
 ## 3. Run
 

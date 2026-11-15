@@ -432,6 +432,7 @@ export function simulateApps(
       const base = {
         id: app.id,
         displayName: app.displayName,
+        ...(app.portalUrl ? { portalUrl: app.portalUrl } : {}),
         publisher: app.publisher,
         appType: app.appType,
         family: app.family,

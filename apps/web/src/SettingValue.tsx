@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 /**
@@ -17,6 +17,7 @@ function isLongValue(value: string): boolean {
  */
 export function SettingValue({ value, title, className }: { value: string; title?: string; className?: string }) {
   const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
 
   if (!isLongValue(value)) {
     return (
@@ -30,6 +31,7 @@ export function SettingValue({ value, title, className }: { value: string; title
   return (
     <>
       <button
+        ref={trigger}
         type="button"
         onClick={(e) => {
           // Rows that expand on click must not also expand for this.
@@ -42,18 +44,47 @@ export function SettingValue({ value, title, className }: { value: string; title
         <span aria-hidden>{"</>"}</span>
         <span className="truncate">{lines > 1 ? `View · ${lines} lines` : "View full value"}</span>
       </button>
-      {open && <ValueViewer value={value} title={title} onClose={() => setOpen(false)} />}
+      {open && (
+        <ValueViewer
+          value={value}
+          title={title}
+          onClose={() => {
+            setOpen(false);
+            // Back to where the keyboard was, not the top of the page.
+            trigger.current?.focus();
+          }}
+        />
+      )}
     </>
   );
 }
 
 function ValueViewer({ value, title, onClose }: { value: string; title?: string; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
+  const dialog = useRef<HTMLDivElement>(null);
+  const closeButton = useRef<HTMLButtonElement>(null);
+
+  // Opened from inside the baseline panel, which keeps focus to itself. Without
+  // taking focus and holding it here, Tab went round the panel underneath and a
+  // keyboard could reach neither Copy nor Close.
+  useEffect(() => {
+    closeButton.current?.focus();
+  }, []);
 
   useEffect(() => {
     // Capture phase, and stopped there: Escape closes this viewer and not the
     // baseline panel underneath it, which listens for the same key.
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Tab") {
+        const stops = [...(dialog.current?.querySelectorAll<HTMLElement>("button, pre") ?? [])];
+        if (stops.length === 0) return;
+        const at = stops.indexOf(document.activeElement as HTMLElement);
+        const next = e.shiftKey ? (at <= 0 ? stops.length - 1 : at - 1) : at === stops.length - 1 ? 0 : at + 1;
+        e.preventDefault();
+        e.stopPropagation();
+        stops[next].focus();
+        return;
+      }
       if (e.key !== "Escape") return;
       e.stopPropagation();
       onClose();
@@ -84,6 +115,7 @@ function ValueViewer({ value, title, onClose }: { value: string; title?: string;
       }}
     >
       <div
+        ref={dialog}
         role="dialog"
         aria-modal="true"
         aria-label={title ?? "Full value"}
@@ -100,6 +132,7 @@ function ValueViewer({ value, title, onClose }: { value: string; title?: string;
             {copied ? "Copied" : "Copy"}
           </button>
           <button
+            ref={closeButton}
             type="button"
             onClick={onClose}
             aria-label="Close"
@@ -108,7 +141,10 @@ function ValueViewer({ value, title, onClose }: { value: string; title?: string;
             Close
           </button>
         </div>
-        <pre className="min-h-0 flex-1 overflow-auto whitespace-pre p-3 font-mono text-[12px] leading-relaxed text-slate-200">
+        <pre
+          tabIndex={0}
+          className="min-h-0 flex-1 overflow-auto whitespace-pre p-3 font-mono text-[12px] leading-relaxed text-slate-200"
+        >
           {value}
         </pre>
       </div>

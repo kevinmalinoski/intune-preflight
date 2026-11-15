@@ -118,6 +118,7 @@ const RESOLUTION_TYPE_RULES: { keyword: string; rule: ResolutionRule }[] = [
   { keyword: "windowsfeatureupdateprofile", rule: "latest-version-wins" },
   { keyword: "windowsdriverupdateprofile", rule: "approved-wins" },
   { keyword: "windowsqualityupdateprofile", rule: "undocumented" },
+  { keyword: "windowsqualityupdatepolicy", rule: "undocumented" },
   // Every platform's variant -- windows10CompliancePolicy, macOSCompliancePolicy,
   // androidWorkProfileCompliancePolicy, ... Compliance is the one entry
   // identifiable by PolicyKind too, but keying it here keeps one table.

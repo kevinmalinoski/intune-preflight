@@ -23,6 +23,7 @@ import {
   policyPayloadLabel,
   type PolicyStatus,
 } from "./theme.ts";
+import { PortalLink } from "../PortalLink.tsx";
 
 /**
  * Every node the diagram can draw, and the `nodeTypes` map React Flow resolves
@@ -128,6 +129,7 @@ export function PolicyNode({
     excludedReason?: string;
     unassigned?: boolean;
     policyId?: string;
+    portalUrl?: string;
     onOpen?: (scope: BaselineScope) => void;
   };
 }) {
@@ -160,7 +162,10 @@ export function PolicyNode({
         {data.label}
       </div>
       <div className="mt-1.5 flex items-center justify-between gap-2 text-[10px] text-slate-500">
-        <span className="truncate">{KIND_LABEL[data.kind] ?? data.kind}</span>
+        <span className="flex min-w-0 items-center gap-1">
+          <span className="truncate">{KIND_LABEL[data.kind] ?? data.kind}</span>
+          <PortalLink url={data.portalUrl} name={data.label} compact />
+        </span>
         {!data.excluded && !isAppKind(data.kind) && (
           <span className="shrink-0 text-slate-400">{pluralize(data.settingsCount, "setting")}</span>
         )}
@@ -185,6 +190,7 @@ export function PolicyTypeNode({
     policies: {
       id: string;
       name: string;
+      portalUrl?: string;
       status: PolicyStatus;
       settingsCount: number;
       section?: { label: string; color: string };
@@ -278,32 +284,37 @@ export function PolicyTypeNode({
                 {p.section.label}
               </div>
             )}
-            <button
-              onClick={() => data.onOpen?.({ policyId: p.id, label: p.name })}
-              title={
-                isAppKind(data.kind)
-                  ? `${p.name}\n\nOpen it in the Apps list`
-                  : `${p.name}\n\nOpen this policy's settings in the merged baseline`
-              }
-              className="flex items-center gap-2 border-b border-ink-800/60 px-3 py-1.5 text-left transition-colors last:border-b-0 hover:bg-ink-800/60"
-            >
-              <span
-                className="h-1.5 w-1.5 shrink-0 rounded-full"
-                style={{ backgroundColor: p.status === "included" ? data.color : STATUS_DOT[p.status] }}
-              />
-              <span
-                className={`min-w-0 flex-1 truncate leading-snug ${
-                  p.status === "excluded" ? "text-slate-500 line-through" : "text-slate-200"
-                }`}
+            {/* A row, not one button: the admin-center mark is a second control,
+                and a button cannot hold another. */}
+            <div className="flex items-center border-b border-ink-800/60 transition-colors last:border-b-0 hover:bg-ink-800/60">
+              <button
+                onClick={() => data.onOpen?.({ policyId: p.id, label: p.name })}
+                title={
+                  isAppKind(data.kind)
+                    ? `${p.name}\n\nOpen it in the Apps list`
+                    : `${p.name}\n\nOpen this policy's settings in the merged baseline`
+                }
+                className="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left"
               >
-                {p.name}
-              </span>
-              {p.status !== "excluded" && (
-                <span className="shrink-0 text-[10px] text-slate-500">
-                  {policyPayloadLabel(data.kind, p.settingsCount)}
+                <span
+                  className="h-1.5 w-1.5 shrink-0 rounded-full"
+                  style={{ backgroundColor: p.status === "included" ? data.color : STATUS_DOT[p.status] }}
+                />
+                <span
+                  className={`min-w-0 flex-1 truncate leading-snug ${
+                    p.status === "excluded" ? "text-slate-500 line-through" : "text-slate-200"
+                  }`}
+                >
+                  {p.name}
                 </span>
-              )}
-            </button>
+                {p.status !== "excluded" && (
+                  <span className="shrink-0 text-[10px] text-slate-500">
+                    {policyPayloadLabel(data.kind, p.settingsCount)}
+                  </span>
+                )}
+              </button>
+              <PortalLink url={p.portalUrl} name={p.name} compact className="mr-2" />
+            </div>
           </Fragment>
         ))}
         {(hiddenCount > 0 || data.expanded) && data.policies.length > TYPE_BUBBLE_CAP && (

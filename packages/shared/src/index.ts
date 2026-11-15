@@ -24,6 +24,12 @@ export interface IntuneGroup {
   isDynamic?: boolean;
   /** The Entra dynamic membership rule, e.g. (device.deviceOSType -eq "Windows") */
   membershipRule?: string;
+  /**
+   * This object's page in the admin center. Set only by the Graph loader, and
+   * only for the object types whose address is known with confidence -- see
+   * the portal URL builders. Absent in the demo tenant, whose ids are made up.
+   */
+  portalUrl?: string;
 }
 
 /**
@@ -189,6 +195,12 @@ export interface IntunePolicy {
    * Wi-Fi, email, wired network) are deliberately NOT flagged.
    */
   legacyTemplate?: boolean;
+  /**
+   * This object's page in the admin center. Set only by the Graph loader, and
+   * only for the object types whose address is known with confidence -- see
+   * the portal URL builders. Absent in the demo tenant, whose ids are made up.
+   */
+  portalUrl?: string;
 }
 
 /** One high-level Autopilot profile setting shown on the simulation card. */
@@ -357,6 +369,8 @@ export interface CrossModelFinding {
 export interface GroupSummary {
   id: string;
   displayName: string;
+  /** See IntunePolicy.portalUrl. */
+  portalUrl?: string;
   policyCount: number;
   settingsCount: number;
   conflictCount: number;
@@ -543,6 +557,8 @@ export const APP_DETECTION_METHOD_LABEL: Record<AppDetection["method"], string> 
 export interface IntuneApp {
   id: string;
   displayName: string;
+  /** See IntunePolicy.portalUrl. */
+  portalUrl?: string;
   publisher?: string;
   /** Human-readable app type, e.g. "Windows app (Win32)". */
   appType: string;
@@ -583,6 +599,8 @@ export const APPS_GRAPH_PERMISSION = "DeviceManagementApps.Read.All";
 export interface SimulationApp {
   id: string;
   displayName: string;
+  /** See IntunePolicy.portalUrl. */
+  portalUrl?: string;
   publisher?: string;
   appType: string;
   family: AppFamily;
@@ -866,6 +884,8 @@ export interface SimulationPolicy {
   id: string;
   displayName: string;
   kind: PolicyKind;
+  /** See IntunePolicy.portalUrl. */
+  portalUrl?: string;
   /** True for a deprecated device-config template (see IntunePolicy.legacyTemplate). */
   legacyTemplate?: boolean;
   status: "included" | "excluded";
@@ -1181,4 +1201,150 @@ export function classifyAutopilotMatch(membershipRule: string | undefined): Auto
   if (!membershipRule) return { state: "none" };
   if (isAutopilotJoinedRule(membershipRule)) return { state: "match" };
   return { state: BARE_ZTDID_CLAUSE.test(membershipRule) ? "conditional" : "none" };
+}
+
+// ---------------------------------------------------------------------------
+// Admin center links
+//
+// Microsoft documents no per-object address for the Intune admin center. These
+// are the portal's own routes, and each one here has a source it can be held
+// to: a Microsoft-authored one (the ZeroTrustAssessment PowerShell module for a
+// Settings Catalog policy and an Entra group, the Microsoft Intune support
+// team's blog for an app), or an address copied from the admin center itself
+// for that exact kind of object and confirmed to open (2026-11).
+//
+// Several routes carry a numeric code for the profile type that is published
+// nowhere. Only the codes actually observed are in the table below; a profile
+// type that is not in it gets no link rather than a guessed one. So do macOS
+// shell scripts, non-Windows compliance policies and legacy endpoint security,
+// for which there is no observed address at all.
+//
+// A route Microsoft changes is one line to fix, and a wrong one opens the
+// portal's own "not found", in the admin's session -- it cannot change anything.
+// ---------------------------------------------------------------------------
+
+const INTUNE_PORTAL = "https://intune.microsoft.com/";
+const ENTRA_PORTAL = "https://entra.microsoft.com/";
+/** Graph object ids are GUIDs; anything else is not something to put in a URL. */
+const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function intuneAppPortalUrl(appId: string): string | undefined {
+  if (!GUID.test(appId)) return undefined;
+  return `${INTUNE_PORTAL}#view/Microsoft_Intune_Apps/SettingsMenu/~/0/appId/${appId}`;
+}
+
+export function entraGroupPortalUrl(groupId: string): string | undefined {
+  if (!GUID.test(groupId)) return undefined;
+  return `${ENTRA_PORTAL}#view/Microsoft_AAD_IAM/GroupDetailsMenuBlade/~/Overview/groupId/${groupId}`;
+}
+
+/**
+ * A Settings Catalog policy (`configurationPolicies`), which includes the
+ * Endpoint Security policies built on it. The route carries the policy's own
+ * `technologies`, template id and `platforms` exactly as Graph returns them,
+ * so without all of `technologies` and `platforms` there is no link.
+ */
+export function settingsCatalogPortalUrl(policy: {
+  id: string;
+  technologies?: string;
+  templateId?: string;
+  platforms?: string;
+  isAssigned: boolean;
+}): string | undefined {
+  if (!GUID.test(policy.id) || !policy.technologies || !policy.platforms) return undefined;
+  const seg = encodeURIComponent;
+  return (
+    `${INTUNE_PORTAL}#view/Microsoft_Intune_Workflows/PolicySummaryBlade` +
+    `/policyId/${policy.id}` +
+    `/isAssigned~/${policy.isAssigned}` +
+    `/technology/${seg(policy.technologies)}` +
+    `/templateId/${seg(policy.templateId ?? "")}` +
+    `/platformName/${seg(policy.platforms)}`
+  );
+}
+
+const DEVICE_SETTINGS = `${INTUNE_PORTAL}#view/Microsoft_Intune_DeviceSettings`;
+
+/**
+ * A display name as a route segment. The portal splits its routes on "/", and
+ * how it escapes one inside a name has not been observed, so a name holding
+ * one gets no link.
+ */
+function nameSegment(name: string): string | undefined {
+  if (!name || name.includes("/")) return undefined;
+  return encodeURIComponent(name);
+}
+
+const bareType = (odataType?: string) => (odataType ?? "").replace(/^#microsoft\.graph\./, "");
+
+/** A Windows PowerShell platform script (`deviceManagementScripts`). */
+export function windowsScriptPortalUrl(id: string): string | undefined {
+  if (!GUID.test(id)) return undefined;
+  return `${DEVICE_SETTINGS}/ConfigureWMPolicyMenuBlade/~/overview/policyId/${id}/policyType~/0`;
+}
+
+/** The portal's own `policyType` code for a device configuration profile, by Graph type. */
+const DEVICE_CONFIGURATION_POLICY_TYPE: Record<string, number> = {
+  windows10CustomConfiguration: 74,
+  windowsHealthMonitoringConfiguration: 109,
+};
+
+/**
+ * A device configuration profile (`deviceConfigurations`), for the profile
+ * types whose route is known: custom (OMA-URI), health monitoring, and update
+ * rings, which have a blade of their own.
+ */
+export function deviceConfigurationPortalUrl(policy: {
+  id: string;
+  name: string;
+  odataType?: string;
+  isAssigned: boolean;
+}): string | undefined {
+  const name = nameSegment(policy.name);
+  if (!GUID.test(policy.id) || !name) return undefined;
+  const type = bareType(policy.odataType);
+
+  if (type === "windowsUpdateForBusinessConfiguration") {
+    return (
+      `${DEVICE_SETTINGS}/SoftwareUpdatesConfigurationSummaryReportBlade` +
+      `/id/${policy.id}/softwareUpdatesType/windows/configurationName/${name}` +
+      `/policyId/${policy.id}/policyType/Windows10DesktopSoftwareUpdate` +
+      `/policyJourneyState/WindowsUpdates/policyName/${name}`
+    );
+  }
+
+  const policyType = DEVICE_CONFIGURATION_POLICY_TYPE[type];
+  if (policyType === undefined) return undefined;
+  return (
+    `${DEVICE_SETTINGS}/PolicySummaryReportBlade/policyId/${policy.id}/policyName/${name}` +
+    `/policyJourneyState~/0/policyType~/${policyType}/isAssigned~/${policy.isAssigned}`
+  );
+}
+
+/** A Windows feature update profile (`windowsFeatureUpdateProfiles`). */
+export function featureUpdatePortalUrl(profile: { id: string; name: string }): string | undefined {
+  const name = nameSegment(profile.name);
+  if (!GUID.test(profile.id) || !name) return undefined;
+  return `${DEVICE_SETTINGS}/WindowsFeatureUpdateProfileMenu/~/0/profileId/${profile.id}/profileName/${name}/hasWufbEnabledLicense~/true`;
+}
+
+/** A compliance policy. Windows only: the other platforms' codes are not known. */
+export function compliancePortalUrl(policy: { id: string; name: string; odataType?: string }): string | undefined {
+  const name = nameSegment(policy.name);
+  if (!GUID.test(policy.id) || !name) return undefined;
+  if (bareType(policy.odataType) !== "windows10CompliancePolicy") return undefined;
+  return (
+    `${DEVICE_SETTINGS}/CompliancePolicyOverview.ReactView/policyId/${policy.id}/policyName/${name}` +
+    `/platform~/8/policyType~/35/policyJourneyState~/1`
+  );
+}
+
+/** An administrative template (`groupPolicyConfigurations`). */
+export function adminTemplatePortalUrl(policy: { id: string; name: string; isAssigned: boolean }): string | undefined {
+  const name = nameSegment(policy.name);
+  if (!GUID.test(policy.id) || !name) return undefined;
+  return (
+    `${DEVICE_SETTINGS}/PolicySummaryReportBlade/policyId/${policy.id}/showReporting~/true` +
+    `/policyType~/71/isAssigned~/${policy.isAssigned}/policyJourneyState~/7/policyName/${name}`
+  );
 }

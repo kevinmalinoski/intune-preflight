@@ -209,6 +209,7 @@ export function buildGraph({
           policies: list.map((vp) => ({
             id: vp.id,
             name: vp.name,
+            portalUrl: vp.portalUrl,
             status: vp.status,
             settingsCount: vp.settingsCount,
             section: vp.section,
@@ -268,6 +269,7 @@ export function buildGraph({
           excludedReason: vp.excludedReason,
           unassigned: vp.status === "unassigned",
           policyId: vp.id,
+          portalUrl: vp.portalUrl,
           onOpen,
         },
       });

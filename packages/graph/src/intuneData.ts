@@ -9,7 +9,17 @@ import type {
   IntunePolicy,
   Platform,
 } from "@intune-preflight/shared";
-import { APPS_GRAPH_PERMISSION } from "@intune-preflight/shared";
+import {
+  adminTemplatePortalUrl,
+  APPS_GRAPH_PERMISSION,
+  compliancePortalUrl,
+  deviceConfigurationPortalUrl,
+  entraGroupPortalUrl,
+  featureUpdatePortalUrl,
+  intuneAppPortalUrl,
+  settingsCatalogPortalUrl,
+  windowsScriptPortalUrl,
+} from "@intune-preflight/shared";
 import { type GraphClient, isGraphStatus, mapWithConcurrency } from "./graphClient.js";
 import {
   appFamilyFromOdataType,
@@ -203,6 +213,12 @@ async function fetchDeviceConfigurations(ctx: LoadContext): Promise<IntunePolicy
       excludedGroupIds,
       assignmentFilters,
       legacyTemplate: isLegacyTemplateType(item["@odata.type"] as string | undefined),
+      portalUrl: deviceConfigurationPortalUrl({
+        id,
+        name: displayName,
+        odataType: item["@odata.type"] as string | undefined,
+        isAssigned: assignments.length > 0,
+      }),
     };
   });
 }
@@ -230,6 +246,7 @@ async function fetchCompliancePolicies(ctx: LoadContext): Promise<IntunePolicy[]
       assignedGroupIds: includedGroupIds,
       excludedGroupIds,
       assignmentFilters,
+      portalUrl: compliancePortalUrl({ id, name: displayName, odataType: item["@odata.type"] as string | undefined }),
     };
   });
 }
@@ -283,6 +300,13 @@ async function fetchSettingsCatalogPolicies(ctx: LoadContext): Promise<IntunePol
         assignedGroupIds: includedGroupIds,
         excludedGroupIds,
         assignmentFilters,
+        portalUrl: settingsCatalogPortalUrl({
+          id,
+          technologies: item.technologies as string | undefined,
+          templateId: (item.templateReference as { templateId?: string } | undefined)?.templateId,
+          platforms: item.platforms as string | undefined,
+          isAssigned: assignments.length > 0,
+        }),
       };
     }
   );
@@ -414,6 +438,7 @@ export async function fetchAdminTemplates(ctx: LoadContext): Promise<IntunePolic
       assignedGroupIds: includedGroupIds,
       excludedGroupIds,
       assignmentFilters,
+      portalUrl: adminTemplatePortalUrl({ id, name: displayName, isAssigned: assignments.length > 0 }),
     };
   });
 }
@@ -518,6 +543,8 @@ export async function fetchPlatformScripts(ctx: LoadContext): Promise<IntunePoli
           description: item.description as string | undefined,
           platform: source.platform,
           settings: flattenScriptToCspSettings({ ...item, scriptContent }, id),
+          // The route is the Windows one; macOS shell scripts have no known address.
+          ...(source.platform === "windows" ? { portalUrl: windowsScriptPortalUrl(id) } : {}),
           assignedGroupIds: includedGroupIds,
           excludedGroupIds,
           assignmentFilters,
@@ -722,6 +749,10 @@ async function fetchWindowsUpdateProfiles(ctx: LoadContext): Promise<IntunePolic
   const sources = [
     { path: "windowsFeatureUpdateProfiles", type: "windowsFeatureUpdateProfile" },
     { path: "windowsQualityUpdateProfiles", type: "windowsQualityUpdateProfile" },
+    // The newer "Quality updates" policy. `windowsQualityUpdateProfiles` above is
+    // only the expedite kind, so reading that alone listed a tenant's expedite
+    // policy and left its ordinary quality update policy out of the baseline.
+    { path: "windowsQualityUpdatePolicies", type: "windowsQualityUpdatePolicy" },
     { path: "windowsDriverUpdateProfiles", type: "windowsDriverUpdateProfile" },
   ];
   const result: IntunePolicy[] = [];
@@ -754,6 +785,9 @@ async function fetchWindowsUpdateProfiles(ctx: LoadContext): Promise<IntunePolic
           assignedGroupIds: includedGroupIds,
           excludedGroupIds,
           assignmentFilters,
+          ...(source.type === "windowsFeatureUpdateProfile"
+            ? { portalUrl: featureUpdatePortalUrl({ id, name: displayName }) }
+            : {}),
         };
       }))
     );
@@ -962,6 +996,7 @@ export async function fetchApps(ctx: LoadContext): Promise<{ apps: IntuneApp[] }
     apps.push({
       id: item.id as string,
       displayName,
+      portalUrl: intuneAppPortalUrl(item.id as string),
       publisher: (item.publisher as string | undefined) || undefined,
       appType: appTypeLabel(odataType),
       family: appFamilyFromOdataType(odataType),
@@ -1105,6 +1140,8 @@ export async function loadTenantData({ client, mode, cache }: LoadTenantDataOpti
           displayName: (match?.displayName as string) ?? unresolvedLabel,
           isDynamic: groupTypes.includes("DynamicMembership"),
           membershipRule: match?.membershipRule as string | undefined,
+          // Only a group Graph actually returned: a deleted one has no page.
+          ...(match ? { portalUrl: entraGroupPortalUrl(id) } : {}),
         };
       } catch {
         return { id, displayName: unresolvedLabel };

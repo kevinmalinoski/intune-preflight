@@ -29,6 +29,8 @@ import { KIND_COLOR, KIND_LABEL, KIND_ORDER, appKind, type PolicyStatus } from "
 export type VisiblePolicy = {
   id: string;
   name: string;
+  /** The object's page in the admin center, where the loader has one. */
+  portalUrl?: string;
   kind: string;
   status: PolicyStatus;
   /** Set only when a device filter excluded it, as a readable sentence. */
@@ -78,6 +80,7 @@ export function visiblePolicies(
     visible.push({
       id: p.id,
       name: p.displayName,
+      portalUrl: p.portalUrl,
       kind: p.kind,
       status: excluded ? "excluded" : p.unassigned ? "unassigned" : "included",
       excludedReason: p.excludedByFilter
@@ -103,6 +106,7 @@ export function visiblePolicies(
     visible.push({
       id: `${appKind(a.family)}:${a.id}`,
       name: a.displayName,
+      portalUrl: a.portalUrl,
       kind: appKind(a.family),
       status: excluded ? "excluded" : "included",
       excludedReason: a.excludedByFilter

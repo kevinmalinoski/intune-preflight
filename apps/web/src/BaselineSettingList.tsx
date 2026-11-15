@@ -3,6 +3,7 @@ import { resolutionRuleDetail, resolutionRuleLabel } from "@intune-preflight/sha
 import { toggled } from "./collections.ts";
 import { cspRef, isLegacyRow, type DisplayRow } from "./baselineRow.ts";
 import { CspRef } from "./CspRef.tsx";
+import { PolicyName } from "./PolicyName.tsx";
 import { SettingValue } from "./SettingValue.tsx";
 
 /**
@@ -206,7 +207,7 @@ function SettingCard({ row }: { row: DisplayRow }) {
                   className="text-xs font-semibold text-slate-200"
                 />
                 <span className="mt-0.5 block break-words text-[11px] leading-snug text-slate-500">
-                  {v.sourcePolicyName}
+                  <PolicyName name={v.sourcePolicyName} />
                 </span>
               </span>
             </div>
@@ -217,7 +218,12 @@ function SettingCard({ row }: { row: DisplayRow }) {
           <SettingValue value={row.value} title={row.displayName} className="font-semibold text-emerald-300" />
           <span className="text-slate-500">
             {" · "}
-            {row.kind === "overlap" ? row.sources.join(" · ") : row.sourcePolicyName}
+            {(row.kind === "overlap" ? row.sources : [row.sourcePolicyName]).map((name, i) => (
+              <span key={`${name}-${i}`}>
+                {i > 0 && " · "}
+                <PolicyName name={name} />
+              </span>
+            ))}
           </span>
         </div>
       )}

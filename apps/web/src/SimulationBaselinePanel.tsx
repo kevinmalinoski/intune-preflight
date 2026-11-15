@@ -15,6 +15,7 @@ import { BaselineSettingList } from "./BaselineSettingList.tsx";
 import { buildRows, cspRef, isLegacyRow, type DisplayRow } from "./baselineRow.ts";
 import { CspRef } from "./CspRef.tsx";
 import { saveDownload } from "./download.ts";
+import { PolicyName } from "./PolicyName.tsx";
 import { SettingValue } from "./SettingValue.tsx";
 import { ExportMenu } from "./ExportMenu.tsx";
 import { readStored, readStoredJson, writeStored } from "./storage.ts";
@@ -294,7 +295,7 @@ export function SimulationBaselinePanel({
           "source",
           "px-3 py-2 align-top text-slate-400",
           <>
-            {v.sourcePolicyName}
+            <PolicyName name={v.sourcePolicyName} />
             <span className="ml-1.5 text-indigo-400" title={resolutionRuleDetail(r.rule)}>
               ⧫
             </span>
@@ -319,7 +320,7 @@ export function SimulationBaselinePanel({
             "source",
             "px-3 py-2 align-top text-slate-400",
             <span className="inline-flex flex-wrap items-center gap-1">
-              {r.sourcePolicyName}
+              <PolicyName name={r.sourcePolicyName} />
               {r.sourceLegacyTemplate && (
                 <span
                   className="rounded bg-amber-500/15 px-1 py-0.5 text-[9px] text-amber-300"
@@ -348,7 +349,7 @@ export function SimulationBaselinePanel({
             "source",
             "px-3 py-2 align-top text-slate-400",
             <>
-              {v.sourcePolicyName}
+              <PolicyName name={v.sourcePolicyName} />
               <span className="ml-1.5 text-amber-400">⚠</span>
             </>
           )}
@@ -391,7 +392,7 @@ export function SimulationBaselinePanel({
             {cell("cspArea", "px-3 py-1.5", "")}
             {cell("setting", "px-3 py-1.5", "")}
             {cell("value", "px-3 py-1.5 text-[11px] text-slate-500", "same value")}
-            {cell("source", "px-3 py-1.5 pl-8 text-slate-400", src)}
+            {cell("source", "px-3 py-1.5 pl-8 text-slate-400", <PolicyName name={src} />)}
             {cell("cspPath", "px-3 py-1.5", "")}
           </tr>
         );
@@ -444,7 +445,7 @@ export function SimulationBaselinePanel({
           "source",
           "px-3 py-2 align-top text-slate-400",
           <span className="inline-flex flex-wrap items-center gap-1">
-            {e.sourcePolicyName}
+            <PolicyName name={e.sourcePolicyName} />
             {e.sourceLegacyTemplate && (
               <span className="rounded bg-amber-500/15 px-1 py-0.5 text-[9px] text-amber-300">Legacy</span>
             )}

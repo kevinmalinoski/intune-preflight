@@ -7,6 +7,7 @@ import {
   isAutopilotJoinedRule,
 } from "@intune-preflight/shared";
 import type { AssignmentFilter, GroupSummary, Platform } from "@intune-preflight/shared";
+import { PortalLink } from "./PortalLink.tsx";
 
 // `short` is what fits four-across in the sidebar; "iOS / iPadOS" does not.
 const PLATFORM_OPTIONS: { value: Platform; label: string; short: string }[] = [
@@ -333,6 +334,7 @@ export function EndpointPicker({
                     <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
                       <span className="min-w-[8rem] flex-1 break-words leading-snug text-slate-200">
                         {g.displayName}
+                        <PortalLink url={g.portalUrl} name={g.displayName} className="ml-1 align-[-3px]" />
                       </span>
                       {/* Tag scope pill — subsumes the "group tag" label: amber when the
                           entered tag matches, muted otherwise; always exposes the [OrderID] scope. */}

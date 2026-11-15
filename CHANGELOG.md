@@ -6,6 +6,49 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [3.1.0] — 2026-11-15
+
+From a finding to the place you fix it: policies, apps and groups link straight
+into the admin center.
+
+### Added
+- **Open in Intune.** A small arrow beside a policy, app or group opens that
+  exact object in the Intune or Entra admin center, in a new tab. It is on
+  group rows in the sidebar, app rows in the Apps list, and policy and app rows
+  in the diagram, grouped or in Detail view. In the merged baseline the source
+  policy's name is the link. The arrow is its own target and never fires the
+  row it sits in.
+- **Only where the address is known.** Microsoft documents no per-object
+  address for the admin center, so links exist only for types whose address is
+  confirmed: apps, Entra groups, Settings Catalog policies (including Endpoint
+  Security built on it), administrative templates, Windows PowerShell scripts,
+  Windows compliance policies, feature update profiles, update rings, and
+  custom (OMA-URI) and health monitoring profiles. Everything else has no
+  arrow rather than a guessed one. In the sample tenant the arrow is inactive
+  and says on hover what it does against a real tenant.
+
+### Fixed
+- **Windows quality update policies are read.** Intune has two kinds, and only
+  the expedite kind was loaded, so an ordinary quality update policy was
+  missing from the baseline, the Manifest and the Waitlist.
+- **The desktop layout can be switched back on a narrow window.** Switching a
+  narrow window to the full desktop layout stretched the top bar to 1280px
+  with the rest of the console, which put the layout switch off the right edge
+  of the window. The top bar now stays the window's width.
+- **The value viewer works from the keyboard.** It opened without taking
+  focus, so Tab went round the baseline panel behind it and could reach
+  neither Copy nor Close. It now takes focus, keeps it, and returns it to the
+  button that opened it.
+
+### Changed
+- **Setup guide: who can grant consent for self-hosting.** It listed Cloud
+  Application Administrator and Application Administrator. Those roles cannot
+  consent to Microsoft Graph application permissions; it takes a Global
+  Administrator or Privileged Role Administrator. Browser mode, which uses
+  delegated permissions, was already described correctly.
+- The README no longer says the app is best on a desktop-sized screen, and the
+  setup guide says Docker needs a `.env` file to exist.
+
 ## [3.0.2] — 2026-11-14
 
 Platform Scripts show their script, the Docker self-host path builds again, and
