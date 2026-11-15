@@ -4,7 +4,7 @@ import { api, LIVE_MODE, STATIC_DEMO } from "./api.ts";
 import { EndpointSimulator } from "./EndpointSimulator.tsx";
 import { AssignmentReport } from "./AssignmentReport.tsx";
 import { LayoutToggle } from "./LayoutToggle.tsx";
-import { LiveFirstRunGate, SessionLock } from "./LiveSession.tsx";
+import { ChangeTenantButton, LiveFirstRunGate, SessionLock } from "./LiveSession.tsx";
 import { PortalDemoContext } from "./portalDemo.ts";
 
 // Public repo, for the "deploy your own / self-host" nudges shown in demo mode.
@@ -279,6 +279,7 @@ export default function App() {
                   beside Refresh because that is where "the app's own condition"
                   now lives, all of it one row high. */}
               {LIVE_MODE && !demo && <SessionLock />}
+              {LIVE_MODE && demo && hasCredentials && <ChangeTenantButton />}
               <LayoutToggle />
 
               <div className="relative shrink-0">

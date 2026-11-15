@@ -6,6 +6,22 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [3.1.1] — 2026-11-15
+
+A way back to the setup form in browser mode, for a mistyped ID or a different
+tenant.
+
+### Added
+- **Change tenant, in browser mode.** Once a tenant ID and client ID were
+  saved there was no way back to the form that collects them, so a mistyped ID
+  failed at Microsoft's sign-in page every time with nothing in the app to fix
+  it. The session lock now has **Change tenant** under End session, and when
+  IDs are saved but nobody is signed in, a pencil button sits in the lock's
+  place. Both reopen the setup form with the saved IDs filled in. You stay
+  signed in until you save new ones, and Cancel puts everything back. One
+  tenant at a time, as before: this replaces the saved tenant, it does not
+  keep a list.
+
 ## [3.1.0] — 2026-11-15
 
 From a finding to the place you fix it: policies, apps and groups link straight

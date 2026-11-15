@@ -75,3 +75,12 @@ export function removeSession(key: string): void {
     // Nothing to do.
   }
 }
+
+/** Empties this tab's session storage. Best-effort, like the rest of this file. */
+export function clearSession(): void {
+  try {
+    window.sessionStorage.clear();
+  } catch {
+    // Storage blocked: there was nothing kept, so nothing to clear.
+  }
+}

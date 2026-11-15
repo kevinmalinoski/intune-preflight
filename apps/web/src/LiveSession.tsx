@@ -8,12 +8,20 @@
  * `liveSession.ts` sits together.
  */
 
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { GRAPH_SCOPES, OPTIONAL_GRAPH_SCOPES } from "./authConfig.ts";
 import { liveRedirectUri } from "./auth.ts";
 import { getLoadProgress, subscribeLoadProgress } from "./loadProgress.ts";
 import { isValidClientId, isValidTenantId } from "./liveConfig.ts";
-import { configureAndSignIn, endLiveSession, readLiveConfig, signedInIdentity } from "./liveSession.ts";
+import {
+  cancelChangeTenant,
+  changeLiveTenant,
+  configureAndSignIn,
+  endLiveSession,
+  isChangingTenant,
+  readLiveConfig,
+  signedInIdentity,
+} from "./liveSession.ts";
 
 const INPUT_CLASS =
   "w-full rounded-md border border-ink-700 bg-ink-800 px-2.5 py-1.5 font-mono text-xs text-slate-200 placeholder:text-slate-500 focus:border-sky-400 focus:outline-none";
@@ -30,6 +38,9 @@ const INPUT_CLASS =
  */
 function LiveSetupPanel({ onUseSampleTenant }: { onUseSampleTenant: () => void }) {
   const stored = readLiveConfig();
+  // Reached from "Change tenant" rather than a first visit: same form, the
+  // saved IDs filled in to correct, and a way back out that keeps them.
+  const changing = isChangingTenant();
   const [tenantId, setTenantId] = useState(stored?.tenantId ?? "");
   const [clientId, setClientId] = useState(stored?.clientId ?? "");
   const [error, setError] = useState<string | null>(null);
@@ -55,7 +66,9 @@ function LiveSetupPanel({ onUseSampleTenant }: { onUseSampleTenant: () => void }
   return (
     <div className="flex h-full items-start justify-center overflow-y-auto p-6">
       <form onSubmit={submit} className="w-full max-w-xl rounded-lg border border-ink-700 bg-ink-900 p-5">
-        <h2 className="text-sm font-semibold text-slate-100">Connect your Intune tenant</h2>
+        <h2 className="text-sm font-semibold text-slate-100">
+          {changing ? "Change tenant" : "Connect your Intune tenant"}
+        </h2>
         <p className="mt-1.5 text-xs leading-relaxed text-slate-400">
           You sign in with your own admin account and this page reads your tenant directly from Microsoft Graph. Nothing
           is installed, there is no server, and no client secret exists — this is a public client using PKCE. Everything
@@ -116,10 +129,11 @@ function LiveSetupPanel({ onUseSampleTenant }: { onUseSampleTenant: () => void }
           </button>
           <button
             type="button"
-            onClick={onUseSampleTenant}
+            onClick={changing ? cancelChangeTenant : onUseSampleTenant}
+            title={changing ? "Keep the tenant and client ID you had." : undefined}
             className="text-xs font-medium text-slate-400 transition-colors hover:text-slate-200"
           >
-            Explore the sample tenant instead
+            {changing ? "Cancel" : "Explore the sample tenant instead"}
           </button>
         </div>
 
@@ -274,10 +288,38 @@ export function SessionLock() {
             >
               {ending ? "Ending…" : "End session"}
             </button>
+            <button
+              onClick={changeLiveTenant}
+              disabled={ending}
+              title="Opens the setup form to correct or replace the tenant ID and client ID. You stay signed in until you save new ones."
+              className="mt-1.5 w-full rounded border border-ink-700 px-2 py-1.5 font-medium text-slate-300 transition-colors hover:bg-ink-800 disabled:opacity-50"
+            >
+              Change tenant
+            </button>
           </div>
         </>
       )}
     </div>
+  );
+}
+
+/**
+ * The way to the setup form when IDs are saved but nobody is signed in -- which
+ * is where a mistyped ID leaves you: Connected fails at Microsoft's sign-in
+ * page every time, and the lock that carries "Change tenant" only exists after
+ * a sign-in that cannot happen. Sits in the lock's place in the toolbar, which
+ * is free in exactly this state.
+ */
+export function ChangeTenantButton() {
+  return (
+    <button
+      onClick={changeLiveTenant}
+      aria-label="Change tenant"
+      title="Change the tenant ID or client ID this page signs in with."
+      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-ink-700 text-sm text-slate-400 transition-colors hover:bg-ink-800 hover:text-slate-200"
+    >
+      <span aria-hidden>✎</span>
+    </button>
   );
 }
 
@@ -309,6 +351,13 @@ export function LiveFirstRunGate({
   onUseSampleTenant: () => void;
   children: React.ReactNode;
 }) {
+  // Choosing Demo in the toolbar while changing tenant is a way of backing out,
+  // so it has to end the change as Cancel does. Otherwise the tab is left with
+  // its saved IDs switched off and no control on screen to switch them back on.
+  useEffect(() => {
+    if (sampleTenantChosen && isChangingTenant()) cancelChangeTenant();
+  }, [sampleTenantChosen]);
+
   if (configured === false && !sampleTenantChosen) {
     return <LiveSetupPanel onUseSampleTenant={onUseSampleTenant} />;
   }

@@ -12,15 +12,52 @@
 import { acquireGraphToken, currentAccount, endSession, initAuth, signIn } from "./auth.ts";
 import { forgetLiveMode, rememberConnectedMode } from "./liveApi.ts";
 import { type LiveConfig, readLiveConfig, resolveLiveConfig, saveLiveConfig } from "./liveConfig.ts";
+import { clearSession, readSession, removeSession, writeSession } from "./storage.ts";
 
 // Resolved once per page load: `resolveLiveConfig` persists whatever the query
 // string supplied, and re-running it on every caller would mean re-writing
 // localStorage over and over for no reason.
 let config: LiveConfig | null | undefined;
 
+/**
+ * Set while the admin is changing which tenant this build points at. It lives
+ * in the tab's session, not in a component, because the change is made across
+ * a reload: MSAL is built once per page load against one tenant's authority,
+ * so the way to stop using a tenant is to load the page without it.
+ */
+const CHANGING_KEY = "preflight.live.changingTenant";
+
+export function isChangingTenant(): boolean {
+  return readSession(CHANGING_KEY) === "1";
+}
+
 export function getLiveConfig(): LiveConfig | null {
-  if (config === undefined) config = resolveLiveConfig(window.location.search);
+  // While the tenant is being changed the build behaves as unconfigured, which
+  // is what brings the setup form back -- with the saved IDs filled in, since
+  // the form reads those from storage itself.
+  if (config === undefined) config = isChangingTenant() ? null : resolveLiveConfig(window.location.search);
   return config;
+}
+
+/**
+ * Reopens the setup form so the tenant ID and client ID can be corrected or
+ * replaced. Before this there was no way back to that form once two IDs were
+ * saved: a mistyped ID failed at Microsoft's sign-in page every time, with
+ * nothing in the app to fix it.
+ *
+ * The session is left alone until new IDs are actually submitted, so Cancel
+ * returns to exactly where the admin was. The address is reloaded without its
+ * query string, because a `?tenant=&client=` bookmark would otherwise put the
+ * old IDs straight back.
+ */
+export function changeLiveTenant(): void {
+  writeSession(CHANGING_KEY, "1");
+  window.location.replace(window.location.pathname);
+}
+
+export function cancelChangeTenant(): void {
+  removeSession(CHANGING_KEY);
+  window.location.reload();
 }
 
 export function isConfigured(): boolean {
@@ -53,6 +90,10 @@ export function ensureReady(): Promise<void> {
  * page reload.
  */
 export async function configureAndSignIn(next: LiveConfig): Promise<void> {
+  // Replacing a tenant: drop everything this tab held for the old one first.
+  // MSAL keeps its accounts and tokens in session storage, and a new sign-in
+  // must not find the previous tenant's account waiting there.
+  if (isChangingTenant()) clearSession();
   saveLiveConfig(next);
   config = next;
   readying = null;
