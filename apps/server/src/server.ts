@@ -3,7 +3,7 @@ import cors from "@fastify/cors";
 import type { Platform } from "@intune-preflight/shared";
 import { config } from "./config.js";
 import { getMode, setMode, type TenantMode } from "./mode.js";
-import { loadTenantData, clearTenantDataCache, getLastLoadWarnings } from "./tenantData.js";
+import { loadTenantData, clearTenantDataCache, getLastLoadWarnings, getLastLoadedAt } from "./tenantData.js";
 import {
   assignmentReportToCsv,
   assignmentReportToXlsx,
@@ -50,6 +50,9 @@ export async function buildServer({ logger = true }: { logger?: boolean } = {}) 
     // Warnings from the last connected load -- non-empty means the baseline was
     // incomplete (a category or policy failed to load even after retries).
     loadWarnings: getLastLoadWarnings(),
+    // When the connected data was read. Absent in demo mode and before the
+    // first connected load has finished.
+    loadedAt: getMode() === "connected" ? getLastLoadedAt() : undefined,
   }));
 
   // Flip the active data source between the bundled demo tenant and the real
@@ -249,7 +252,7 @@ export async function buildServer({ logger = true }: { logger?: boolean } = {}) 
     // shows a banner when the load dropped anything.
     try {
       const data = await loadTenantData();
-      return { status: "reloaded", warnings: data.warnings ?? [] };
+      return { status: "reloaded", warnings: data.warnings ?? [], loadedAt: data.loadedAt };
     } catch (err) {
       app.log.error(err);
       return reply.status(502).send({ error: (err as Error).message });

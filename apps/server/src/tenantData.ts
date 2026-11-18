@@ -65,17 +65,29 @@ const cache = new TtlCache(config.cacheTtlSeconds);
 // the last baseline was incomplete. Demo loads never touch it, so a glance at
 // the demo tenant doesn't erase the record of a bad connected load.
 let lastLoadWarnings: string[] = [];
+// When the connected data being served was read. Read off the data itself on
+// every load, so a cache hit leaves it alone and the TTL's silent re-read
+// moves it forward -- it always describes what the API is answering from.
+let lastLoadedAt: string | undefined;
 
 export async function loadTenantData(): Promise<TenantData> {
   const mode = getMode();
   const data = await loadFromGraph({ client, mode, cache });
-  if (mode === "connected") lastLoadWarnings = data.warnings ?? [];
+  if (mode === "connected") {
+    lastLoadWarnings = data.warnings ?? [];
+    lastLoadedAt = data.loadedAt;
+  }
   return data;
 }
 
 /** Warnings from the most recent connected tenant load, for the /api/health surface. */
 export function getLastLoadWarnings(): string[] {
   return lastLoadWarnings;
+}
+
+/** When the most recent connected tenant load finished, for the /api/health surface. */
+export function getLastLoadedAt(): string | undefined {
+  return lastLoadedAt;
 }
 
 export function clearTenantDataCache() {

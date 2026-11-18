@@ -36,7 +36,13 @@ import {
   type BaselineCriteria,
 } from "@intune-preflight/engine";
 import { createGraphClient, loadTenantData, type TenantMode, TtlCache } from "@intune-preflight/graph";
-import type { SimulationExportFormat, ManifestExportFormat, ServerStatus, SimulationInputs } from "./api.ts";
+import type {
+  SimulationExportFormat,
+  ManifestExportFormat,
+  RefreshResult,
+  ServerStatus,
+  SimulationInputs,
+} from "./api.ts";
 import type { Download } from "./download.ts";
 import { setLoadProgress } from "./loadProgress.ts";
 import { readSession, removeSession, writeSession } from "./storage.ts";
@@ -201,6 +207,7 @@ export function createLiveApi(deps: LiveApiDeps) {
         demo: active === "demo",
         hasCredentials: deps.isConfigured(),
         loadWarnings: warnings,
+        loadedAt: active === "connected" ? loaded?.loadedAt : undefined,
       };
     },
 
@@ -238,10 +245,10 @@ export function createLiveApi(deps: LiveApiDeps) {
         : textFile("text/csv", assignmentReportToCsv(report));
     },
 
-    refresh: async (): Promise<{ warnings: string[] }> => {
+    refresh: async (): Promise<RefreshResult> => {
       drop();
-      await tenant();
-      return { warnings };
+      const data = await tenant();
+      return { warnings, loadedAt: data.loadedAt };
     },
 
     simulate: async (inputs: SimulationInputs) => computeSimulation(await tenant(), toInputs(inputs)),

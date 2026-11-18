@@ -104,6 +104,14 @@ export interface ServerStatus {
   hasCredentials: boolean;
   /** Warnings from the last connected load; non-empty means the baseline was incomplete. */
   loadWarnings?: string[];
+  /** When the connected tenant data was read (ISO 8601); absent in demo or before the first load. */
+  loadedAt?: string;
+}
+
+/** What a refresh reports back: the reload's warnings and when it finished. */
+export interface RefreshResult {
+  warnings: string[];
+  loadedAt?: string;
 }
 
 const serverApi = {
@@ -131,11 +139,11 @@ const serverApi = {
     kind: "url",
     url: `/api/reports/assignments/export?format=${format}${platform ? `&platform=${platform}` : ""}`,
   }),
-  refresh: async (): Promise<{ warnings: string[] }> => {
+  refresh: async (): Promise<RefreshResult> => {
     const res = await fetch("/api/refresh", { method: "POST" });
     if (!res.ok) throw new Error(`Refresh failed: ${res.status}`);
     const body = await res.json().catch(() => ({}));
-    return { warnings: body.warnings ?? [] };
+    return { warnings: body.warnings ?? [], loadedAt: body.loadedAt };
   },
   simulate: (inputs: SimulationInputs, signal?: AbortSignal) =>
     getJson<SimulationResult>(`/simulate?${simulationQuery(inputs)}`, signal),

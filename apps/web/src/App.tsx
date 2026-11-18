@@ -12,6 +12,28 @@ const REPO_URL = "https://github.com/kevinmalinoski/intune-preflight";
 
 type Tab = "simulate" | "assignments";
 
+/**
+ * "Last refresh" in two lengths, in the viewer's own locale and time zone: a
+ * short one for the header (date and time, the year only when it isn't this
+ * one) and a full one for the tooltip and the refresh dialog.
+ */
+function formatLoadedAt(iso: string | undefined): { short: string; full: string } | null {
+  if (!iso) return null;
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return null;
+  const sameYear = at.getFullYear() === new Date().getFullYear();
+  return {
+    short: at.toLocaleString(undefined, {
+      day: "numeric",
+      month: "short",
+      ...(sameYear ? {} : { year: "numeric" }),
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+    full: at.toLocaleString(undefined, { dateStyle: "full", timeStyle: "medium" }),
+  };
+}
+
 const TABS: { value: Tab; label: string; short: string; icon: string }[] = [
   { value: "simulate", label: "Endpoint Preflight", short: "Preflight", icon: "💻" },
   { value: "assignments", label: "Assignment Manifest", short: "Manifest", icon: "📋" },
@@ -21,6 +43,9 @@ export default function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [refreshed, setRefreshed] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  // Bumped by a refresh that keeps the setup: the views refetch in place instead
+  // of remounting, so the endpoint and the Manifest selection survive.
+  const [reloadToken, setReloadToken] = useState(0);
   const [tab, setTab] = useState<Tab>("simulate");
   // Focus mode lives here rather than in the simulator because the app header
   // and the banners are part of what it hides. Leaving the simulate tab drops
@@ -47,6 +72,9 @@ export default function App() {
   // failed even after retries). Surfaced as a banner so a partial load is never
   // silent.
   const [loadWarnings, setLoadWarnings] = useState<string[]>([]);
+  // When the connected tenant data on screen was read, for "Last refresh".
+  // Undefined in demo and until the first connected load has finished.
+  const [loadedAt, setLoadedAt] = useState<string | undefined>();
 
   useEffect(() => {
     api
@@ -55,23 +83,43 @@ export default function App() {
         setDemo(s.demo);
         setHasCredentials(s.hasCredentials);
         setLoadWarnings(s.loadWarnings ?? []);
+        setLoadedAt(s.loadedAt);
       })
       .catch(() => setDemo(null));
-    // The first view load triggers the tenant fetch; re-poll health shortly after
-    // to pick up any warnings it produced.
-    const t = setTimeout(() => {
-      api
-        .health()
-        .then((s) => setLoadWarnings(s.loadWarnings ?? []))
-        .catch(() => {});
-    }, 3000);
-    return () => clearTimeout(t);
+    // The first view load triggers the tenant fetch; keep polling health to pick
+    // up any warnings it produced and, for "Last refresh", when it finished.
+    // Every 3s until a connected load has reported a time -- a first load on a
+    // large tenant takes a while -- then every 30s, because the self-hosted
+    // server quietly re-reads the tenant when its cache expires and the time
+    // shown has to follow the data actually being served.
+    let timer: ReturnType<typeof setTimeout>;
+    let stopped = false;
+    const poll = (delay: number) => {
+      timer = setTimeout(() => {
+        api
+          .health()
+          .then((s) => {
+            if (stopped) return;
+            setLoadWarnings(s.loadWarnings ?? []);
+            setLoadedAt(s.loadedAt);
+            poll(s.loadedAt || s.demo ? 30_000 : 3000);
+          })
+          .catch(() => !stopped && poll(30_000));
+      }, delay);
+    };
+    poll(3000);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
   }, []);
 
-  // Refreshing remounts both views so they refetch, which also throws away the
-  // simulated endpoint -- its groups, filters, Autopilot settings and waitlist
-  // picks -- and whatever the Manifest had selected. That is a lot to lose to a
-  // stray click on a button that sounds harmless, so it asks first.
+  // Refresh offers two things. Keeping the setup is the default, because the
+  // usual reason to refresh is having just changed an assignment in the admin
+  // center and wanting to see this same endpoint re-resolve against it. Resetting
+  // remounts both views, which throws away the simulated endpoint -- its groups,
+  // filters, Autopilot settings and waitlist picks -- and the Manifest's
+  // selection. Either way it asks first: a full re-read takes a while.
   const [confirmingRefresh, setConfirmingRefresh] = useState(false);
   useEffect(() => {
     if (!confirmingRefresh) return;
@@ -82,14 +130,16 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [confirmingRefresh]);
 
-  const handleRefresh = async () => {
+  const handleRefresh = async (keepSetup: boolean) => {
     setConfirmingRefresh(false);
     setRefreshing(true);
     setRefreshed(false);
     try {
-      const { warnings } = await api.refresh();
+      const { warnings, loadedAt: readAt } = await api.refresh();
       setLoadWarnings(warnings);
-      setRefreshKey((k) => k + 1);
+      setLoadedAt(readAt);
+      if (keepSetup) setReloadToken((t) => t + 1);
+      else setRefreshKey((k) => k + 1);
       setRefreshed(true);
       setTimeout(() => setRefreshed(false), 2500);
     } finally {
@@ -111,12 +161,16 @@ export default function App() {
       setDemo(status.demo);
       setHasCredentials(status.hasCredentials);
       setLoadWarnings([]); // demo has none; connected re-populates on the next health poll
+      setLoadedAt(status.loadedAt);
       setRefreshKey((k) => k + 1); // remount views so they refetch from the new source
       if (target === "connected") {
         setTimeout(() => {
           api
             .health()
-            .then((s) => setLoadWarnings(s.loadWarnings ?? []))
+            .then((s) => {
+              setLoadWarnings(s.loadWarnings ?? []);
+              setLoadedAt(s.loadedAt);
+            })
             .catch(() => {});
         }, 3000);
       }
@@ -133,6 +187,8 @@ export default function App() {
     { value: "demo", label: "Demo", short: "Demo" },
   ];
 
+  const lastRefresh = formatLoadedAt(loadedAt);
+
   const views =
     tab === "simulate" ? (
       <EndpointSimulator
@@ -141,10 +197,12 @@ export default function App() {
         onHandoffConsumed={() => setHandoff(null)}
         focus={focus}
         onToggleFocus={() => setFocus((f) => !f)}
+        reloadToken={reloadToken}
       />
     ) : (
       <AssignmentReport
         key={refreshKey}
+        reloadToken={reloadToken}
         onSimulateGroups={(groupIds, platform, filterIds) => {
           setHandoff({ groupIds, platform, filterIds });
           setFocus(false);
@@ -282,6 +340,18 @@ export default function App() {
               {LIVE_MODE && demo && hasCredentials && <ChangeTenantButton />}
               <LayoutToggle />
 
+              {/* When the data on screen was read. Connected only: the demo
+                  tenant was never read from anywhere. Hidden on a phone, where
+                  the header has no room; the dialog carries it there. */}
+              {!demo && lastRefresh && (
+                <span
+                  className="hidden shrink-0 text-[11px] leading-tight text-slate-500 md:block"
+                  title={`Tenant data last read from Intune: ${lastRefresh.full}`}
+                >
+                  Last refresh <span className="tabular-nums text-slate-400">{lastRefresh.short}</span>
+                </span>
+              )}
+
               <div className="relative shrink-0">
                 <button
                   onClick={() => setConfirmingRefresh((open) => !open)}
@@ -322,19 +392,30 @@ export default function App() {
                       aria-label="Confirm refresh"
                       className="absolute right-0 top-full z-40 mt-1 w-72 max-w-[calc(100vw-1rem)] rounded-lg border border-amber-400/40 bg-ink-900 p-3 text-left shadow-2xl"
                     >
-                      <div className="text-xs font-semibold text-amber-200">
+                      <div className="text-xs font-semibold text-slate-100">
                         {demo ? "Reload the demo data?" : "Refresh from Intune?"}
                       </div>
                       <p className="mt-1 text-[11px] leading-relaxed text-slate-300">
-                        This resets what you have set up here: the simulated endpoint’s groups, device filters,
-                        Autopilot settings and Policy Waitlist picks, and any selection in the Manifest.
+                        <span className="font-medium text-slate-100">Keep my setup</span> re-checks the same endpoint
+                        and Manifest selection against what is in {demo ? "the demo data" : "Intune"} now. Groups and
+                        filters that no longer exist drop out, and a waitlisted policy that has since been assigned
+                        leaves the waitlist.
+                      </p>
+                      <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                        <span className="font-medium text-slate-300">Reset</span> also clears the endpoint’s groups,
+                        device filters, Autopilot settings and waitlist picks, and the Manifest selection.
                       </p>
                       {!demo && (
                         <p className="mt-1 text-[11px] leading-relaxed text-slate-500">
-                          It re-reads every policy, app, assignment and group, which can take a little while.
+                          Both re-read every policy, app, assignment and group, which can take a little while.
                         </p>
                       )}
-                      <div className="mt-2.5 flex justify-end gap-2">
+                      {!demo && lastRefresh && (
+                        <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
+                          Last refresh: <span className="text-slate-300">{lastRefresh.full}</span>
+                        </p>
+                      )}
+                      <div className="mt-2.5 flex flex-wrap justify-end gap-2">
                         <button
                           onClick={() => setConfirmingRefresh(false)}
                           className="rounded-md border border-ink-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-ink-800"
@@ -342,11 +423,17 @@ export default function App() {
                           Cancel
                         </button>
                         <button
-                          autoFocus
-                          onClick={handleRefresh}
-                          className="rounded-md border border-amber-400/50 bg-amber-500/15 px-2.5 py-1.5 text-xs font-medium text-amber-200 hover:bg-amber-500/25"
+                          onClick={() => handleRefresh(false)}
+                          className="rounded-md border border-ink-700 px-2.5 py-1.5 text-xs text-slate-300 hover:bg-ink-800"
                         >
-                          {demo ? "Reload and reset" : "Refresh and reset"}
+                          Reset
+                        </button>
+                        <button
+                          autoFocus
+                          onClick={() => handleRefresh(true)}
+                          className="rounded-md border border-emerald-400/50 bg-emerald-500/15 px-2.5 py-1.5 text-xs font-medium text-emerald-200 hover:bg-emerald-500/25"
+                        >
+                          Keep my setup
                         </button>
                       </div>
                     </div>

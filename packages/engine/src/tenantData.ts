@@ -31,4 +31,11 @@ export interface TenantData {
   appsUnavailable?: AppsUnavailable;
   /** Non-empty when the load was incomplete (a category or item failed after retries). */
   warnings?: string[];
+  /**
+   * When this data finished loading from Graph, as an ISO 8601 timestamp. Shown
+   * as "Last refresh" so an admin can tell whether a change they just made in
+   * the admin center is in it. Absent for the bundled demo tenant, which was
+   * never read from anywhere.
+   */
+  loadedAt?: string;
 }

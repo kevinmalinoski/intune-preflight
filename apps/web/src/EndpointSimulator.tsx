@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import type { AssignmentFilter, Platform, SimulationResult } from "@intune-preflight/shared";
 import { api, type AppsExportFormat } from "./api.ts";
 import type { AppsFocus } from "./AppsList.tsx";
@@ -27,7 +27,11 @@ export function EndpointSimulator({
   onHandoffConsumed,
   focus = false,
   onToggleFocus,
+  reloadToken = 0,
 }: {
+  /** Bumped by "Refresh, keep my setup": re-read the catalogs and re-simulate
+   *  the same endpoint, rather than remounting with a blank one. */
+  reloadToken?: number;
   /** One-shot "simulate a device in these groups" payload from the Manifest. */
   handoff?: { groupIds: string[]; platform: Platform; filterIds: string[] } | null;
   onHandoffConsumed?: () => void;
@@ -97,24 +101,46 @@ export function EndpointSimulator({
     if (handoff) onHandoffConsumed?.();
   }, [handoff, onHandoffConsumed]);
 
+  // The first run loads the catalogs; a later one (a kept-setup refresh) reloads
+  // them under the same endpoint. The data source has already re-read the
+  // tenant by the time the token changes, so these calls return the new data.
+  // Keyed on the token rather than a first-run flag: StrictMode runs a mount
+  // effect twice, and the second run must still count as the first load.
+  const loadedToken = useRef<number | null>(null);
   useEffect(() => {
+    const reload = loadedToken.current !== null && loadedToken.current !== reloadToken;
+    loadedToken.current = reloadToken;
+    let live = true;
+    if (reload) setError(null);
     Promise.all([api.groups(), api.filters(), api.unassignedPolicies()])
       .then(([allGroups, allFilters, allUnassigned]) => {
+        if (!live) return;
         setFilters(allFilters);
-        dispatch({
-          type: "catalogLoaded",
-          groups: allGroups.filter((g) => !g.id.startsWith("virtual-")),
-          unassignedPolicies: allUnassigned,
-        });
+        const groups = allGroups.filter((g) => !g.id.startsWith("virtual-"));
+        dispatch(
+          reload
+            ? {
+                type: "catalogReloaded",
+                groups,
+                unassignedPolicies: allUnassigned,
+                filterIds: allFilters.map((f) => f.id),
+              }
+            : { type: "catalogLoaded", groups, unassignedPolicies: allUnassigned }
+        );
       })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, []);
+      .catch((e) => live && setError(e.message))
+      .finally(() => live && setLoading(false));
+    return () => {
+      live = false;
+    };
+  }, [reloadToken]);
 
   // Recompute the simulation whenever the endpoint definition changes. Debounced
   // and abortable: the debounce coalesces a burst of changes (typing a Group Tag
   // re-resolves group selection on each keystroke) into one call, and the
-  // AbortController cancels any superseded request.
+  // AbortController cancels any superseded request. `reloadToken` is in the deps
+  // because a kept-setup refresh changes the tenant under an unchanged endpoint,
+  // and the result has to be recomputed against it.
   useEffect(() => {
     const controller = new AbortController();
     const timer = setTimeout(() => {
@@ -129,7 +155,7 @@ export function EndpointSimulator({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [selectedGroupIds, platform, deviceFilterIds, unassignedPolicyIds]);
+  }, [selectedGroupIds, platform, deviceFilterIds, unassignedPolicyIds, reloadToken]);
 
   // Open the merged-baseline panel, optionally scoped to a policy type or a
   // single policy (from clicking in the diagram). null = the whole baseline.

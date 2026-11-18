@@ -1180,6 +1180,7 @@ export async function loadTenantData({ client, mode, cache }: LoadTenantDataOpti
       assignmentFilters,
       ...("apps" in appsResult ? { apps: appsResult.apps } : { appsUnavailable: appsResult.unavailable }),
       warnings: loadWarnings,
+      loadedAt: new Date().toISOString(),
     };
   });
 }

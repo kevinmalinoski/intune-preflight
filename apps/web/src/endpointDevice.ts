@@ -45,6 +45,18 @@ export interface DeviceState {
 export type DeviceAction =
   /** The group / unassigned-policy lists arrived; re-resolve anything that depends on them. */
   | { type: "catalogLoaded"; groups: GroupSummary[]; unassignedPolicies: UnassignedPolicy[] }
+  /**
+   * The tenant was re-read with the endpoint kept as it is. Like `catalogLoaded`,
+   * plus dropping whatever no longer exists: a deleted group or filter, and a
+   * waitlisted policy that has since been assigned (it now arrives through its
+   * assignment instead, or not at all).
+   */
+  | {
+      type: "catalogReloaded";
+      groups: GroupSummary[];
+      unassignedPolicies: UnassignedPolicy[];
+      filterIds: string[];
+    }
   | { type: "setPlatform"; platform: Platform }
   | { type: "toggleGroup"; id: string }
   | { type: "setGroupTag"; groupTag: string }
@@ -170,6 +182,24 @@ export function deviceReducer(state: DeviceState, action: DeviceAction): DeviceS
           unassignedPolicies: action.unassignedPolicies,
         })
       );
+
+    case "catalogReloaded": {
+      // Unlike the first load, nothing can legitimately name a group the
+      // catalog hasn't seen yet -- the catalog IS the tenant now -- so an
+      // unknown group is one that was deleted. Waitlist picks need no pruning
+      // here: the invariant already drops any id the new catalog lacks.
+      const groupIds = new Set(action.groups.map((g) => g.id));
+      const filterIds = new Set(action.filterIds);
+      return applyInvariants(
+        resolveImpliedGroups({
+          ...state,
+          groups: action.groups,
+          unassignedPolicies: action.unassignedPolicies,
+          selectedGroupIds: state.selectedGroupIds.filter((id) => groupIds.has(id)),
+          deviceFilterIds: state.deviceFilterIds.filter((id) => filterIds.has(id)),
+        })
+      );
+    }
 
     case "setPlatform": {
       if (action.platform === state.platform) return state;

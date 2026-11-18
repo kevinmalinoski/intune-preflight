@@ -6,6 +6,39 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [3.1.2] — 2026-11-18
+
+Change an assignment in the admin center, come back, and refresh the same
+endpoint without setting it up again — with the time of the last read shown.
+
+### Added
+- **Refresh without losing your setup.** Refresh from Intune now offers **Keep
+  my setup** beside **Reset**, and keeping is the default. The usual reason to
+  refresh is having just changed an assignment in the admin center and wanting
+  to see the same endpoint re-resolve: before, every refresh threw away the
+  simulated endpoint's groups, filters, Autopilot settings and waitlist picks,
+  and the Manifest's checked groups, so you had to set it all up again to see
+  whether the policy dropped off. Keeping re-reads the tenant and recomputes the
+  same endpoint against it. A group or filter deleted in the meantime drops out,
+  as does a group that no longer carries a policy for the selected OS, and a
+  waitlisted policy that has since been assigned leaves the waitlist. Group Tag
+  and Autopilot groups are re-resolved, so a new group matching the tag is
+  picked up.
+- **Last refresh, with date and time.** Beside Refresh from Intune, the header
+  shows when the tenant data on screen was read (hover for the full date), and
+  the refresh dialog repeats it. It is the time the read from Graph finished,
+  not when the button was pressed, so a self-hosted server that quietly re-read
+  the tenant when its cache expired shows the newer time within half a minute.
+  Connected only; the demo tenant was never read from anywhere. Hidden on a
+  phone's header for space, but still in the dialog.
+
+### Changed
+- **ROADMAP.md brought up to v3.1.** Browser sign-in and the Apps view moved
+  from "what's next" to shipped, the shipped history now runs through v3.1, and
+  two items were added to maintenance: saying in the app when a browser-mode
+  baseline is scoped by the admin's role, and Open in Intune for the object
+  types that have no link yet.
+
 ## [3.1.1] — 2026-11-15
 
 A way back to the setup form in browser mode, for a mistyped ID or a different

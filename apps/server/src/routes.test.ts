@@ -245,6 +245,11 @@ describe("POST /api/refresh", () => {
     expect(res.statusCode).toBe(200);
     expect(JSON.parse(res.body)).toMatchObject({ status: "reloaded", warnings: [] });
   });
+
+  it("gives no last-refresh time for the demo tenant, which was never read", async () => {
+    await app.inject({ method: "POST", url: "/api/refresh" });
+    expect(JSON.parse((await get("/api/health")).body).loadedAt).toBeUndefined();
+  });
 });
 
 describe("CORS", () => {

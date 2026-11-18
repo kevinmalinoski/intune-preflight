@@ -231,3 +231,68 @@ describe("deviceReducer — policy waitlist", () => {
     expect(state.unassignedPolicyIds).toEqual(["b"]);
   });
 });
+
+describe("deviceReducer — refresh that keeps the setup", () => {
+  const reloaded = (groups: GroupSummary[], policies: UnassignedPolicy[] = [], filterIds: string[] = []) =>
+    ({ type: "catalogReloaded", groups, unassignedPolicies: policies, filterIds }) as const;
+
+  it("keeps the endpoint as it was when everything still exists", () => {
+    const before = run(
+      loaded([group("g1"), group("g2")], [unassigned("p")]),
+      { type: "toggleGroup", id: "g1" },
+      { type: "toggleDeviceFilter", id: "f1" },
+      { type: "toggleUnassignedPolicy", id: "p" }
+    );
+    const after = deviceReducer(before, reloaded([group("g1"), group("g2")], [unassigned("p")], ["f1"]));
+    expect(after.selectedGroupIds).toEqual(["g1"]);
+    expect(after.deviceFilterIds).toEqual(["f1"]);
+    expect(after.unassignedPolicyIds).toEqual(["p"]);
+    expect(after.platform).toBe("windows");
+  });
+
+  it("drops a group and a filter that were deleted in Intune", () => {
+    const before = run(
+      loaded([group("g1"), group("gone")]),
+      { type: "toggleGroup", id: "g1" },
+      { type: "toggleGroup", id: "gone" },
+      { type: "toggleDeviceFilter", id: "f1" },
+      { type: "toggleDeviceFilter", id: "deleted" }
+    );
+    const after = deviceReducer(before, reloaded([group("g1")], [], ["f1"]));
+    expect(after.selectedGroupIds).toEqual(["g1"]);
+    expect(after.deviceFilterIds).toEqual(["f1"]);
+  });
+
+  it("takes a waitlisted policy off the waitlist once it has been assigned", () => {
+    const before = run(loaded([group("g1")], [unassigned("p"), unassigned("q")]), {
+      type: "selectUnassignedPolicies",
+      ids: ["p", "q"],
+    });
+    // `p` was assigned in the admin center, so it is no longer unassigned.
+    const after = deviceReducer(before, reloaded([group("g1")], [unassigned("q")]));
+    expect(after.unassignedPolicyIds).toEqual(["q"]);
+  });
+
+  it("drops a group that no longer carries a policy for this OS", () => {
+    const before = run(loaded([group("g1"), group("g2")]), { type: "toggleGroup", id: "g2" });
+    const after = deviceReducer(before, reloaded([group("g1"), group("g2", { platforms: ["macos"] })]));
+    expect(after.selectedGroupIds).toEqual([]);
+  });
+
+  it("keeps the Group Tag and Autopilot settings, re-resolving them against the new groups", () => {
+    const before = run(
+      loaded([tagGroup("t1", "KIOSK"), autopilotGroup("ap")]),
+      { type: "toggleAutopilotDevice" },
+      { type: "setGroupTag", groupTag: "KIOSK" }
+    );
+    expect(before.selectedGroupIds.sort()).toEqual(["ap", "t1"]);
+    // A second group with the same tag rule was created in Entra.
+    const after = deviceReducer(
+      before,
+      reloaded([tagGroup("t1", "KIOSK"), tagGroup("t2", "KIOSK"), autopilotGroup("ap")])
+    );
+    expect(after.isAutopilotDevice).toBe(true);
+    expect(after.groupTag).toBe("KIOSK");
+    expect(after.selectedGroupIds.sort()).toEqual(["ap", "t1", "t2"]);
+  });
+});

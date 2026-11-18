@@ -181,6 +181,27 @@ describe("reading a connected tenant", () => {
     await api.refresh();
     expect(fetchMock.mock.calls.length).toBeGreaterThan(afterFirst);
   });
+
+  // "Last refresh" in the header: the refresh reports when its read finished,
+  // and health reports the same time afterwards, so the two cannot disagree.
+  it("reports when the connected tenant was read, and only for connected", async () => {
+    stubGraph();
+    const api = createLiveApi(deps());
+    await api.groups();
+    expect((await api.health()).loadedAt).toBeUndefined();
+
+    await api.setMode("connected");
+    const before = Date.now();
+    const { loadedAt } = await api.refresh();
+    expect(loadedAt).toBeDefined();
+    const readAt = Date.parse(loadedAt!);
+    expect(readAt).toBeGreaterThanOrEqual(before - 1000);
+    expect(readAt).toBeLessThanOrEqual(Date.now());
+    expect((await api.health()).loadedAt).toBe(loadedAt);
+
+    await api.setMode("demo");
+    expect((await api.health()).loadedAt).toBeUndefined();
+  });
 });
 
 describe("refresh", () => {

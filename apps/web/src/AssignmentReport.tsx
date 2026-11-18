@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { AssignmentReport as Report, AssignmentReportRow, Platform } from "@intune-preflight/shared";
 import { api, type ManifestExportFormat } from "./api.ts";
 import { saveDownload } from "./download.ts";
@@ -66,7 +66,10 @@ function SortTh({
 
 export function AssignmentReport({
   onSimulateGroups,
+  reloadToken = 0,
 }: {
+  /** Bumped by "Refresh, keep my setup": refetch, keeping the selection. */
+  reloadToken?: number;
   /** Send the checked groups (and any simulated device filters) to the Simulator
    *  as a fresh device. When omitted, the checkbox column and selection bar are
    *  hidden (the Manifest is read-only). */
@@ -105,17 +108,32 @@ export function AssignmentReport({
   // Refetch when the OS filter changes -- the server recomputes rows, the group
   // rollup, AND the totals (incl. the per-OS unassigned count, which can't be
   // derived client-side since unassigned policies produce no assignment rows).
+  //
+  // Also refetched on a kept-setup refresh, which leaves the selection alone
+  // except for groups that are no longer in the report (deleted, or no longer
+  // carrying a policy for this OS).
+  const loadedOs = useRef<Platform | null>(null);
   useEffect(() => {
     let live = true;
-    setChecked(new Set()); // the group set differs per OS; don't carry a stale selection across tabs
+    const osChanged = loadedOs.current !== os;
+    loadedOs.current = os;
+    if (osChanged) setChecked(new Set()); // the group set differs per OS; don't carry a stale selection across tabs
     api
       .assignmentReport(os)
-      .then((r) => live && setReport(r))
+      .then((r) => {
+        if (!live) return;
+        setReport(r);
+        setError(null);
+        if (!osChanged) {
+          const present = new Set(r.rows.map((row) => row.groupId));
+          setChecked((prev) => new Set([...prev].filter((id) => present.has(id))));
+        }
+      })
       .catch((e) => live && setError(e.message));
     return () => {
       live = false;
     };
-  }, [os]);
+  }, [os, reloadToken]);
 
   const toggleChecked = (id: string) => setChecked(toggled(id));
 

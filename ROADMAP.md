@@ -1,6 +1,6 @@
 # Roadmap
 
-Intune Preflight is at **v3.0**. v2 finished the settings side: endpoint
+Intune Preflight is at **v3.1**. v2 finished the settings side: endpoint
 simulation, assignment resolution (include/exclude, filters, inherited All
 Devices / All Users), the Autopilot V1/V2 enrollment layer, the Windows merged
 CSP baseline with human-readable names and values, conflict / overlap /
@@ -14,7 +14,8 @@ know exactly where to double-check against Entra and the Intune admin center. Se
 [CHANGELOG.md](CHANGELOG.md) for what shipped when.
 
 **Where v3 stands.** The first v3 bet has landed: [apps for the
-endpoint](#whats-next). What remains is split the same way as before —
+endpoint](#shipped-since-v10), followed in v3.1 by links from a policy, app or
+group into the admin center. What remains is split the same way as before —
 **maintenance**, which makes what already ships more accurate without adding a
 capability, and the **bigger bets**, each of which would change what the tool
 is and carries real design risk.
@@ -78,7 +79,7 @@ The honest edge: it's **best-effort over common settings**. Settings Catalog ↔
 OMA-URI is exact; the template crosswalk is a small, hand-verified set (grounded
 in Microsoft's Policy CSP docs), not every setting. Legacy Endpoint Security
 intents aren't crosswalked yet (their definitions carry no CSP path). Expanding
-crosswalk coverage is the v2 item below; migrating legacy templates to the
+crosswalk coverage is a [maintenance](#maintenance) item below; migrating legacy templates to the
 Settings Catalog remains the real fix, which the flag encourages.
 
 ### Legacy Endpoint Security intents: read, named, and value-labelled
@@ -169,6 +170,14 @@ adding a capability.
 - **Accessibility pass on the diagram and the baseline grid** — the panel and the
   dialogs are keyboard-navigable; the React Flow canvas and the resizable data
   grid are the parts that still assume a mouse.
+- **Say so when a browser-mode baseline is scoped** — browser mode reads the
+  tenant as the signed-in admin, so an admin whose Intune role carries scope
+  tags gets their slice of it. The docs say this; the app does not yet. Until it
+  does, read a browser-mode baseline as "what this admin can see".
+- **Open in Intune for the rest** — the link is shown only where the admin-center
+  address is known to be right. Still without one: Waitlist policies, Manifest
+  rows, Autopilot cards, and every profile type whose address has not been
+  confirmed against a real tenant.
 
 ## What's next
 
@@ -176,17 +185,13 @@ Bigger swings. Each would change what the tool is capable of and carries real
 design risk. The tool's honesty about its edges is what makes them upgrades
 rather than corrections.
 
-- **Apps for the endpoint** — *shipped in v3.0.* The
-  Required, Available and Uninstall apps a simulated endpoint's groups deliver,
-  in a tab of their own beside the baseline, with the diagram switching to draw them,
-  with an Apps sheet in the Excel export. It changes what the tool is — a
-  preflight of what is put *on* the device, not only how it is configured — and
-  needs a new optional permission (`DeviceManagementApps.Read.All`). Its honest edges are under
-  [Known limitations](#apps-are-listed-by-assignment-not-by-outcome). Still to
-  do: classifying user versus device groups so
-  intent conflicts and Available targeting can be read more precisely; and
-  reading Win32 supersedence and dependencies, which install or remove apps no
-  assignment mentions.
+- **Apps, by outcome rather than by assignment** — the Apps view shipped in v3.0
+  and lists what is assigned. Two things would let it say more about what
+  actually happens: classifying user versus device groups, so intent conflicts
+  and Available targeting can be read more precisely; and reading Win32
+  supersedence and dependencies, which install or remove apps no assignment
+  mentions. Today's edges are under
+  [Known limitations](#apps-are-listed-by-assignment-not-by-outcome).
 - **Combined/nested dynamic-group rule evaluation** — the headline bet. Replace
   the regex-based clause extraction (`parsePhysicalIdClauses`,
   `groupTagMatchesRule`, `isAutopilotJoinedRule` in
@@ -207,11 +212,6 @@ rather than corrections.
   would let user-driven flows — Autopilot V2 in particular, which currently
   resolves by its configured device group — be simulated from the user side, and
   would enable user-scoped vs device-scoped setting context.
-- **Optional delegated (user sign-in) auth** — a device-code sign-in flow as an
-  *alternative* to the long-lived client secret. Deliberate tradeoff: a delegated
-  token is scoped to the signed-in admin's RBAC (scope tags / admin units), so it
-  shows only *that admin's slice* — which narrows the tool's "full, unfiltered
-  preflight" value. App-only stays the default and recommended mode.
 - **Tenant-wide policy ↔ group map** — a connective "nebula" of which policies
   bridge which groups across the whole tenant. The per-group seating chart (v1.2)
   is its single-group view; this is the zoomed-out whole-tenant version.
@@ -235,6 +235,33 @@ Written down so the reasoning isn't relitigated, not as a queue.
   revisit only if the descriptive views prove it's wanted.
 
 ## Shipped since v1.0
+
+**v3.1** — **Open in Intune**: a link beside a policy, app or group opens that
+exact object in the Intune or Entra admin center, and in the merged baseline the
+source policy's name is the link. Windows quality update policies are read.
+Browser mode can change tenant without clearing the browser's storage.
+
+**v3.0** — **Apps for the endpoint**: the Required, Available and Uninstall apps
+a simulated endpoint's groups deliver, in a tab of their own beside the
+baseline, with the diagram switching to draw them and an Apps sheet in the Excel
+export. Four findings (install against uninstall, redundant assignments, the
+same product added as several apps, line-of-business `.msi`), each app's
+detection rule in the export, and Platform Script content readable in the
+baseline. The simulator became three columns: define the endpoint, watch it
+resolve, read the result. Needs one more read-only permission,
+`DeviceManagementApps.Read.All`.
+
+**v2.3 – v2.6** — the app on a phone and a tablet. A compact diagram below the
+desktop width, the merged baseline beside the diagram rather than over it, CSP
+areas named from what Graph returns, an Excel (`.xlsx`) export alongside CSV
+and JSON, and exporting the view on screen instead of always the whole baseline.
+
+**v2.2** — **browser mode**: the tool runs entirely in a browser tab, signed in
+as the admin (delegated, PKCE), with no server and no client secret. This is
+the delegated sign-in this page once listed as a future bet, shipped as a
+hosted mode of its own rather than as an alternative inside the server.
+Self-hosting with application credentials is unchanged and is still the only
+mode that sees the whole tenant regardless of the admin's scope tags.
 
 **v2.1** — hardening, not features. The engine became its own package with its
 I/O-free boundary enforced three ways; the simulator's state became one tested
@@ -275,7 +302,7 @@ automated demo deploy, and 114 → 178 tests. See
 - **Legacy Endpoint Security & Security Baselines** (`deviceManagement/intents`)
   are read and merged — BitLocker / Disk Encryption, Defender Antivirus, Firewall,
   ASR — and, being Windows, compared for conflicts/overlaps (see the two remaining
-  edges under Known limitations, and the CSP-mapping item in v2).
+  edges under Known limitations, and the crosswalk item under Maintenance).
 - **Docker runtime fix** — the slim server image resolved the shared package from
   its TypeScript source and 502'd on boot; it now resolves the built output.
 
