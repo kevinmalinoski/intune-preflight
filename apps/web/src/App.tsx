@@ -13,25 +13,14 @@ const REPO_URL = "https://github.com/kevinmalinoski/intune-preflight";
 type Tab = "simulate" | "assignments";
 
 /**
- * "Last refresh" in two lengths, in the viewer's own locale and time zone: a
- * short one for the header (date and time, the year only when it isn't this
- * one) and a full one for the tooltip and the refresh dialog.
+ * "Last refresh" for the refresh dialog: the full date and time, in the
+ * viewer's own locale and time zone. Null when there is no valid time.
  */
-function formatLoadedAt(iso: string | undefined): { short: string; full: string } | null {
+function formatLoadedAt(iso: string | undefined): string | null {
   if (!iso) return null;
   const at = new Date(iso);
   if (Number.isNaN(at.getTime())) return null;
-  const sameYear = at.getFullYear() === new Date().getFullYear();
-  return {
-    short: at.toLocaleString(undefined, {
-      day: "numeric",
-      month: "short",
-      ...(sameYear ? {} : { year: "numeric" }),
-      hour: "2-digit",
-      minute: "2-digit",
-    }),
-    full: at.toLocaleString(undefined, { dateStyle: "full", timeStyle: "medium" }),
-  };
+  return at.toLocaleString(undefined, { dateStyle: "full", timeStyle: "medium" });
 }
 
 const TABS: { value: Tab; label: string; short: string; icon: string }[] = [
@@ -72,7 +61,8 @@ export default function App() {
   // failed even after retries). Surfaced as a banner so a partial load is never
   // silent.
   const [loadWarnings, setLoadWarnings] = useState<string[]>([]);
-  // When the connected tenant data on screen was read, for "Last refresh".
+  // When the connected tenant data on screen was read, for "Last refresh" in the
+  // refresh dialog.
   // Undefined in demo and until the first connected load has finished.
   const [loadedAt, setLoadedAt] = useState<string | undefined>();
 
@@ -340,18 +330,6 @@ export default function App() {
               {LIVE_MODE && demo && hasCredentials && <ChangeTenantButton />}
               <LayoutToggle />
 
-              {/* When the data on screen was read. Connected only: the demo
-                  tenant was never read from anywhere. Hidden on a phone, where
-                  the header has no room; the dialog carries it there. */}
-              {!demo && lastRefresh && (
-                <span
-                  className="hidden shrink-0 text-[11px] leading-tight text-slate-500 md:block"
-                  title={`Tenant data last read from Intune: ${lastRefresh.full}`}
-                >
-                  Last refresh <span className="tabular-nums text-slate-400">{lastRefresh.short}</span>
-                </span>
-              )}
-
               <div className="relative shrink-0">
                 <button
                   onClick={() => setConfirmingRefresh((open) => !open)}
@@ -412,7 +390,7 @@ export default function App() {
                       )}
                       {!demo && lastRefresh && (
                         <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
-                          Last refresh: <span className="text-slate-300">{lastRefresh.full}</span>
+                          Last refresh: <span className="text-slate-300">{lastRefresh}</span>
                         </p>
                       )}
                       <div className="mt-2.5 flex flex-wrap justify-end gap-2">

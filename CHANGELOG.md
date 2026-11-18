@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [3.1.3] — 2026-11-18
+
+### Changed
+- **Last refresh is only in the refresh dialog.** 3.1.2 also put it in the
+  header beside Refresh from Intune, where it took room in a row that is
+  already full. The dialog the button opens still shows the full date and time
+  the tenant data was read.
+
 ## [3.1.2] — 2026-11-18
 
 Change an assignment in the admin center, come back, and refresh the same
