@@ -148,6 +148,11 @@
           pick <strong style="color:var(--tx);">PowerShell</strong>. It is already signed in as you and
           already has what it needs, so there is nothing to install. Paste this whole block and press enter.
         </p>
+        <p class="dim" style="font-size:13.5px;">
+          Set it up with an earlier version? Run it again. It finds your registration by name, adds any
+          permission this version needs, keeps everything else, and prints the consent link again — open it
+          in step 2 to approve what was added.
+        </p>
         <div class="codewrap">
           <button class="copy" data-copy="script">Copy</button>
           <pre id="script">Connect-MgGraph -Scopes "Application.ReadWrite.All"
@@ -164,19 +169,32 @@ $wanted = @(
   "Device.Read.All"
 )
 
+# Resolve the delegated permission ids by name, rather than hardcoding GUIDs.
 $graphSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0000-c000-000000000000'"
-$ids = $graphSp.Oauth2PermissionScopes | Where-Object { $wanted -contains $_.Value }
+$scopes  = @($graphSp.Oauth2PermissionScopes | Where-Object { $wanted -contains $_.Value } |
+  ForEach-Object { @{ Id = $_.Id; Type = "Scope" } })
 
-$app = New-MgApplication -DisplayName $displayName `
-  -SignInAudience "AzureADMyOrg" `
-  -Spa @{ RedirectUris = @($redirectUri) } `
-  -RequiredResourceAccess @(@{
-      ResourceAppId  = $graphSp.AppId
-      ResourceAccess = @($ids | ForEach-Object { @{ Id = $_.Id; Type = "Scope" } })
-    })
-
-New-MgServicePrincipal -AppId $app.AppId | Out-Null
-Start-Sleep -Seconds 5
+$app = Get-MgApplication -Filter "displayName eq '$displayName'" | Select-Object -First 1
+if ($app) {
+  # Already set up: add what this version needs and keep everything else.
+  $others = @($app.RequiredResourceAccess | Where-Object { $_.ResourceAppId -ne $graphSp.AppId } |
+    ForEach-Object { @{ ResourceAppId = $_.ResourceAppId
+                        ResourceAccess = @($_.ResourceAccess | ForEach-Object { @{ Id = $_.Id; Type = $_.Type } }) } })
+  $current = @($app.RequiredResourceAccess | Where-Object { $_.ResourceAppId -eq $graphSp.AppId } |
+    ForEach-Object { $_.ResourceAccess } | ForEach-Object { @{ Id = $_.Id; Type = $_.Type } })
+  $added   = @($scopes | Where-Object { $current.Id -notcontains $_.Id })
+  $uris    = @(@($app.Spa.RedirectUris) + $redirectUri | Where-Object { $_ } | Select-Object -Unique)
+  Update-MgApplication -ApplicationId $app.Id -Spa @{ RedirectUris = $uris } `
+    -RequiredResourceAccess @($others + @{ ResourceAppId = $graphSp.AppId; ResourceAccess = @($current + $added) })
+  Write-Host "Updated the existing registration: $($added.Count) permission(s) added." -ForegroundColor Yellow
+} else {
+  $app = New-MgApplication -DisplayName $displayName `
+    -SignInAudience "AzureADMyOrg" `
+    -Spa @{ RedirectUris = @($redirectUri) } `
+    -RequiredResourceAccess @(@{ ResourceAppId = $graphSp.AppId; ResourceAccess = $scopes })
+  New-MgServicePrincipal -AppId $app.AppId | Out-Null
+  Start-Sleep -Seconds 5   # let the service principal replicate
+}
 
 $tenant  = (Get-MgContext).TenantId
 $encoded = [System.Uri]::EscapeDataString($redirectUri)
@@ -185,8 +203,8 @@ Write-Host ""
 Write-Host "TENANT_ID = $tenant"
 Write-Host "CLIENT_ID = $($app.AppId)"
 Write-Host ""
-Write-Host "Consent URL:" -ForegroundColor Cyan
-Write-Host "https://login.microsoftonline.com/$tenant/adminconsent?client_id=$($app.AppId)&redirect_uri=$encoded"</pre>
+Write-Host "Now open this to grant consent:" -ForegroundColor Cyan
+Write-Host "https://login.microsoftonline.com/$tenant/adminconsent?client_id=$($app.AppId)&amp;redirect_uri=$encoded"</pre>
         </div>
         <p class="dim" style="font-size:13.5px;margin-top:12px;">
           It prints two IDs and a consent link. Keep that output open — you need it in step 3.
@@ -301,21 +319,23 @@ Write-Host "https://login.microsoftonline.com/$tenant/adminconsent?client_id=$($
     <details>
       <summary>The Apps tab says "Needs setup"</summary>
       <p>
-        Your app registration predates the Apps view and is missing its permission. In the Entra portal,
-        open the registration, go to <strong>API permissions</strong>, add
-        <span class="mono">DeviceManagementApps.Read.All</span> as a <strong>Delegated</strong> Microsoft Graph
-        permission, and click <strong>Grant admin consent</strong>. Then end the session here and sign in again.
+        Your app registration predates the Apps view and is missing its permission. Re-run the step 1 script
+        and open the consent link it prints — or, in the Entra portal, open the registration, go to
+        <strong>API permissions</strong>, add <span class="mono">DeviceManagementApps.Read.All</span> as a
+        <strong>Delegated</strong> Microsoft Graph permission, and click <strong>Grant admin consent</strong>.
+        Then end the session here and sign in again.
       </p>
     </details>
 
     <details>
       <summary>"Start from a real device" says Graph refused</summary>
       <p>
-        Your app registration predates the device search and is missing its permission. In the Entra portal,
-        open the registration, go to <strong>API permissions</strong>, add
-        <span class="mono">Device.Read.All</span> as a <strong>Delegated</strong> Microsoft Graph permission,
-        and click <strong>Grant admin consent</strong>. Then end the session here and sign in again. Everything
-        else works without it.
+        Your app registration predates the device search and is missing its permission. Re-run the step 1
+        script and open the consent link it prints — or, in the Entra portal, open the registration, go to
+        <strong>API permissions</strong>, add <span class="mono">Device.Read.All</span> as a
+        <strong>Delegated</strong> Microsoft Graph permission, and click <strong>Grant admin consent</strong>.
+        Then end the session here and sign in again. Your account also needs a role that can read devices,
+        such as Intune Administrator or Global Reader. Everything else works without it.
       </p>
     </details>
 
