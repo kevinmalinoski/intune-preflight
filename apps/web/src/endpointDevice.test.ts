@@ -296,3 +296,160 @@ describe("deviceReducer — refresh that keeps the setup", () => {
     expect(after.selectedGroupIds.sort()).toEqual(["ap", "t1", "t2"]);
   });
 });
+
+describe("deviceReducer — nested groups", () => {
+  // `child` sits inside `parent`, which sits inside `grand` (the loader flattens
+  // parentGroupIds to every depth). `other` is an unrelated child of `parent`.
+  const nested = () => [
+    group("grand"),
+    group("parent", { parentGroupIds: ["grand"] }),
+    group("child", { parentGroupIds: ["grand", "parent"] }),
+    group("other", { parentGroupIds: ["parent"] }),
+  ];
+
+  it("selects every group a ticked group is nested in, marked as nested", () => {
+    const state = run(loaded(nested()), { type: "toggleGroup", id: "child" });
+    expect(state.selectedGroupIds.sort()).toEqual(["child", "grand", "parent"]);
+    expect(state.nestedAutoIds.sort()).toEqual(["grand", "parent"]);
+  });
+
+  it("lets a nested parent be unticked, and later actions do not put it back", () => {
+    const state = run(
+      loaded(nested()),
+      { type: "toggleGroup", id: "child" },
+      { type: "toggleGroup", id: "parent" },
+      { type: "toggleAutopilotDevice" },
+      { type: "setGroupTag", groupTag: "ANY" }
+    );
+    expect(state.selectedGroupIds.sort()).toEqual(["child", "grand"]);
+  });
+
+  it("drops nested parents once nothing selected puts the device in them", () => {
+    const state = run(loaded(nested()), { type: "toggleGroup", id: "child" }, { type: "toggleGroup", id: "child" });
+    expect(state.selectedGroupIds).toEqual([]);
+    expect(state.nestedAutoIds).toEqual([]);
+  });
+
+  it("keeps a nested parent while another selected child still implies it", () => {
+    const state = run(
+      loaded(nested()),
+      { type: "toggleGroup", id: "child" },
+      { type: "toggleGroup", id: "other" },
+      { type: "toggleGroup", id: "child" }
+    );
+    expect(state.selectedGroupIds.sort()).toEqual(["other", "parent"]);
+  });
+
+  it("never drops a parent the admin ticked themselves", () => {
+    const state = run(
+      loaded(nested()),
+      { type: "toggleGroup", id: "parent" },
+      { type: "toggleGroup", id: "child" },
+      { type: "toggleGroup", id: "child" }
+    );
+    // `grand` stays too: the device is in `parent`, which is inside it.
+    expect(state.selectedGroupIds.sort()).toEqual(["grand", "parent"]);
+    expect(state.nestedAutoIds).toEqual(["grand"]);
+  });
+
+  it("brings the parents of an Autopilot group the checkbox selects", () => {
+    const state = run(
+      loaded([group("all-kiosks"), autopilotGroup("ap", { parentGroupIds: ["all-kiosks"], nestedOnly: true })]),
+      { type: "toggleAutopilotDevice" }
+    );
+    expect(state.selectedGroupIds.sort()).toEqual(["all-kiosks", "ap"]);
+    const off = deviceReducer(state, { type: "toggleAutopilotDevice" });
+    expect(off.selectedGroupIds).toEqual([]);
+  });
+
+  it("expands a Manifest handoff once the catalog says what it is nested in", () => {
+    const state = loaded(nested(), [], { groupIds: ["child"], platform: "windows", filterIds: [] });
+    expect(state.selectedGroupIds.sort()).toEqual(["child", "grand", "parent"]);
+  });
+
+  it("does not re-add an unticked parent on a refresh that keeps the setup", () => {
+    const before = run(loaded(nested()), { type: "toggleGroup", id: "child" }, { type: "toggleGroup", id: "parent" });
+    const after = deviceReducer(before, {
+      type: "catalogReloaded",
+      groups: nested(),
+      unassignedPolicies: [],
+      filterIds: [],
+    });
+    expect(after.selectedGroupIds.sort()).toEqual(["child", "grand"]);
+  });
+});
+
+describe("deviceReducer — start from a real device", () => {
+  it("takes the device's OS, Autopilot facts and the groups the catalog knows", () => {
+    const before = run(loaded([group("g1"), group("g2"), group("mac", { platforms: ["macos"] })]), {
+      type: "toggleDeviceFilter",
+      id: "f1",
+    });
+    const state = deviceReducer(before, {
+      type: "applyRealDevice",
+      platform: "windows",
+      groupIds: ["g2", "unassigned-elsewhere", "mac"],
+      isAutopilot: true,
+      groupTag: "KIOSK",
+    });
+    expect(state.selectedGroupIds).toEqual(["g2"]);
+    expect(state.isAutopilotDevice).toBe(true);
+    expect(state.groupTag).toBe("KIOSK");
+    expect(state.deviceFilterIds).toEqual([]);
+    expect(state.nestedAutoIds).toEqual([]);
+  });
+
+  it("keeps Autopilot off for a device that is not Windows", () => {
+    const state = deviceReducer(loaded([group("m", { platforms: ["macos"] })]), {
+      type: "applyRealDevice",
+      platform: "macos",
+      groupIds: ["m"],
+      isAutopilot: true,
+      groupTag: "X",
+    });
+    expect(state.platform).toBe("macos");
+    expect(state.isAutopilotDevice).toBe(false);
+    expect(state.groupTag).toBe("");
+    expect(state.selectedGroupIds).toEqual(["m"]);
+  });
+});
+
+describe("deviceReducer — Group Tag groups the tag cannot settle", () => {
+  it("does not auto-select a tag match ANDed with a property it cannot check", () => {
+    const state = run(
+      loaded([
+        tagGroup("plain", "PREFLIGHT-A"),
+        group("versioned", {
+          isDynamic: true,
+          membershipRule:
+            '(device.devicePhysicalIds -any (_ -eq "[OrderID]:PREFLIGHT-A")) and (device.deviceOSVersion -startsWith "26")',
+        }),
+        group("either", {
+          isDynamic: true,
+          membershipRule:
+            '(device.devicePhysicalIds -any (_ -eq "[OrderID]:PREFLIGHT-A")) or (device.deviceModel -eq "Virtual Machine")',
+        }),
+      ]),
+      { type: "toggleAutopilotDevice" },
+      { type: "setGroupTag", groupTag: "PREFLIGHT-A" }
+    );
+    expect(state.selectedGroupIds.sort()).toEqual(["either", "plain"]);
+  });
+
+  it("keeps an undecidable tag group the admin ticked, and drops it once the tag rules it out", () => {
+    const versioned = group("versioned", {
+      isDynamic: true,
+      membershipRule:
+        '(device.devicePhysicalIds -any (_ -eq "[OrderID]:PREFLIGHT-A")) and (device.deviceOSVersion -startsWith "26")',
+    });
+    const ticked = run(
+      loaded([versioned]),
+      { type: "toggleAutopilotDevice" },
+      { type: "setGroupTag", groupTag: "PREFLIGHT-A" },
+      { type: "toggleGroup", id: "versioned" },
+      { type: "setGroupTag", groupTag: "PREFLIGHT-A " }
+    );
+    expect(ticked.selectedGroupIds).toEqual(["versioned"]);
+    expect(deviceReducer(ticked, { type: "setGroupTag", groupTag: "OTHER" }).selectedGroupIds).toEqual([]);
+  });
+});

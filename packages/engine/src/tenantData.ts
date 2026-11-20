@@ -38,4 +38,12 @@ export interface TenantData {
    * never read from anywhere.
    */
   loadedAt?: string;
+  /**
+   * Every dynamic group in the tenant whose rule mentions the enrollment
+   * profile name, assigned or not. Read so a rule broken by a profile rename
+   * is found even in a group nothing targets yet -- the groups above are only
+   * the ones assignments reference. Absent when the read failed or for the
+   * demo tenant.
+   */
+  profileRuleGroups?: IntuneGroup[];
 }

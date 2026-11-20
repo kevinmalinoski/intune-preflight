@@ -1,12 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import {
   classifyAutopilotMatch,
   classifyGroupTagMatch,
   groupTagScope,
   isGroupTagRule,
   isAutopilotJoinedRule,
+  judgeMembershipRule,
+  unmodelledRuleProperties,
+  type RuleVerdict,
 } from "@intune-preflight/shared";
-import type { AssignmentFilter, GroupSummary, Platform } from "@intune-preflight/shared";
+import type { AssignmentFilter, GroupSummary, Platform, ProfileNameWarning } from "@intune-preflight/shared";
 import { PortalLink } from "./PortalLink.tsx";
 
 // `short` is what fits four-across in the sidebar; "iOS / iPadOS" does not.
@@ -101,7 +104,23 @@ export function EndpointPicker({
   groupTag,
   onGroupTagChange,
   loading = false,
+  nestedAutoIds = [],
+  deviceLookup,
+  verifiedDevice = null,
+  profileWarnings = [],
 }: {
+  /** Tenant-wide: dynamic groups naming an enrollment profile no profile has. */
+  profileWarnings?: ProfileNameWarning[];
+  /**
+   * A real device the endpoint was started from. While set, its memberships
+   * are the facts: groups are marked by whether it is in them, and nothing is
+   * judged from rules.
+   */
+  verifiedDevice?: { name: string; groupIds: string[] } | null;
+  /** Selected groups that are selected only because a group inside them is. */
+  nestedAutoIds?: string[];
+  /** "Start from a real device", placed at the top of the column. */
+  deviceLookup?: ReactNode;
   groups: GroupSummary[];
   selectedGroupIds: string[];
   platform: Platform;
@@ -143,9 +162,25 @@ export function EndpointPicker({
 
   const trimmedGroupTag = groupTag.trim();
 
+  // Each dynamic group's membership judged from its rule, three-valued -- see
+  // judgeMembershipRule. Not judged while a real device is loaded: its actual
+  // memberships answer the question rules only estimate.
+  const verdicts = useMemo(() => {
+    const out = new Map<string, RuleVerdict>();
+    if (verifiedDevice) return out;
+    const autopilot = platform === "windows" && (isAutopilotDevice || groupTag.trim() !== "");
+    const inputs = { platform, isAutopilot: autopilot, groupTag: autopilot ? groupTag : "" };
+    for (const g of groups)
+      if (g.isDynamic && g.membershipRule) out.set(g.id, judgeMembershipRule(g.membershipRule, inputs));
+    return out;
+  }, [groups, platform, isAutopilotDevice, groupTag, verifiedDevice]);
+  const deviceGroupIds = useMemo(() => new Set(verifiedDevice?.groupIds ?? []), [verifiedDevice]);
+
   // Float the relevant groups up: selected first, then confident matches (Group
-  // Tag or Autopilot), then conditional references, then the rest alphabetically.
-  // Re-sorts as you select, type a tag, or toggle Autopilot, so what matters rises.
+  // Tag, Autopilot, or a rule that settles the device in), then the ones to
+  // review -- conditional references and dynamic groups that may include this
+  // device -- then the rest alphabetically. Re-sorts as you select, type a tag,
+  // or toggle Autopilot, so what matters rises.
   const autopilotOn = isAutopilotDevice && platform === "windows";
   const sortedGroups = useMemo(() => {
     // Rank each group ONCE, then sort -- rather than classifying inside the
@@ -158,8 +193,9 @@ export function EndpointPicker({
         if (selected.has(g.id)) return [g.id, 0];
         const tagState = trimmedGroupTag ? classifyGroupTagMatch(g.membershipRule, trimmedGroupTag).state : "none";
         const apState = autopilotOn ? classifyAutopilotMatch(g.membershipRule).state : "none";
-        if (tagState === "match" || apState === "match") return [g.id, 1];
-        if (tagState === "conditional" || apState === "conditional") return [g.id, 2];
+        if (tagState === "match" || apState === "match" || verdicts.get(g.id) === "member") return [g.id, 1];
+        if (tagState === "conditional" || apState === "conditional" || verdicts.get(g.id) === "unknown")
+          return [g.id, 2];
         return [g.id, 3];
       })
     );
@@ -168,18 +204,41 @@ export function EndpointPicker({
         (rank.get(a.id) ?? 3) - (rank.get(b.id) ?? 3) ||
         a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" })
     );
-  }, [filteredGroups, selectedGroupIds, trimmedGroupTag, autopilotOn]);
+  }, [filteredGroups, selectedGroupIds, trimmedGroupTag, autopilotOn, verdicts]);
+
+  // Dynamic groups this endpoint may be in that nothing here can settle.
+  const mayInclude = sortedGroups.filter(
+    (g) => !selectedGroupIds.includes(g.id) && verdicts.get(g.id) === "unknown"
+  ).length;
 
   const platformFilters = useMemo(() => filters.filter((f) => f.platform === platform), [filters, platform]);
 
   // Autopilot is a Windows-only enrollment path -- disable the whole section off Windows.
   const autopilotDisabled = platform !== "windows";
 
+  const nameById = useMemo(() => new Map(groups.map((g) => [g.id, g.displayName])), [groups]);
+
+  // For a group selected because of nesting: the selected groups inside it
+  // that put it there, named in its pill.
+  const nestedVia = useMemo(() => {
+    const via = new Map<string, string[]>();
+    const auto = new Set(nestedAutoIds);
+    for (const id of selectedGroupIds) {
+      if (auto.has(id)) continue;
+      for (const parent of groups.find((g) => g.id === id)?.parentGroupIds ?? []) {
+        if (!auto.has(parent)) continue;
+        via.set(parent, [...(via.get(parent) ?? []), nameById.get(id) ?? id]);
+      }
+    }
+    return via;
+  }, [groups, selectedGroupIds, nestedAutoIds, nameById]);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col px-3 py-3">
       <div className="flex min-h-0 flex-1 flex-col gap-3">
         {/* Col 1: Platform + Autopilot */}
         <div className="flex w-full shrink-0 flex-col gap-2.5">
+          {deviceLookup}
           <div>
             <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-500">Platform</div>
             <div className="grid grid-cols-4 gap-0.5 rounded-lg border border-ink-700 bg-ink-800 p-0.5">
@@ -263,6 +322,22 @@ export function EndpointPicker({
               All Devices &amp; All Users always apply
             </span>
           </div>
+          {platform === "windows" && profileWarnings.length > 0 && <ProfileWarnings warnings={profileWarnings} />}
+          {verifiedDevice ? (
+            <div className="text-[10px] leading-snug text-emerald-300/80">
+              Checked against {verifiedDevice.name}: ✓ marks the groups it is in.
+            </div>
+          ) : (
+            mayInclude > 0 && (
+              <div
+                className="text-[10px] leading-snug text-amber-300/80"
+                title="These dynamic groups' rules depend on properties this simulation does not model, such as the enrollment profile name or the device model. Expand a rule to check it, or start from a real device to use its actual memberships."
+              >
+                {mayInclude} dynamic group{mayInclude === 1 ? "" : "s"} may include this device. Check the rule, or
+                start from a real device.
+              </div>
+            )
+          )}
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -290,7 +365,16 @@ export function EndpointPicker({
               // Show the rule when we couldn't fully decide it (Group Tag conditional,
               // a tag match that also hinges on other properties, or an Autopilot
               // "+ conditions" group whose extra condition we can't check).
-              const showRule = isConditional || (isMatch && !tm.fullyEvaluated) || isAutopilotConditional;
+              const stale = g.staleProfileNames ?? [];
+              const showRule =
+                isConditional || (isMatch && !tm.fullyEvaluated) || isAutopilotConditional || stale.length > 0;
+              const via = nestedVia.get(g.id);
+              const selected = selectedGroupIds.includes(g.id);
+              const verdict = verdicts.get(g.id);
+              const unmodelled = unmodelledRuleProperties(g.membershipRule);
+              // The tag and Autopilot pills already speak for these rows.
+              const otherPillShown = tagActive || isAutopilotConditional || (isAutopilotJoined && isAutopilotDevice);
+              const parentNames = (g.parentGroupIds ?? []).map((id) => nameById.get(id) ?? id);
               // Every dynamic group's rule is worth being able to read, not just the
               // ones we could not decide: the rule is what determines whether a real
               // device lands in the group at all, and an admin judging an assignment
@@ -365,7 +449,7 @@ export function EndpointPicker({
                       {isMatch && !tm.fullyEvaluated && (
                         <span
                           className="animate-fade-in inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[9px] font-medium leading-none text-amber-300/90 ring-1 ring-inset ring-amber-400/40"
-                          title="Matched on the Group Tag, but this rule also depends on properties a Group Tag can't decide — verify against the rule."
+                          title={`The Group Tag matches, but this rule also depends on ${unmodelledRuleProperties(g.membershipRule).join(", ") || "properties a Group Tag can't decide"}, so whether this device is in the group is not known. It is not selected automatically: read the rule and tick it if it applies, or start from a real device.`}
                         >
                           + conditions
                         </span>
@@ -392,6 +476,74 @@ export function EndpointPicker({
                           title="An Autopilot ([ZTDId]) group whose rule also depends on a device condition that can't be evaluated here (e.g. excluding Cloud PCs). Review the rule and include it if it applies to this device."
                         >
                           autopilot · + conditions
+                        </span>
+                      )}
+                      {verifiedDevice && deviceGroupIds.has(g.id) && (
+                        <span
+                          className="inline-flex shrink-0 items-center rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[9px] font-medium leading-none text-emerald-300 ring-1 ring-inset ring-emerald-400/30"
+                          title={`${verifiedDevice.name} is in this group, according to Entra when it was loaded.`}
+                        >
+                          ✓ in device
+                        </span>
+                      )}
+                      {!otherPillShown && !selected && verdict === "member" && (
+                        <span
+                          className="animate-fade-in inline-flex shrink-0 items-center rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-medium leading-none text-amber-200 ring-1 ring-inset ring-amber-400/30"
+                          title="By its rule, a device set up like this one is in this group, whatever the parts of the rule this simulation cannot check turn out to be. Tick it to include it."
+                        >
+                          rule matches
+                        </span>
+                      )}
+                      {!otherPillShown && !selected && verdict === "unknown" && (
+                        <span
+                          className="inline-flex shrink-0 items-center rounded-full border border-dashed border-amber-400/40 px-1.5 py-0.5 text-[9px] font-medium leading-none text-amber-300/80"
+                          title={
+                            unmodelled.length > 0
+                              ? `Whether this device is in the group depends on ${unmodelled.join(", ")}, which this simulation does not model. Read the rule to decide, or start from a real device to see its actual groups.`
+                              : "This rule's form is not evaluated here, so whether this device is in the group is not known. Read the rule to decide, or start from a real device to see its actual groups."
+                          }
+                        >
+                          may include
+                        </span>
+                      )}
+                      {selected && verdict === "not-member" && (
+                        <span
+                          className="inline-flex shrink-0 items-center rounded-full bg-rose-500/10 px-1.5 py-0.5 text-[9px] font-medium leading-none text-rose-300 ring-1 ring-inset ring-rose-400/30"
+                          title="By its rule, a device set up like this one is not in this group — for example, it requires a Group Tag or Autopilot registration this endpoint does not have. It stays selected because you ticked it."
+                        >
+                          rule says no
+                        </span>
+                      )}
+                      {via && (
+                        <span
+                          className="animate-fade-in inline-flex shrink-0 items-center rounded-full bg-sky-500/15 px-1.5 py-0.5 text-[9px] font-medium leading-none text-sky-300 ring-1 ring-inset ring-sky-400/30"
+                          title={`Selected because ${via.join(", ")} ${via.length === 1 ? "is a member" : "are members"} of this group, so the device is too. Untick it to see the device without it.`}
+                        >
+                          nested · via {via.length === 1 ? via[0] : `${via.length} groups`}
+                        </span>
+                      )}
+                      {parentNames.length > 0 && (
+                        <span
+                          className="inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[9px] font-medium leading-none text-slate-500 ring-1 ring-inset ring-ink-700"
+                          title={`A member of ${parentNames.join(", ")}. Selecting this group selects ${parentNames.length === 1 ? "it" : "them"} too.`}
+                        >
+                          in {parentNames.length} group{parentNames.length === 1 ? "" : "s"}
+                        </span>
+                      )}
+                      {g.nestedOnly && (
+                        <span
+                          className="inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[9px] font-medium leading-none text-slate-500 ring-1 ring-inset ring-ink-700"
+                          title="Nothing is assigned to this group directly. It is listed because it sits inside a group that is, which makes it a way a device reaches that group's policies and apps."
+                        >
+                          nested only
+                        </span>
+                      )}
+                      {stale.length > 0 && (
+                        <span
+                          className="inline-flex shrink-0 items-center rounded-full bg-rose-500/15 px-1.5 py-0.5 text-[9px] font-medium leading-none text-rose-300 ring-1 ring-inset ring-rose-400/30"
+                          title={staleProfileTitle(stale)}
+                        >
+                          {stale.some((s) => s.closest) ? "profile name: spaces differ" : "profile name not found"}
                         </span>
                       )}
                       {g.isDynamic && (
@@ -454,6 +606,68 @@ export function EndpointPicker({
       </div>
     </div>
   );
+}
+
+/**
+ * Tenant-wide: every dynamic group whose rule names an enrollment profile no
+ * Autopilot profile has, including groups nothing is assigned to yet -- the
+ * ones the list below cannot show. Collapsed to one line, because it is about
+ * the tenant rather than this endpoint.
+ *
+ * Names are printed inside visible quotes with spaces preserved, because the
+ * case this most often catches -- a stray space -- is otherwise invisible.
+ */
+function ProfileWarnings({ warnings }: { warnings: ProfileNameWarning[] }) {
+  return (
+    <details className="rounded-md border border-rose-400/30 bg-rose-500/[0.06] px-2 py-1 text-[10px] leading-snug text-rose-200/90">
+      <summary className="cursor-pointer">
+        {warnings.length} dynamic group{warnings.length === 1 ? "" : "s"} name{warnings.length === 1 ? "s" : ""} an
+        enrollment profile no Autopilot profile has
+      </summary>
+      <ul className="mt-1 flex flex-col gap-1.5 pb-1">
+        {warnings.map((w) => (
+          <li key={w.groupId} className="text-slate-300">
+            <span className="font-medium text-slate-200">{w.displayName}</span>
+            <PortalLink url={w.portalUrl} name={w.displayName} className="ml-1 align-[-3px]" />
+            {!w.assigned && <span className="ml-1 text-slate-500">(nothing assigned)</span>}
+            {w.names.map((n) => (
+              <span key={n.name} className="block text-slate-400">
+                <span className="whitespace-pre font-mono text-rose-200">“{n.name}”</span>
+                {n.closest ? (
+                  <>
+                    {" "}
+                    — the profile is <span className="whitespace-pre font-mono text-slate-200">“{n.closest}”</span>;
+                    only spaces differ
+                  </>
+                ) : (
+                  " — no profile has this name"
+                )}
+              </span>
+            ))}
+          </li>
+        ))}
+      </ul>
+      <p className="border-t border-rose-400/20 pt-1 text-slate-500">
+        Usually a profile renamed after the rule was written. A device enrolled under the current name does not match
+        that part of the rule, and for an exclusion (-ne / -notIn) it is not excluded. A name kept on purpose for
+        devices enrolled before a rename is listed too. Apple and Android profiles are not checked.
+      </p>
+    </details>
+  );
+}
+
+/**
+ * The explanation behind a "profile name" pill. Spells out the names with
+ * visible quotes, because the case it exists for -- a trailing space -- is
+ * invisible otherwise.
+ */
+function staleProfileTitle(stale: { name: string; closest?: string }[]): string {
+  const lines = stale.map((s) =>
+    s.closest
+      ? `The rule compares the enrollment profile name with “${s.name}”, but the profile is called “${s.closest}”. They differ only by spaces at the start or end, and Entra does not ignore those: a device enrolled by this profile does not match this part of the rule.`
+      : `The rule compares the enrollment profile name with “${s.name}”, but no Windows Autopilot profile or device preparation policy is called that now. If the profile was renamed or deleted, a device enrolled under its current name does not match this part of the rule.`
+  );
+  return `${lines.join("\n\n")}\n\nFor an exclusion (-ne / -notIn) that means the device is not excluded. Apple and Android enrollment profiles are not checked.`;
 }
 
 /**

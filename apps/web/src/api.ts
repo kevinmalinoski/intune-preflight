@@ -1,6 +1,9 @@
 import type {
   AssignmentFilter,
   AssignmentReport,
+  DeviceMembershipResponse,
+  DeviceSearchResponse,
+  ProfileNameWarning,
   GroupSummary,
   Platform,
   SimulationResult,
@@ -130,6 +133,13 @@ const serverApi = {
   },
   groups: () => getJson<GroupSummary[]>("/groups"),
   filters: () => getJson<AssignmentFilter[]>("/filters"),
+  /** Dynamic groups anywhere in the tenant naming an enrollment profile no profile has. */
+  profileNameWarnings: () => getJson<ProfileNameWarning[]>("/profile-name-warnings"),
+  /** "Load a real device": devices whose name starts with `query`. */
+  searchDevices: (query: string, signal?: AbortSignal) =>
+    getJson<DeviceSearchResponse>(`/devices?search=${encodeURIComponent(query)}`, signal),
+  /** The groups a device is in, and its OS and Autopilot facts. */
+  deviceMembership: (id: string) => getJson<DeviceMembershipResponse>(`/devices/${encodeURIComponent(id)}/membership`),
   unassignedPolicies: () => getJson<UnassignedPolicy[]>("/unassigned"),
   assignmentReport: (platform?: Platform) =>
     getJson<AssignmentReport>(`/reports/assignments${platform ? `?platform=${platform}` : ""}`),

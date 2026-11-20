@@ -1,9 +1,17 @@
 import Fastify from "fastify";
 import cors from "@fastify/cors";
-import type { Platform } from "@intune-preflight/shared";
+import { DEVICE_LOOKUP_DEMO, type Platform } from "@intune-preflight/shared";
+import { listProfileNameWarnings } from "@intune-preflight/engine";
 import { config } from "./config.js";
 import { getMode, setMode, type TenantMode } from "./mode.js";
-import { loadTenantData, clearTenantDataCache, getLastLoadWarnings, getLastLoadedAt } from "./tenantData.js";
+import {
+  loadTenantData,
+  clearTenantDataCache,
+  deviceMembership,
+  findDevices,
+  getLastLoadWarnings,
+  getLastLoadedAt,
+} from "./tenantData.js";
 import {
   assignmentReportToCsv,
   assignmentReportToXlsx,
@@ -78,6 +86,27 @@ export async function buildServer({ logger = true }: { logger?: boolean } = {}) 
       app.log.error(err);
       return reply.status(502).send({ error: (err as Error).message });
     }
+  });
+
+  app.get("/api/profile-name-warnings", async (_req, reply) => {
+    try {
+      return listProfileNameWarnings(await loadTenantData());
+    } catch (err) {
+      app.log.error(err);
+      return reply.status(502).send({ error: (err as Error).message });
+    }
+  });
+
+  // "Load a real device". Read live from Graph on each call; the sample tenant
+  // has no devices, so demo mode answers `unavailable` rather than an error.
+  app.get<{ Querystring: { search?: string } }>("/api/devices", async (req) => {
+    if (getMode() === "demo") return { unavailable: DEVICE_LOOKUP_DEMO };
+    return findDevices(String(req.query.search ?? "").slice(0, 100));
+  });
+
+  app.get<{ Params: { id: string } }>("/api/devices/:id/membership", async (req) => {
+    if (getMode() === "demo") return { unavailable: DEVICE_LOOKUP_DEMO };
+    return deviceMembership(req.params.id);
   });
 
   app.get("/api/filters", async (_req, reply) => {

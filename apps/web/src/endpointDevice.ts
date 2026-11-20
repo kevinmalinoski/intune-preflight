@@ -1,4 +1,4 @@
-import { groupTagMatchesRule, isAutopilotJoinedRule, isGroupTagRule } from "@intune-preflight/shared";
+import { isAutopilotJoinedRule, isGroupTagRule, judgeMembershipRule } from "@intune-preflight/shared";
 import type { GroupSummary, Platform, UnassignedPolicy } from "@intune-preflight/shared";
 
 /**
@@ -40,6 +40,13 @@ export interface DeviceState {
   unassignedPolicyIds: string[];
   isAutopilotDevice: boolean;
   groupTag: string;
+  /**
+   * Selected groups that are selected only because a group nested inside them
+   * is: the device is in the child, so it is in the parent. Tracked so they can
+   * go again when nothing selected still puts the device in them -- and so that
+   * unticking one sticks, because that is the admin overriding it.
+   */
+  nestedAutoIds: string[];
 }
 
 export type DeviceAction =
@@ -56,6 +63,19 @@ export type DeviceAction =
       groups: GroupSummary[];
       unassignedPolicies: UnassignedPolicy[];
       filterIds: string[];
+    }
+  /**
+   * Start from a real device: its OS, its Autopilot facts and the groups it is
+   * actually in. Group ids the catalog does not have are dropped -- nothing is
+   * assigned to them. Transitive membership already includes every parent, so
+   * nothing is inferred on top of it.
+   */
+  | {
+      type: "applyRealDevice";
+      platform?: Platform;
+      groupIds: string[];
+      isAutopilot: boolean;
+      groupTag?: string;
     }
   | { type: "setPlatform"; platform: Platform }
   | { type: "toggleGroup"; id: string }
@@ -83,6 +103,7 @@ export function initialDeviceState(
     unassignedPolicyIds: [],
     isAutopilotDevice: false,
     groupTag: "",
+    nestedAutoIds: [],
   };
 }
 
@@ -126,7 +147,55 @@ function applyInvariants(state: DeviceState): DeviceState {
     next = { ...next, unassignedPolicyIds: onPlatformPolicies };
   }
 
+  // Only selected groups can be selected-because-nested.
+  const auto = next.nestedAutoIds.filter((id) => next.selectedGroupIds.includes(id));
+  if (auto.length !== next.nestedAutoIds.length) next = { ...next, nestedAutoIds: auto };
+
   return next;
+}
+
+/** The catalog groups `id` sits inside -- already flattened to every depth by the loader. */
+const parentsOf = (state: DeviceState, id: string) => state.groups.find((g) => g.id === id)?.parentGroupIds ?? [];
+
+/**
+ * Nesting, in two steps. Every group in `added` brings the groups it is nested
+ * in, marked as selected-because-nested. Then any of those that nothing
+ * selected in its own right still sits inside is dropped -- the child that put
+ * it there was unticked, or its Group Tag no longer matches.
+ *
+ * Only groups just ADDED expand. Re-expanding everything on every action would
+ * put back a parent the admin had deliberately unticked to see the device
+ * without it, which is the override this exists to allow.
+ */
+function settleNesting(state: DeviceState, added: string[]): DeviceState {
+  let selected = state.selectedGroupIds;
+  let auto = state.nestedAutoIds;
+  for (const id of added) {
+    for (const parent of parentsOf(state, id)) {
+      if (!selected.includes(parent)) {
+        selected = [...selected, parent];
+        auto = [...auto, parent];
+      }
+    }
+  }
+  const implied = new Set(selected.filter((id) => !auto.includes(id)).flatMap((id) => parentsOf(state, id)));
+  const drop = auto.filter((id) => !implied.has(id));
+  if (drop.length > 0) {
+    selected = selected.filter((id) => !drop.includes(id));
+    auto = auto.filter((id) => !drop.includes(id));
+  }
+  return selected === state.selectedGroupIds && auto === state.nestedAutoIds
+    ? state
+    : { ...state, selectedGroupIds: selected, nestedAutoIds: auto };
+}
+
+/**
+ * The common tail of every action that can change which groups are selected:
+ * expand what was added, apply the invariants, then drop nesting they orphaned.
+ */
+function finish(prev: DeviceState, next: DeviceState): DeviceState {
+  const added = next.selectedGroupIds.filter((id) => !prev.selectedGroupIds.includes(id));
+  return settleNesting(applyInvariants(settleNesting(next, added)), []);
 }
 
 /**
@@ -149,14 +218,21 @@ function resolveImpliedGroups(state: DeviceState): DeviceState {
   let selected = state.selectedGroupIds;
 
   if (tag) {
-    // Drop Group Tag groups this tag no longer matches, then add the ones it does.
+    // Judged three-valued (judgeMembershipRule): a group is added only when its
+    // rule makes this device a member whatever its unmodelled parts say, and
+    // dropped only when the rule rules it out. A tag match ANDed with, say, an
+    // OS version is "unknown" -- left for the admin, never ticked on a guess.
+    // A Group Tag only exists on an Autopilot registration, so one implies the other.
+    const inputs = { platform: state.platform, isAutopilot: true, groupTag: tag };
     selected = selected.filter((id) => {
       const rule = state.groups.find((g) => g.id === id)?.membershipRule;
-      return !isGroupTagRule(rule) || groupTagMatchesRule(rule, tag);
+      return !isGroupTagRule(rule) || judgeMembershipRule(rule, inputs) !== "not-member";
     });
     selected = union(
       selected,
-      state.groups.filter((g) => groupTagMatchesRule(g.membershipRule, tag)).map((g) => g.id)
+      state.groups
+        .filter((g) => isGroupTagRule(g.membershipRule) && judgeMembershipRule(g.membershipRule, inputs) === "member")
+        .map((g) => g.id)
     );
   }
 
@@ -174,8 +250,10 @@ export function deviceReducer(state: DeviceState, action: DeviceAction): DeviceS
   switch (action.type) {
     case "catalogLoaded":
       // The catalogs are what the tag / Autopilot rules resolve against, so a
-      // device configured before they landed is re-resolved against them now.
-      return applyInvariants(
+      // device configured before they landed is re-resolved against them now --
+      // nesting included, which is why every selected group counts as added.
+      return finish(
+        { ...state, selectedGroupIds: [] },
         resolveImpliedGroups({
           ...state,
           groups: action.groups,
@@ -190,7 +268,8 @@ export function deviceReducer(state: DeviceState, action: DeviceAction): DeviceS
       // here: the invariant already drops any id the new catalog lacks.
       const groupIds = new Set(action.groups.map((g) => g.id));
       const filterIds = new Set(action.filterIds);
-      return applyInvariants(
+      return finish(
+        state,
         resolveImpliedGroups({
           ...state,
           groups: action.groups,
@@ -201,29 +280,50 @@ export function deviceReducer(state: DeviceState, action: DeviceAction): DeviceS
       );
     }
 
+    case "applyRealDevice": {
+      const known = new Set(state.groups.map((g) => g.id));
+      const platform = action.platform ?? state.platform;
+      const autopilot = platform === "windows" && action.isAutopilot;
+      return applyInvariants({
+        ...state,
+        platform,
+        isAutopilotDevice: autopilot,
+        groupTag: autopilot ? (action.groupTag ?? "") : "",
+        selectedGroupIds: [...new Set(action.groupIds)].filter((id) => known.has(id)),
+        deviceFilterIds: [],
+        nestedAutoIds: [],
+      });
+    }
+
     case "setPlatform": {
       if (action.platform === state.platform) return state;
       // Action effect: filters matched for one OS don't carry to another. This
       // fires ONLY on a real OS switch, which is why a handoff's seeded filters
       // survive -- they arrive as initial state, with no switch to clear them.
-      return applyInvariants(resolveImpliedGroups({ ...state, platform: action.platform, deviceFilterIds: [] }));
+      return finish(state, resolveImpliedGroups({ ...state, platform: action.platform, deviceFilterIds: [] }));
     }
 
     case "toggleGroup":
-      return applyInvariants({ ...state, selectedGroupIds: toggle(state.selectedGroupIds, action.id) });
+      // Unticking a selected-because-nested group makes it the admin's choice:
+      // it leaves the nested set, so nothing re-adds it until a child is ticked again.
+      return finish(state, {
+        ...state,
+        selectedGroupIds: toggle(state.selectedGroupIds, action.id),
+        nestedAutoIds: state.nestedAutoIds.filter((id) => id !== action.id),
+      });
 
     case "setGroupTag":
-      return applyInvariants(resolveImpliedGroups({ ...state, groupTag: action.groupTag }));
+      return finish(state, resolveImpliedGroups({ ...state, groupTag: action.groupTag }));
 
     case "toggleAutopilotDevice": {
       const nowOn = !state.isAutopilotDevice;
-      if (nowOn) return applyInvariants(resolveImpliedGroups({ ...state, isAutopilotDevice: true }));
+      if (nowOn) return finish(state, resolveImpliedGroups({ ...state, isAutopilotDevice: true }));
       // Action effect: turning it OFF makes this a non-Autopilot device, which
       // can carry no Group Tag and belong to no Autopilot-joined group -- so
       // drop what those rules selected. Deliberately not an invariant: as one it
       // would strip an Autopilot-joined group the user picked by hand (or the
       // Manifest handed off) merely because the toggle happens to be off.
-      return applyInvariants({
+      return finish(state, {
         ...state,
         isAutopilotDevice: false,
         groupTag: "",

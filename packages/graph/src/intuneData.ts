@@ -1009,6 +1009,93 @@ export async function fetchApps(ctx: LoadContext): Promise<{ apps: IntuneApp[] }
   return { apps };
 }
 
+/** Maps one raw Graph group to the catalog's shape. */
+function toIntuneGroup(raw: Record<string, unknown>): IntuneGroup {
+  const id = raw.id as string;
+  const groupTypes = (raw.groupTypes as string[] | undefined) ?? [];
+  return {
+    id,
+    displayName: (raw.displayName as string) ?? id,
+    isDynamic: groupTypes.includes("DynamicMembership"),
+    membershipRule: (raw.membershipRule as string | undefined) ?? undefined,
+    portalUrl: entraGroupPortalUrl(id),
+  };
+}
+
+/**
+ * Every dynamic group in the tenant whose rule mentions the enrollment profile
+ * name. One paged call over dynamic groups, kept small by dropping the rest.
+ * Undefined when the read fails: the check it feeds is a hygiene warning, so
+ * losing it is logged, not raised as an incomplete load.
+ */
+export async function readProfileRuleGroups(client: GraphClient): Promise<IntuneGroup[] | undefined> {
+  try {
+    const raw = await client.graphGetCollection<Record<string, unknown>>(
+      "/groups?$filter=groupTypes/any(c:c eq 'DynamicMembership')&$select=id,displayName,groupTypes,membershipRule&$top=999"
+    );
+    return raw
+      .filter((g) => typeof g.membershipRule === "string" && /enrollmentProfileName/i.test(g.membershipRule))
+      .map(toIntuneGroup);
+  } catch (err) {
+    console.warn(`Could not read the tenant's dynamic groups for the profile-name check: ${(err as Error).message}`);
+    return undefined;
+  }
+}
+
+/**
+ * Reads which groups sit inside each of `parents`, at any depth, and records
+ * it on the catalog: every group found gets the parents it is inside as
+ * `parentGroupIds`, and a group the catalog did not already have is returned
+ * to be added as `nestedOnly` -- it is how a device reaches the parent, so it
+ * has to be selectable.
+ *
+ * One call per parent, cast to groups so a parent with thousands of devices
+ * does not page through them. A failure loses the nesting of that parent and
+ * nothing else; it is logged rather than raised as a load warning, because the
+ * baseline itself is complete without it -- what is lost is an automatic
+ * selection.
+ */
+export async function readGroupNesting(
+  client: GraphClient,
+  parents: IntuneGroup[],
+  catalog: IntuneGroup[]
+): Promise<IntuneGroup[]> {
+  const byId = new Map(catalog.map((g) => [g.id, g]));
+  const parentsOf = new Map<string, Set<string>>();
+  const discovered = new Map<string, IntuneGroup>();
+  let failed = 0;
+
+  await mapWithConcurrency(parents, client.concurrency, async (parent) => {
+    try {
+      const members = await client.graphGetCollection<Record<string, unknown>>(
+        `/groups/${parent.id}/transitiveMembers/microsoft.graph.group?$select=id,displayName,groupTypes,membershipRule`
+      );
+      for (const raw of members) {
+        const id = raw.id as string | undefined;
+        if (!id || id === parent.id) continue;
+        let set = parentsOf.get(id);
+        if (!set) parentsOf.set(id, (set = new Set()));
+        set.add(parent.id);
+        if (!byId.has(id) && !discovered.has(id)) discovered.set(id, { ...toIntuneGroup(raw), nestedOnly: true });
+      }
+    } catch (err) {
+      failed++;
+      console.warn(`Could not read the groups nested in ${parent.displayName}: ${(err as Error).message}`);
+    }
+  });
+  if (failed > 0) {
+    console.warn(
+      `Nested groups were not read for ${failed} group(s); a device reaching them through a nested group will not have them selected automatically.`
+    );
+  }
+
+  for (const [id, set] of parentsOf) {
+    const group = byId.get(id) ?? discovered.get(id);
+    if (group) group.parentGroupIds = [...set].sort();
+  }
+  return [...discovered.values()];
+}
+
 /**
  * Wraps a top-level resource fetch so one failing category -- a missing
  * permission, a transient Graph error, a malformed policy -- degrades to empty
@@ -1127,6 +1214,7 @@ export async function loadTenantData({ client, mode, cache }: LoadTenantDataOpti
     // round-trip per group. A referenced group can be gone (a policy still
     // assigned to a deleted group) or unreadable -- in both cases Graph
     // returns no match; label it clearly rather than leaving a bare GUID.
+    const found = new Set<string>();
     const resolved = await mapWithConcurrency(realGroupIds, client.concurrency, async (id): Promise<IntuneGroup> => {
       const unresolvedLabel = `⚠ Deleted or inaccessible group (${id.slice(0, 8)}…)`;
       try {
@@ -1134,6 +1222,7 @@ export async function loadTenantData({ client, mode, cache }: LoadTenantDataOpti
           `/groups?$filter=id eq '${id}'&$select=id,displayName,groupTypes,membershipRule`
         );
         const match = group[0];
+        if (match) found.add(id);
         const groupTypes = (match?.groupTypes as string[] | undefined) ?? [];
         return {
           id,
@@ -1148,6 +1237,18 @@ export async function loadTenantData({ client, mode, cache }: LoadTenantDataOpti
       }
     });
     groups.push(...resolved);
+    // Nesting: a device in a group inside an assigned group is a member of the
+    // assigned one too. Only groups Graph actually returned, and only assigned
+    // (static) ones -- a dynamic group cannot have groups as members.
+    groups.push(
+      ...(await readGroupNesting(
+        client,
+        resolved.filter((g) => found.has(g.id) && !g.isDynamic),
+        groups
+      ))
+    );
+
+    const profileRuleGroups = await readProfileRuleGroups(client);
 
     // Resolve APv2 just-in-time device-group ids to display names now that the
     // referenced groups are loaded.
@@ -1181,6 +1282,7 @@ export async function loadTenantData({ client, mode, cache }: LoadTenantDataOpti
       ...("apps" in appsResult ? { apps: appsResult.apps } : { appsUnavailable: appsResult.unavailable }),
       warnings: loadWarnings,
       loadedAt: new Date().toISOString(),
+      ...(profileRuleGroups ? { profileRuleGroups } : {}),
     };
   });
 }

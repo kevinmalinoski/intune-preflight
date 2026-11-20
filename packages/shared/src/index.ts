@@ -30,6 +30,19 @@ export interface IntuneGroup {
    * the portal URL builders. Absent in the demo tenant, whose ids are made up.
    */
   portalUrl?: string;
+  /**
+   * Groups in this catalog that this group sits inside, directly or through
+   * further nesting. A device in this group is therefore a member of each of
+   * them too, which Intune honours for assignments. Absent when the group is
+   * nested in nothing the tenant assigns to.
+   */
+  parentGroupIds?: string[];
+  /**
+   * In the catalog only because it is nested inside an assigned group: nothing
+   * targets it directly. Listed so the device's real route into the parent --
+   * often an Autopilot dynamic group inside a static one -- can be selected.
+   */
+  nestedOnly?: boolean;
 }
 
 /**
@@ -378,6 +391,23 @@ export interface GroupSummary {
   membershipRule?: string;
   /** OS platforms this group has assigned (or excluded) policies for -- used to hide it when a different OS is simulated. */
   platforms: Platform[];
+  /** See IntuneGroup.parentGroupIds. */
+  parentGroupIds?: string[];
+  /** See IntuneGroup.nestedOnly. */
+  nestedOnly?: boolean;
+  /**
+   * Enrollment profile names this group's rule compares against exactly, and
+   * that no Windows Autopilot profile or device preparation policy in the
+   * tenant is called. Usually a profile that was renamed or deleted after the
+   * rule was written, which leaves the rule matching nothing -- or, for an
+   * exclusion, excluding nothing. Set only when the tenant's Autopilot profiles
+   * were read and the group carries Windows assignments.
+   *
+   * `closest` is a profile whose name differs from the rule's only by spaces
+   * at either end. Entra ignores case in these comparisons but not spaces, so
+   * a trailing space in a profile's name is enough to break the rule.
+   */
+  staleProfileNames?: { name: string; closest?: string }[];
 }
 
 /**
@@ -594,6 +624,93 @@ export interface AppsUnavailable {
 
 /** The Graph permission the Apps view needs, named once so every message agrees. */
 export const APPS_GRAPH_PERMISSION = "DeviceManagementApps.Read.All";
+
+/**
+ * A dynamic group anywhere in the tenant whose rule compares the enrollment
+ * profile name with a name no Windows Autopilot profile or device preparation
+ * policy has -- typically a profile renamed after the rule was written.
+ * See GroupSummary.staleProfileNames for `closest`.
+ */
+export interface ProfileNameWarning {
+  groupId: string;
+  displayName: string;
+  portalUrl?: string;
+  /** Whether anything in the tenant is assigned to the group. */
+  assigned: boolean;
+  names: { name: string; closest?: string }[];
+}
+
+/** The Graph permission "Load a real device" needs, named once so every message agrees. */
+export const DEVICE_GRAPH_PERMISSION = "Device.Read.All";
+
+/** A device found by "Load a real device": the Entra device object, as listed. */
+export interface DeviceSearchResult {
+  /** The Entra device object id (not the hardware deviceId). */
+  id: string;
+  displayName: string;
+  operatingSystem?: string;
+  operatingSystemVersion?: string;
+  /** Entra join type: AzureAd, ServerAd (hybrid) or Workplace (registered). */
+  trustType?: string;
+}
+
+/** A real device's group memberships and the facts the simulator takes from it. */
+export interface DeviceMembership {
+  device: DeviceSearchResult;
+  /** The simulator OS for `operatingSystem`, or undefined when it maps to none. */
+  platform?: Platform;
+  /** True when the device carries a `[ZTDId]` physical id: it is registered with Autopilot. */
+  isAutopilot: boolean;
+  /** The Autopilot Group Tag, from the device's `[OrderID]` physical id. */
+  groupTag?: string;
+  enrollmentProfileName?: string;
+  /** Every group the device is a member of, directly or through nesting. */
+  groups: { id: string; displayName: string; isDynamic?: boolean; membershipRule?: string }[];
+}
+
+/** Why "Load a real device" cannot run, in the same shape as AppsUnavailable. */
+export interface DeviceLookupUnavailable {
+  /** "permission": Graph refused (403). "demo": the sample tenant has no devices. "error": anything else. */
+  reason: "permission" | "demo" | "error";
+  detail: string;
+}
+
+/** The answer "Load a real device" gets from the sample tenant, wherever it runs. */
+export const DEVICE_LOOKUP_DEMO: DeviceLookupUnavailable = {
+  reason: "demo",
+  detail: "The sample tenant has no real devices. Switch to Connected to load one from your tenant.",
+};
+
+export type DeviceSearchResponse = { devices: DeviceSearchResult[] } | { unavailable: DeviceLookupUnavailable };
+export type DeviceMembershipResponse = { membership: DeviceMembership } | { unavailable: DeviceLookupUnavailable };
+
+/** The simulator platform for an Entra device's `operatingSystem` string. */
+export function platformFromOperatingSystem(os: string | undefined): Platform | undefined {
+  const v = (os ?? "").toLowerCase();
+  if (v.startsWith("windows")) return "windows";
+  if (v.startsWith("mac")) return "macos";
+  if (v === "ios" || v.startsWith("iphone") || v.startsWith("ipad")) return "ios";
+  if (v.startsWith("android")) return "android";
+  return undefined;
+}
+
+/**
+ * Reads the Autopilot facts out of an Entra device's `physicalIds`: whether it
+ * is registered (`[ZTDId]:...`) and its Group Tag (`[OrderID]:<tag>`), the same
+ * two entries dynamic group rules test.
+ */
+export function readPhysicalIds(physicalIds: string[] | undefined): { isAutopilot: boolean; groupTag?: string } {
+  let isAutopilot = false;
+  let groupTag: string | undefined;
+  for (const id of physicalIds ?? []) {
+    const m = /^\[([^\]]+)\]:(.*)$/.exec(id);
+    if (!m) continue;
+    const tag = m[1].toLowerCase();
+    if (tag === "ztdid") isAutopilot = true;
+    else if (tag === "orderid" && m[2]) groupTag = m[2];
+  }
+  return { isAutopilot, ...(groupTag ? { groupTag } : {}) };
+}
 
 /** One app under one intent, as it lands on the simulated endpoint. */
 export interface SimulationApp {
@@ -990,6 +1107,197 @@ function parsePhysicalIdClauses(rule: string): PhysicalIdClause[] {
     });
   }
   return clauses;
+}
+
+/**
+ * The enrollment profile names a membership rule compares against EXACTLY:
+ * `device.enrollmentProfileName -eq/-ne "<name>"` and `-in/-notIn [...]`.
+ * Prefix, substring and regex comparisons are left out on purpose -- they do
+ * not name one profile, so "no profile is called this" says nothing about them.
+ */
+export function enrollmentProfileNamesInRule(membershipRule: string | undefined): string[] {
+  if (!membershipRule) return [];
+  const names: string[] = [];
+  const single = /device\.enrollmentProfileName\s+-(?:eq|ne)\s+"([^"]*)"/gi;
+  let m: RegExpExecArray | null;
+  while ((m = single.exec(membershipRule))) names.push(m[1]);
+  const list = /device\.enrollmentProfileName\s+-(?:in|notIn)\s+\[([^\]]*)\]/gi;
+  while ((m = list.exec(membershipRule))) {
+    for (const v of m[1].matchAll(/"([^"]*)"/g)) names.push(v[1]);
+  }
+  return [...new Set(names.filter((n) => n.trim() !== ""))];
+}
+
+/** What the simulated endpoint is, as far as a membership rule can be judged against it. */
+export interface RuleInputs {
+  platform: Platform;
+  isAutopilot: boolean;
+  /** The Group Tag; empty means the device carries none. */
+  groupTag: string;
+}
+
+/** Membership of a dynamic group for the simulated endpoint, never more certain than the rule allows. */
+export type RuleVerdict = "member" | "not-member" | "unknown";
+
+/** Strips parentheses that wrap the WHOLE expression, however many layers. */
+function stripOuterParens(expr: string): string {
+  let e = expr.trim();
+  for (;;) {
+    if (!e.startsWith("(") || !e.endsWith(")")) return e;
+    let depth = 0;
+    let inString = false;
+    let wraps = true;
+    for (let i = 0; i < e.length; i++) {
+      const ch = e[i];
+      if (ch === '"') inString = !inString;
+      else if (!inString) {
+        if (ch === "(") depth++;
+        else if (ch === ")") depth--;
+        if (depth === 0 && i < e.length - 1) {
+          wraps = false;
+          break;
+        }
+      }
+    }
+    if (!wraps) return e;
+    e = e.slice(1, -1).trim();
+  }
+}
+
+/** Splits at a boolean operator that sits outside any parentheses or string. */
+function splitTopLevel(expr: string, op: "or" | "and"): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let inString = false;
+  let start = 0;
+  const pattern = op === "or" ? /^\s+-?or\s+/i : /^\s+-?and\s+/i;
+  for (let i = 0; i < expr.length; i++) {
+    const ch = expr[i];
+    if (ch === '"') inString = !inString;
+    else if (!inString) {
+      if (ch === "(") depth++;
+      else if (ch === ")") depth--;
+      else if (depth === 0) {
+        const m = pattern.exec(expr.slice(i));
+        if (m) {
+          parts.push(expr.slice(start, i));
+          start = i + m[0].length;
+          i = start - 1;
+        }
+      }
+    }
+  }
+  parts.push(expr.slice(start));
+  return parts;
+}
+
+const not = (v: RuleVerdict): RuleVerdict =>
+  v === "member" ? "not-member" : v === "not-member" ? "member" : "unknown";
+
+/** One `device.devicePhysicalIds -any (_ -op "value")` clause against the simulated device. */
+function physicalIdVerdict(op: string, value: string, inputs: RuleInputs): RuleVerdict {
+  const m = /^\[([^\]]+)\](?::(.*))?$/.exec(value);
+  if (!m) return "unknown";
+  const tag = m[1].toLowerCase();
+  const rest = m[2];
+  const o = op.toLowerCase();
+  // Only an Autopilot-registered device carries these entries at all.
+  if ((tag === "ztdid" || tag === "orderid" || tag === "purchaseorderid") && !inputs.isAutopilot) return "not-member";
+  if (tag === "ztdid") {
+    // "Has an Autopilot id": the bare form. A specific id names one device.
+    const bare = rest === undefined || rest === "";
+    return bare && (o === "startswith" || o === "contains") ? "member" : "unknown";
+  }
+  if (tag === "orderid") {
+    const gt = inputs.groupTag.trim().toLowerCase();
+    if (!gt) return "not-member";
+    const id = `[orderid]:${gt}`;
+    const v = value.toLowerCase();
+    if (o === "eq") return id === v ? "member" : "not-member";
+    if (o === "startswith") return id.startsWith(v) ? "member" : "not-member";
+    if (o === "contains") return id.includes(v) ? "member" : "not-member";
+    return "unknown";
+  }
+  return "unknown";
+}
+
+/** `device.deviceOSType`, judged only for Windows -- the one value Entra documents plainly. */
+function osTypeVerdict(op: string, value: string, inputs: RuleInputs): RuleVerdict {
+  if (inputs.platform !== "windows") return "unknown";
+  const os = "windows";
+  const v = value.toLowerCase();
+  switch (op.toLowerCase()) {
+    case "eq":
+      return os === v ? "member" : "not-member";
+    case "ne":
+      return os !== v ? "member" : "not-member";
+    case "startswith":
+      return os.startsWith(v) ? "member" : "not-member";
+    case "notstartswith":
+      return os.startsWith(v) ? "not-member" : "member";
+    case "contains":
+      return os.includes(v) ? "member" : "not-member";
+    case "notcontains":
+      return os.includes(v) ? "not-member" : "member";
+    default:
+      return "unknown";
+  }
+}
+
+function evaluate(expr: string, inputs: RuleInputs): RuleVerdict {
+  const e = stripOuterParens(expr);
+  const ors = splitTopLevel(e, "or");
+  if (ors.length > 1) {
+    const vs = ors.map((x) => evaluate(x, inputs));
+    if (vs.includes("member")) return "member";
+    return vs.every((v) => v === "not-member") ? "not-member" : "unknown";
+  }
+  const ands = splitTopLevel(e, "and");
+  if (ands.length > 1) {
+    const vs = ands.map((x) => evaluate(x, inputs));
+    if (vs.includes("not-member")) return "not-member";
+    return vs.every((v) => v === "member") ? "member" : "unknown";
+  }
+  const negated = /^-not\s+([\s\S]+)$/i.exec(e);
+  if (negated) return not(evaluate(negated[1], inputs));
+
+  const pid = /^device\.devicePhysicalIds?\s+-any\s*\(?\s*_\s*-(eq|startsWith|contains)\s+"([^"]*)"\s*\)?$/i.exec(e);
+  if (pid) return physicalIdVerdict(pid[1], pid[2], inputs);
+  const os = /^device\.deviceOSType\s+-(eq|ne|startsWith|notStartsWith|contains|notContains)\s+"([^"]*)"$/i.exec(e);
+  if (os) return osTypeVerdict(os[1], os[2], inputs);
+  return "unknown";
+}
+
+/**
+ * Whether the simulated endpoint is in a dynamic group, judged from its rule.
+ *
+ * Three-valued on purpose. Only what the simulator models is evaluated -- the
+ * Autopilot registration and Group Tag (`devicePhysicalIds`), and the OS when it
+ * is Windows -- and every other property (enrollment profile, model, ownership,
+ * category, extension attributes, `memberOf`, any `user.` property) is
+ * "unknown". `and`/`or`/`-not` combine those the way Kleene logic does, so a
+ * rule is only called "member" or "not-member" when the parts that are known
+ * settle it whatever the unknown parts turn out to be. Anything the evaluator
+ * cannot parse is "unknown" too: it never guesses.
+ */
+export function judgeMembershipRule(membershipRule: string | undefined, inputs: RuleInputs): RuleVerdict {
+  if (!membershipRule?.trim()) return "unknown";
+  return evaluate(membershipRule, inputs);
+}
+
+/**
+ * The properties a rule depends on that the simulator does not model, e.g.
+ * `device.enrollmentProfileName` -- for saying WHY a group can't be judged.
+ */
+export function unmodelledRuleProperties(membershipRule: string | undefined): string[] {
+  if (!membershipRule) return [];
+  const found = new Set<string>();
+  for (const m of membershipRule.matchAll(/\b(device|user)\.([A-Za-z0-9_]+)/g)) {
+    const prop = `${m[1]}.${m[2]}`;
+    if (/^device\.devicePhysicalIds?$/i.test(prop) || /^device\.deviceOSType$/i.test(prop)) continue;
+    found.add(prop);
+  }
+  return [...found];
 }
 
 /** Whether a membership rule scopes on an Autopilot Group Tag ([OrderID]) at all. */

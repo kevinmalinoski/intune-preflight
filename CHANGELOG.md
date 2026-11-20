@@ -6,6 +6,51 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [3.2.0] — 2026-11-19
+
+Start from a real device and see the groups it is actually in; nested groups
+are followed; and every dynamic rule is judged member, not a member, or can't
+tell, so nothing is selected on a guess. Adds one optional read-only
+permission, `Device.Read.All`, for the device search.
+
+### Changed
+- **A Group Tag no longer auto-selects a group whose rule also depends on
+  something else** (the "+ conditions" groups, e.g. a tag ANDed with an OS
+  version). Whether the device is in such a group is not known, so it is
+  marked and left for you to tick rather than selected on a guess. A tag match
+  the rest of the rule cannot overturn is still selected.
+
+### Added
+- **Start from a real device.** Search your tenant's devices by name and the
+  endpoint is set from the one you pick: its OS, Autopilot registration, Group
+  Tag and every group it is in, including through nested groups. A note lists
+  the device's groups that nothing is assigned to and shows its enrollment
+  profile name in quotes. Needs the optional `Device.Read.All` permission;
+  without it the search names the permission and nothing else changes.
+- **Nested groups.** The tenant load reads which groups sit inside each
+  assigned group. Selecting a group now selects the groups it is nested in,
+  marked "nested · via" the group that brought them in; untick one to see the
+  device without it. A group nothing is assigned to directly but that sits
+  inside one that is, such as an Autopilot dynamic group inside a static group,
+  is now listed as "nested only". Uses the existing `Group.Read.All`.
+- **Dynamic groups are judged member, not a member, or can't tell.** Only
+  what the simulator models is evaluated (Autopilot registration, Group Tag,
+  and a Windows OS); a rule that hinges on anything else is "can't tell", and
+  an unticked one is marked "may include" with the properties it depends on.
+  An unticked group whose rule settles the device in is marked "rule
+  matches"; a ticked one whose rule settles it out, "rule says no". After
+  starting from a real device, its actual memberships replace the judgement and
+  are marked "✓ in device".
+- **Enrollment profile names that match no profile.** A dynamic rule comparing
+  `device.enrollmentProfileName` with a name no Windows Autopilot profile or
+  device preparation policy has is flagged in the group list, with a separate
+  flag when the only difference is a leading or trailing space — Entra ignores
+  case in that comparison but not spaces. For an exclusion, either means the
+  device is not excluded. The check covers every dynamic group in the tenant
+  that compares enrollment profile names, including groups nothing is assigned
+  to yet (one extra Graph read of dynamic groups during the load); those are
+  listed in a collapsed line above the group list.
+
 ## [3.1.3] — 2026-11-18
 
 ### Changed

@@ -1,11 +1,18 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
-import type { AssignmentFilter, Platform, SimulationResult } from "@intune-preflight/shared";
+import type {
+  AssignmentFilter,
+  DeviceMembership,
+  Platform,
+  ProfileNameWarning,
+  SimulationResult,
+} from "@intune-preflight/shared";
 import { api, type AppsExportFormat } from "./api.ts";
 import type { AppsFocus } from "./AppsList.tsx";
 import { countApps } from "./appsView.ts";
 import { AppsPanel, AppsPeek } from "./AppsPanel.tsx";
 import { BaselinePeek } from "./BaselinePeek.tsx";
 import { appFamilyOf, isAppKind } from "./diagram/theme.ts";
+import { DeviceLookup, type LoadedDevice } from "./DeviceLookup.tsx";
 import { deviceReducer, initialDeviceState } from "./endpointDevice.ts";
 import { EndpointPicker, EndpointSummary } from "./EndpointPicker.tsx";
 import { GroupTagPill } from "./GroupTagPill.tsx";
@@ -55,7 +62,34 @@ export function EndpointSimulator({
     unassignedPolicyIds,
     isAutopilotDevice,
     groupTag,
+    nestedAutoIds,
   } = device;
+  const [loadedDevice, setLoadedDevice] = useState<LoadedDevice | null>(null);
+  const [profileWarnings, setProfileWarnings] = useState<ProfileNameWarning[]>([]);
+  const loadRealDevice = useCallback(
+    (m: DeviceMembership) => {
+      dispatch({
+        type: "applyRealDevice",
+        platform: m.platform,
+        groupIds: m.groups.map((g) => g.id),
+        isAutopilot: m.isAutopilot,
+        groupTag: m.groupTag,
+      });
+      const known = new Set(groups.map((g) => g.id));
+      setLoadedDevice({
+        name: m.device.displayName,
+        matched: m.groups.filter((g) => known.has(g.id)).length,
+        total: m.groups.length,
+        groupIds: m.groups.map((g) => g.id),
+        unassignedGroups: m.groups
+          .filter((g) => !known.has(g.id))
+          .map((g) => ({ displayName: g.displayName, membershipRule: g.membershipRule }))
+          .sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" })),
+        enrollmentProfileName: m.enrollmentProfileName,
+      });
+    },
+    [groups]
+  );
 
   const compact = useSyncExternalStore(subscribeLayout, isCompact, () => false);
   const [filters, setFilters] = useState<AssignmentFilter[]>([]);
@@ -112,6 +146,11 @@ export function EndpointSimulator({
     loadedToken.current = reloadToken;
     let live = true;
     if (reload) setError(null);
+    // A hygiene check, not part of the endpoint: if it fails, it shows nothing.
+    api
+      .profileNameWarnings()
+      .then((w) => live && setProfileWarnings(w))
+      .catch(() => live && setProfileWarnings([]));
     Promise.all([api.groups(), api.filters(), api.unassignedPolicies()])
       .then(([allGroups, allFilters, allUnassigned]) => {
         if (!live) return;
@@ -275,6 +314,12 @@ export function EndpointSimulator({
         groupTag={groupTag}
         onGroupTagChange={(groupTag) => dispatch({ type: "setGroupTag", groupTag })}
         loading={loading}
+        nestedAutoIds={nestedAutoIds}
+        profileWarnings={profileWarnings}
+        verifiedDevice={loadedDevice ? { name: loadedDevice.name, groupIds: loadedDevice.groupIds } : null}
+        deviceLookup={
+          <DeviceLookup loaded={loadedDevice} onLoad={loadRealDevice} onClear={() => setLoadedDevice(null)} />
+        }
       />
       <PolicyPreflight
         policies={unassignedPolicies}

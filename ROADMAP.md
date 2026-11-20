@@ -1,6 +1,6 @@
 # Roadmap
 
-Intune Preflight is at **v3.1**. v2 finished the settings side: endpoint
+Intune Preflight is at **v3.2**. v2 finished the settings side: endpoint
 simulation, assignment resolution (include/exclude, filters, inherited All
 Devices / All Users), the Autopilot V1/V2 enrollment layer, the Windows merged
 CSP baseline with human-readable names and values, conflict / overlap /
@@ -22,38 +22,33 @@ is and carries real design risk.
 
 ## Known limitations
 
-### Dynamic-group rule evaluation is flat / best-effort
-The **Autopilot** and **Group Tag** auto-selection (and the "implied group"
-detection) parse only *flat* membership-rule clauses:
+### Dynamic-group rules are judged, not fully evaluated
+Each dynamic group's rule is judged three ways for the simulated endpoint:
+**member**, **not a member**, or **can't tell** (`judgeMembershipRule` in
+`packages/shared`). Only what the simulator models is evaluated:
 
-- single-level `or` / `and` of `device.devicePhysicalIds` clauses,
-- targeting the `[OrderID]` (Group Tag) and `[ZTDId]` (Autopilot) tags,
-- with `-eq` / `-startsWith` operators.
+- `device.devicePhysicalIds` clauses for Autopilot registration (`[ZTDId]`) and
+  the Group Tag (`[OrderID]`), with `-eq`, `-startsWith` and `-contains`;
+- `device.deviceOSType`, and only for Windows, where Entra's value is
+  documented as `"Windows"`.
 
-They do **not** fully evaluate **combined / nested dynamic-group rules** — e.g.
-rules that nest parentheses, mix device properties
-(`(device.devicePhysicalIds -any (_ -startsWith "[OrderID]:X")) and (device.deviceOSType -eq "Windows")`),
-or use other operators (`-match`, `-in`, `-notIn`). Such a group may
-be missed by the auto-selection. Implied/auto-selected groups are
-always surfaced in the UI so they can be eyeballed against Entra.
+Everything else (enrollment profile name, OS version, model, ownership,
+category, extension attributes, `memberOf`, any `user.` property) is **can't
+tell**. `and`, `or` and `-not` combine those Kleene-style, so a rule is called
+member or not only when its known parts settle it regardless of the rest. A
+group the tool can't judge is never selected on a guess: it is marked **may
+include**, sorted up for review, and counted above the list. A Group Tag match
+ANDed with something else (**+ conditions**) is no longer auto-selected.
 
-Two deliberate exceptions where the structure *is* understood: a bare `[ZTDId]`
-clause standing as a top-level `or` branch selects the group (Entra binds `and`
-tighter than `or`, so that branch guarantees membership on its own), and
-**implied-group detection is restricted to rules built solely from
-`devicePhysicalIds` clauses** — the moment either rule mixes in another property,
-no implication is claimed rather than guessing from a shared condition.
+The way past the edge is **Start from a real device**: it reads the groups a
+real device is in from Entra, nesting included, and those memberships replace
+the judgement. What remains is the case with no real device to point at: a
+rule that hinges on a property the simulator doesn't model can only be read,
+not answered. Modelling more properties (enrollment profile, OS version) as
+endpoint inputs would narrow it; see What's next.
 
-**Surfaced, not guessed (shipped).** Rather than fake a full evaluator, the group
-picker now classifies each dynamic group against the entered Group Tag: a
-confident `[OrderID]` match is badged **group tag** and auto-selected; a match
-whose rule *also* hinges on a property a tag can't decide (deviceOSType,
-deviceCategory, …) is badged **+ conditions** with the membership rule shown to
-verify; and a tag that's referenced but can't be confirmed by the flat evaluator
-is badged **conditional** (surfaced, not auto-selected). The list sorts
-selected → matches → conditional → rest. So the honest edge is *visible* per group
-now, and a real rule engine (below) becomes an accuracy upgrade, not a correctness
-prerequisite.
+**Nested groups** are read during the load: selecting a group selects every
+assigned group it sits inside, which the admin can untick.
 
 ### Conflict & overlap detection is Windows-only
 Value-level conflict and overlap detection is trustworthy for Windows. Other
@@ -192,19 +187,13 @@ rather than corrections.
   supersedence and dependencies, which install or remove apps no assignment
   mentions. Today's edges are under
   [Known limitations](#apps-are-listed-by-assignment-not-by-outcome).
-- **Combined/nested dynamic-group rule evaluation** — the headline bet. Replace
-  the regex-based clause extraction (`parsePhysicalIdClauses`,
-  `groupTagMatchesRule`, `isAutopilotJoinedRule` in
-  `packages/shared/src/index.ts`; `ruleImplies` in
-  `packages/engine/src/normalize.ts`) with a real membership-rule expression
-  parser and evaluator (tokenize → AST → evaluate against the simulated device's
-  attributes). It is the single largest piece of new engine surface on this page.
-  Explicitly **deferred**, and it's the "surfaced, not guessed" work that earned
-  the right to defer it: because the picker now classifies each dynamic group
-  against the entered tag (**match** / **+ conditions** / **conditional**, with
-  the rule shown), the flat evaluator's limits are *visible per group* rather
-  than silently wrong. A real engine is therefore an accuracy upgrade, not a
-  correctness prerequisite.
+- **More of the device as endpoint inputs** — the three-valued rule judgement
+  shipped in v3.2, along with nested groups and starting from a real device.
+  What it cannot judge are rules on properties the simulated endpoint doesn't
+  have: enrollment profile name, OS version, model, ownership, category.
+  Adding the common ones as optional inputs would let more rules settle without
+  a real device, at the cost of a longer form. Worth doing only for the
+  properties real tenants' rules actually use.
 - **Richer user / user-group modelling** — assignments to Entra *user* groups
   resolve normally today (user groups are selectable, and All Users always
   applies), but there is no notion of a **specific user**: the tool never

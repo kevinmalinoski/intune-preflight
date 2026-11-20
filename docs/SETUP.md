@@ -56,6 +56,7 @@ So if you are *only* an Intune Administrator, you'll need a Global Administrator
    | `DeviceManagementServiceConfig.Read.All` | Windows Autopilot deployment profiles | Optional — skipped gracefully if omitted |
    | `DeviceManagementScripts.Read.All` | Platform Scripts (Windows PowerShell + macOS shell) | Optional — skipped gracefully if omitted |
    | `DeviceManagementApps.Read.All` | The Apps view: the Required, Available and Uninstall apps an endpoint gets | **Required** for the Apps view — without it the Apps tab asks for it; the baseline still loads |
+   | `Device.Read.All` | **Start from a real device**: finding a device by name and reading the groups it is in | Optional — without it the device search names the permission; nothing else is affected |
 
 4. Click **Grant admin consent** for your tenant (needs one of the roles noted above).
 5. Under **Certificates & secrets → New client secret**, create a secret and copy its value immediately (it's only shown once).
@@ -93,7 +94,8 @@ $wanted = @(
   "Group.Read.All",
   "DeviceManagementServiceConfig.Read.All",
   "DeviceManagementScripts.Read.All",
-  "DeviceManagementApps.Read.All"   # the Apps view
+  "DeviceManagementApps.Read.All",  # the Apps view
+  "Device.Read.All"                 # Start from a real device
 )
 
 $existing = Get-MgApplication -Filter "displayName eq '$displayName'" -ErrorAction SilentlyContinue
@@ -130,7 +132,7 @@ if ($existing) {
 }
 ```
 
-Open the consent URL it prints, review the five permissions, and accept. The script deliberately
+Open the consent URL it prints, review the six permissions, and accept. The script deliberately
 does **not** grant consent for you: consenting is the one step where an admin should see exactly
 what they are approving, and granting it programmatically skips that screen.
 
@@ -161,11 +163,13 @@ on behalf of the organisation; everyone else just needs the client ID.
    | `DeviceManagementServiceConfig.Read.All` | Windows Autopilot deployment profiles |
    | `DeviceManagementScripts.Read.All` | Platform Scripts (Windows PowerShell + macOS shell) |
    | `DeviceManagementApps.Read.All` | The Apps view: the Required, Available and Uninstall apps an endpoint gets |
+   | `Device.Read.All` | **Start from a real device**: finding a device by name and reading the groups it is in |
 
-   Add all five. The first four are named in the sign-in request; the apps permission is not, so a
-   registration set up before v3 keeps signing in. Granting it here is enough — the token Entra
-   issues carries every Graph permission the registration has been consented to. If it is missing,
-   the Apps tab is marked **Needs setup** and names the permission to add.
+   Add all six. The first four are named in the sign-in request; the last two are not, so a
+   registration set up before they existed keeps signing in. Granting them here is enough — the
+   token Entra issues carries every Graph permission the registration has been consented to. If the
+   apps permission is missing, the Apps tab is marked **Needs setup** and names it; if the device
+   permission is missing, the device search says so.
 
 3. Click **Grant admin consent** — all of them require it even as delegated permissions.
 4. **No client secret.** Don't create one; a public client cannot keep it, and this build has
@@ -358,6 +362,7 @@ never points at an intentionally empty `conflicts` list.
 - **A `403` in the logs after pointing at a new tenant** — the app registration's permissions were added but **admin consent wasn't granted** (or hasn't propagated yet, which can take several minutes). Confirm each permission shows **"Granted for &lt;tenant&gt;."**
 - **Browser mode: the tenant ID or client ID is wrong, or you want a different tenant.** Open the lock in the top bar and choose **Change tenant**. If sign-in never succeeded there is no lock; use the pencil button in its place. Either reopens the setup form with the saved IDs filled in.
 - **The Apps tab is marked "Needs setup" and says "Apps need one more permission".** The apps read came back `403`. Add `DeviceManagementApps.Read.All` — as an **Application** permission for the self-hosted build, **Delegated** for browser mode — and grant admin consent. The self-hosted server keeps its Graph token for up to an hour, so **restart the server** after granting it; Refresh alone reuses the old token. This is not an incomplete load: the baseline never depended on it.
+- **"Start from a real device" says Graph refused.** Add `Device.Read.All` — **Application** for the self-hosted build, **Delegated** for browser mode — and grant admin consent; for the self-hosted build, restart the server afterwards for the same token reason as above. In browser mode the signed-in admin also needs a role that can read devices, such as Intune Administrator or Global Reader.
 - **An "Incomplete load" banner appears.** Something failed to import even after retries, so the baseline is missing data — the banner names what dropped and the server log has a summary. Usually a transient Graph error: click **Refresh from Intune**. If it persists, check the named policy in the admin center.
 - **The first load is slow.** A cold load reads every policy and assignment in the tenant. It's cached afterwards (`CACHE_TTL_SECONDS`), so only the first request pays for it. The server logs a summary line with call counts and any throttling.
 - **Docker CLI says `failed to connect to Docker API at npipe://…`** — Docker Desktop isn't running or hasn't finished starting. Launch it, wait for **"Engine running,"** and confirm with `docker version` (you want a **Server:** section).

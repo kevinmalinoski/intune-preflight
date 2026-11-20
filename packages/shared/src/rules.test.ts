@@ -207,3 +207,92 @@ describe("classifyAutopilotMatch (Autopilot in the picker)", () => {
     expect(classifyAutopilotMatch(undefined).state).toBe("none");
   });
 });
+
+describe("enrollmentProfileNamesInRule", () => {
+  it("collects exact comparisons, including lists, and ignores partial ones", async () => {
+    const { enrollmentProfileNamesInRule } = await import("./index.js");
+    expect(
+      enrollmentProfileNamesInRule(
+        '(device.enrollmentProfileName -ne "Old Kiosk") and (device.enrollmentProfileName -notIn ["A", "B"]) or (device.enrollmentProfileName -startsWith "Prefix")'
+      )
+    ).toEqual(["Old Kiosk", "A", "B"]);
+    expect(enrollmentProfileNamesInRule('(device.deviceOSType -eq "Windows")')).toEqual([]);
+    expect(enrollmentProfileNamesInRule(undefined)).toEqual([]);
+  });
+});
+
+describe("readPhysicalIds and platformFromOperatingSystem", () => {
+  it("reads Autopilot registration and the Group Tag", async () => {
+    const { readPhysicalIds } = await import("./index.js");
+    expect(readPhysicalIds(["[ZTDId]:x", "[OrderID]:SALES"])).toEqual({ isAutopilot: true, groupTag: "SALES" });
+    expect(readPhysicalIds(["[GID]:g"])).toEqual({ isAutopilot: false });
+    expect(readPhysicalIds(undefined)).toEqual({ isAutopilot: false });
+  });
+
+  it("maps Entra operating system names to the simulator's platforms", async () => {
+    const { platformFromOperatingSystem } = await import("./index.js");
+    expect(platformFromOperatingSystem("Windows")).toBe("windows");
+    expect(platformFromOperatingSystem("MacMDM")).toBe("macos");
+    expect(platformFromOperatingSystem("iPadOS")).toBe("ios");
+    expect(platformFromOperatingSystem("AndroidForWork")).toBe("android");
+    expect(platformFromOperatingSystem("Linux")).toBeUndefined();
+  });
+});
+
+describe("judgeMembershipRule", () => {
+  const win = { platform: "windows" as const, isAutopilot: true, groupTag: "MALO-KIOSK-VM" };
+  const judge = async (rule: string, inputs = win) => (await import("./index.js")).judgeMembershipRule(rule, inputs);
+
+  it("decides rules built only from what the simulator models", async () => {
+    expect(await judge('(device.devicePhysicalIds -any (_ -startsWith "[ZTDId]"))')).toBe("member");
+    expect(
+      await judge('(device.devicePhysicalIds -any (_ -startsWith "[ZTDId]"))', { ...win, isAutopilot: false })
+    ).toBe("not-member");
+    expect(await judge('(device.devicePhysicalIds -any (_ -startsWith "[OrderID]:MALO-KIOSK"))')).toBe("member");
+    expect(await judge('(device.devicePhysicalIds -any (_ -eq "[OrderID]:SALES"))')).toBe("not-member");
+    expect(await judge('(device.deviceOSType -eq "Windows")')).toBe("member");
+    expect(await judge('(device.deviceOSType -eq "iPad")')).toBe("not-member");
+  });
+
+  it("says unknown when the answer hangs on a property it does not model", async () => {
+    expect(await judge('(device.enrollmentProfileName -eq "Kiosk")')).toBe("unknown");
+    expect(await judge('(device.deviceOSType -eq "Windows") and (device.deviceOwnership -eq "Company")')).toBe(
+      "unknown"
+    );
+    expect(await judge('(device.deviceModel -startsWith "Cloud PC") or (device.deviceOSType -eq "iPad")')).toBe(
+      "unknown"
+    );
+    expect(await judge('(user.department -eq "Sales")')).toBe("unknown");
+  });
+
+  it("decides anyway when the known part settles it", async () => {
+    // An and with a false part is false whatever the rest is; an or with a true part is true.
+    expect(
+      await judge('(device.devicePhysicalIds -any (_ -eq "[OrderID]:SALES")) and (device.deviceModel -eq "X")')
+    ).toBe("not-member");
+    expect(
+      await judge('(device.deviceModel -eq "X") or (device.devicePhysicalIds -any (_ -startsWith "[ZTDId]"))')
+    ).toBe("member");
+  });
+
+  it("handles -not, -ne on the OS, and an unregistered device's tags", async () => {
+    expect(await judge('-not (device.deviceOSType -eq "Windows")')).toBe("not-member");
+    expect(await judge('(device.deviceOSType -ne "Windows")')).toBe("not-member");
+    expect(
+      await judge('(device.devicePhysicalIds -any (_ -eq "[OrderID]:MALO-KIOSK-VM"))', { ...win, isAutopilot: false })
+    ).toBe("not-member");
+  });
+
+  it("does not judge the OS off Windows, where Entra's values vary", async () => {
+    expect(await judge('(device.deviceOSType -eq "MacMDM")', { ...win, platform: "macos" })).toBe("unknown");
+  });
+
+  it("names the unmodelled properties", async () => {
+    const { unmodelledRuleProperties } = await import("./index.js");
+    expect(
+      unmodelledRuleProperties(
+        '(device.deviceOSType -eq "Windows") and (device.enrollmentProfileName -eq "K") and (device.devicePhysicalIds -any (_ -eq "x"))'
+      )
+    ).toEqual(["device.enrollmentProfileName"]);
+  });
+});

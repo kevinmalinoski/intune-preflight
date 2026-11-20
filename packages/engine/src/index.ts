@@ -22,6 +22,7 @@ export {
   computeSimulation,
   listAssignmentFilters,
   listGroupSummaries,
+  listProfileNameWarnings,
   listUnassignedPolicies,
   simulationAppsToCsv,
   simulationAppsToXlsx,

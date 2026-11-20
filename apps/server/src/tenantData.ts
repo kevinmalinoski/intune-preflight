@@ -1,5 +1,12 @@
 import { ConfidentialClientApplication } from "@azure/msal-node";
-import { createGraphClient, loadTenantData as loadFromGraph, TtlCache } from "@intune-preflight/graph";
+import {
+  createGraphClient,
+  loadTenantData as loadFromGraph,
+  readDeviceMembership,
+  searchDevices,
+  TtlCache,
+} from "@intune-preflight/graph";
+import type { DeviceMembershipResponse, DeviceSearchResponse } from "@intune-preflight/shared";
 import type { TenantData } from "@intune-preflight/engine";
 import { config } from "./config.js";
 import { getMode } from "./mode.js";
@@ -88,6 +95,15 @@ export function getLastLoadWarnings(): string[] {
 /** When the most recent connected tenant load finished, for the /api/health surface. */
 export function getLastLoadedAt(): string | undefined {
   return lastLoadedAt;
+}
+
+/** "Load a real device": a live Graph read, never cached -- the point is the device as it is now. */
+export function findDevices(query: string): Promise<DeviceSearchResponse> {
+  return searchDevices(client, query);
+}
+
+export function deviceMembership(id: string): Promise<DeviceMembershipResponse> {
+  return readDeviceMembership(client, id);
 }
 
 export function clearTenantDataCache() {

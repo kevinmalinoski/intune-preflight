@@ -14,6 +14,7 @@ import type {
   Platform,
   PolicyKind,
   PolicyOverlap,
+  ProfileNameWarning,
   SimulationGroup,
   SimulationAutopilotProfile,
   SimulationPolicy,
@@ -26,6 +27,7 @@ import {
   APP_FAMILY_LABEL,
   APP_LOB_LEARN_URL,
   appIntentLabel,
+  enrollmentProfileNamesInRule,
   resolutionRuleLabel,
   UNASSIGNED_SOURCE_GROUP,
 } from "@intune-preflight/shared";
@@ -183,7 +185,100 @@ function mergeSettings(policies: IntunePolicy[]): {
   return { settings, conflicts, layered, overlaps };
 }
 
+/**
+ * The enrollment profile names a rule compares against exactly that no
+ * Windows Autopilot profile or device preparation policy is called, each with
+ * the profile it differs from only by spaces, if any. Empty when the tenant's
+ * profiles were not read: with none to compare against, every name would look
+ * stale.
+ *
+ * Entra compares these strings ignoring case but not spaces, so names are
+ * matched lowercased and NOT trimmed -- a trailing space in a profile's name
+ * really does stop a rule written without it from matching.
+ */
+function staleProfileNamesIn(rule: string | undefined, data: TenantData): { name: string; closest?: string }[] {
+  if (data.autopilotProfiles.length === 0) return [];
+  const exact = new Set(data.autopilotProfiles.map((a) => a.displayName.toLowerCase()));
+  const byTrimmed = new Map(data.autopilotProfiles.map((a) => [a.displayName.trim().toLowerCase(), a.displayName]));
+  return enrollmentProfileNamesInRule(rule)
+    .filter(
+      (name) =>
+        !exact.has(name.toLowerCase()) &&
+        // Autopilot for existing devices writes this prefix; it names no profile.
+        !name.trim().toLowerCase().startsWith("offlineautopilotprofile-")
+    )
+    .map((name) => {
+      const closest = byTrimmed.get(name.trim().toLowerCase());
+      return closest ? { name, closest } : { name };
+    });
+}
+
+/**
+ * Whether a rule's enrollment profile names are Windows ones, judged from the
+ * rule itself -- for groups nothing is assigned to, which have no platform to
+ * go by. Apple and Android enrollment profiles use the same property, so a
+ * name matching no Autopilot profile is only worth flagging when the rule is
+ * evidently about Windows: it tests the OS against Windows, or another of its
+ * names is a current Autopilot profile.
+ */
+function isWindowsProfileRule(rule: string | undefined, data: TenantData): boolean {
+  if (!rule) return false;
+  if (/device\.deviceOSType\s+-(?:eq|startsWith|contains)\s+"windows/i.test(rule)) return true;
+  const names = new Set(data.autopilotProfiles.map((a) => a.displayName.toLowerCase()));
+  return enrollmentProfileNamesInRule(rule).some((n) => names.has(n.toLowerCase()));
+}
+
+/**
+ * Every dynamic group in the tenant -- assigned or not -- whose rule names an
+ * enrollment profile that no Windows Autopilot profile or device preparation
+ * policy is called. An assigned group counts when it carries Windows
+ * assignments; an unassigned one when its rule is evidently about Windows.
+ */
+export function listProfileNameWarnings(data: TenantData): ProfileNameWarning[] {
+  const assigned = new Map(listGroupSummaries(data).map((g) => [g.id, g]));
+  const candidates = new Map<string, IntuneGroup>();
+  for (const g of [...data.groups, ...(data.profileRuleGroups ?? [])]) {
+    if (g.isDynamic && g.membershipRule && !candidates.has(g.id)) candidates.set(g.id, g);
+  }
+  const out: ProfileNameWarning[] = [];
+  for (const g of candidates.values()) {
+    const summary = assigned.get(g.id);
+    const isAssigned = Boolean(summary && !summary.nestedOnly);
+    const windows = summary?.platforms.includes("windows") || isWindowsProfileRule(g.membershipRule, data);
+    if (!windows) continue;
+    const names = staleProfileNamesIn(g.membershipRule, data);
+    if (names.length === 0) continue;
+    out.push({ groupId: g.id, displayName: g.displayName, portalUrl: g.portalUrl, assigned: isAssigned, names });
+  }
+  return out.sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" }));
+}
+
 export function listGroupSummaries(data: TenantData): GroupSummary[] {
+  // Every OS platform a group is meaningfully involved with -- either included
+  // or excluded by a policy of that platform. Autopilot profiles are
+  // Windows-only, so a group assigned to one counts as Windows. Used by the
+  // picker to hide groups that are irrelevant to the simulated OS.
+  const ownPlatforms = (groupId: string): Set<Platform> => {
+    const platforms = new Set<Platform>();
+    for (const p of data.policies) {
+      if (p.assignedGroupIds.includes(groupId) || p.excludedGroupIds.includes(groupId)) platforms.add(p.platform);
+    }
+    if (
+      data.autopilotProfiles.some(
+        (a) =>
+          a.assignedGroupIds.includes(groupId) || a.excludedGroupIds.includes(groupId) || a.deviceGroupId === groupId
+      )
+    )
+      platforms.add("windows");
+    // A group that only delivers apps is still one an admin may simulate, so
+    // it has to count toward its apps' platforms or the picker would hide it.
+    for (const app of data.apps ?? []) {
+      if (app.assignments.some((a) => a.groupId === groupId)) for (const p of appPlatforms(app)) platforms.add(p);
+    }
+    return platforms;
+  };
+  const own = new Map(data.groups.map((g) => [g.id, ownPlatforms(g.id)]));
+
   return data.groups
     .filter(
       (g) =>
@@ -195,28 +290,11 @@ export function listGroupSummaries(data: TenantData): GroupSummary[] {
     .map((group) => {
       const applied = data.policies.filter((p) => appliesTo(p, [group.id]));
       const { settings, conflicts } = mergeSettings(applied);
-      // Every OS platform this group is meaningfully involved with -- either
-      // included or excluded by a policy of that platform. Autopilot profiles
-      // are Windows-only, so a group assigned to one counts as Windows. Used by
-      // the picker to hide groups that are irrelevant to the simulated OS.
-      const platforms = new Set<Platform>();
-      for (const p of data.policies) {
-        if (p.assignedGroupIds.includes(group.id) || p.excludedGroupIds.includes(group.id)) platforms.add(p.platform);
-      }
-      if (
-        data.autopilotProfiles.some(
-          (a) =>
-            a.assignedGroupIds.includes(group.id) ||
-            a.excludedGroupIds.includes(group.id) ||
-            a.deviceGroupId === group.id
-        )
-      )
-        platforms.add("windows");
-      // A group that only delivers apps is still one an admin may simulate, so
-      // it has to count toward its apps' platforms or the picker would hide it.
-      for (const app of data.apps ?? []) {
-        if (app.assignments.some((a) => a.groupId === group.id)) for (const p of appPlatforms(app)) platforms.add(p);
-      }
+      // A nested group delivers what its parents deliver, so it is relevant on
+      // their platforms as well as on its own.
+      const platforms = new Set(own.get(group.id));
+      for (const parent of group.parentGroupIds ?? []) for (const p of own.get(parent) ?? []) platforms.add(p);
+      const staleProfileNames = platforms.has("windows") ? staleProfileNamesIn(group.membershipRule, data) : [];
       return {
         id: group.id,
         displayName: group.displayName,
@@ -227,6 +305,9 @@ export function listGroupSummaries(data: TenantData): GroupSummary[] {
         isDynamic: group.isDynamic,
         membershipRule: group.membershipRule,
         platforms: [...platforms],
+        ...(group.parentGroupIds?.length ? { parentGroupIds: group.parentGroupIds } : {}),
+        ...(group.nestedOnly ? { nestedOnly: true } : {}),
+        ...(staleProfileNames.length ? { staleProfileNames } : {}),
       };
     })
     .sort((a, b) => b.settingsCount - a.settingsCount);

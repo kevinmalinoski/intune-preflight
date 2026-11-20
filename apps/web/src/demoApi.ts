@@ -3,7 +3,12 @@
 // buildAssignmentReport, ...) over the bundled sample tenant -- no server, no
 // network, nothing leaves the browser. Only bundled when VITE_STATIC_DEMO=1;
 // tree-shaken out of the normal (server-backed) build.
-import type { Platform } from "@intune-preflight/shared";
+import {
+  DEVICE_LOOKUP_DEMO,
+  type DeviceMembershipResponse,
+  type DeviceSearchResponse,
+  type Platform,
+} from "@intune-preflight/shared";
 import {
   assignmentReportToCsv,
   assignmentReportToXlsx,
@@ -12,6 +17,7 @@ import {
   demoTenantData,
   listAssignmentFilters,
   listGroupSummaries,
+  listProfileNameWarnings,
   listUnassignedPolicies,
   narrowSimulation,
   simulationAppsToCsv,
@@ -47,6 +53,11 @@ export const demoApi = {
   setMode: () => ok({ demo: true, hasCredentials: false, loadWarnings: [] as string[] }),
   groups: () => ok(listGroupSummaries(data())),
   filters: () => ok(listAssignmentFilters(data())),
+  profileNameWarnings: () => ok(listProfileNameWarnings(data())),
+  // The sample tenant's ids are made up; there is no device behind any of them.
+  searchDevices: (_query: string, _signal?: AbortSignal) =>
+    ok<DeviceSearchResponse>({ unavailable: DEVICE_LOOKUP_DEMO }),
+  deviceMembership: (_id: string) => ok<DeviceMembershipResponse>({ unavailable: DEVICE_LOOKUP_DEMO }),
   unassignedPolicies: () => ok(listUnassignedPolicies(data())),
   assignmentReport: (platform?: Platform) => ok(buildAssignmentReport(data(), platform)),
   assignmentReportExport: (platform?: Platform, format: ManifestExportFormat = "csv") => {

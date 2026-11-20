@@ -25,6 +25,7 @@ import {
   computeSimulation,
   listAssignmentFilters,
   listGroupSummaries,
+  listProfileNameWarnings,
   listUnassignedPolicies,
   narrowSimulation,
   simulationAppsToCsv,
@@ -35,7 +36,15 @@ import {
   XLSX_MIME,
   type BaselineCriteria,
 } from "@intune-preflight/engine";
-import { createGraphClient, loadTenantData, type TenantMode, TtlCache } from "@intune-preflight/graph";
+import {
+  createGraphClient,
+  loadTenantData,
+  readDeviceMembership,
+  searchDevices,
+  type TenantMode,
+  TtlCache,
+} from "@intune-preflight/graph";
+import { DEVICE_LOOKUP_DEMO, type DeviceMembershipResponse, type DeviceSearchResponse } from "@intune-preflight/shared";
 import type {
   SimulationExportFormat,
   ManifestExportFormat,
@@ -235,7 +244,14 @@ export function createLiveApi(deps: LiveApiDeps) {
     },
 
     groups: async () => listGroupSummaries(await tenant()),
+    profileNameWarnings: async () => listProfileNameWarnings(await tenant()),
     filters: async () => listAssignmentFilters(await tenant()),
+    // Live reads under the signed-in admin's own token, like the tenant load.
+    // Not part of the cached tenant: the point is the device as it is now.
+    searchDevices: async (query: string, _signal?: AbortSignal): Promise<DeviceSearchResponse> =>
+      (await ensureMode()) === "demo" ? { unavailable: DEVICE_LOOKUP_DEMO } : searchDevices(client, query),
+    deviceMembership: async (id: string): Promise<DeviceMembershipResponse> =>
+      (await ensureMode()) === "demo" ? { unavailable: DEVICE_LOOKUP_DEMO } : readDeviceMembership(client, id),
     unassignedPolicies: async () => listUnassignedPolicies(await tenant()),
     assignmentReport: async (platform?: Platform) => buildAssignmentReport(await tenant(), platform),
     assignmentReportExport: (platform?: Platform, format: ManifestExportFormat = "csv") => {

@@ -28,3 +28,5 @@ export {
 } from "./graphClient.js";
 
 export { loadTenantData, type LoadTenantDataOptions, type TenantMode } from "./intuneData.js";
+
+export { readDeviceMembership, searchDevices } from "./devices.js";
