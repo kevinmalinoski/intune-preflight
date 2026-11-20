@@ -160,7 +160,8 @@ $wanted = @(
   "Group.Read.All",
   "DeviceManagementServiceConfig.Read.All",
   "DeviceManagementScripts.Read.All",
-  "DeviceManagementApps.Read.All"
+  "DeviceManagementApps.Read.All",
+  "Device.Read.All"
 )
 
 $graphSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0000-c000-000000000000'"
@@ -203,7 +204,7 @@ Write-Host "https://login.microsoftonline.com/$tenant/adminconsent?client_id=$($
       <div>
         <h3>Approve the permissions</h3>
         <p>
-          Open the consent link the script printed. You will see exactly what you are approving — five
+          Open the consent link the script printed. You will see exactly what you are approving — six
           read-only permissions, nothing else. Read them, then accept.
         </p>
         <table>
@@ -214,6 +215,7 @@ Write-Host "https://login.microsoftonline.com/$tenant/adminconsent?client_id=$($
             <tr><td class="mono">DeviceManagementServiceConfig.Read.All</td><td class="muted">Windows Autopilot deployment profiles</td></tr>
             <tr><td class="mono">DeviceManagementScripts.Read.All</td><td class="muted">Platform Scripts — Windows PowerShell and macOS shell</td></tr>
             <tr><td class="mono">DeviceManagementApps.Read.All</td><td class="muted">Apps and their assignments — what is Required, Available or set to Uninstall</td></tr>
+            <tr><td class="mono">Device.Read.All</td><td class="muted">Start from a real device — a device's name, OS and the groups it is in. Optional</td></tr>
           </tbody>
         </table>
         <div class="note">
@@ -307,6 +309,17 @@ Write-Host "https://login.microsoftonline.com/$tenant/adminconsent?client_id=$($
     </details>
 
     <details>
+      <summary>"Start from a real device" says Graph refused</summary>
+      <p>
+        Your app registration predates the device search and is missing its permission. In the Entra portal,
+        open the registration, go to <strong>API permissions</strong>, add
+        <span class="mono">Device.Read.All</span> as a <strong>Delegated</strong> Microsoft Graph permission,
+        and click <strong>Grant admin consent</strong>. Then end the session here and sign in again. Everything
+        else works without it.
+      </p>
+    </details>
+
+    <details>
       <summary>Sign-in fails with AADSTS50011 — redirect URI mismatch</summary>
       <p>
         The address registered in step 1 has to match this site exactly, character for character —
@@ -330,7 +343,7 @@ Write-Host "https://login.microsoftonline.com/$tenant/adminconsent?client_id=$($
       <summary>AADSTS65001 — consent not granted</summary>
       <p>
         Step 2 did not complete. Re-open the consent link the script printed, and make sure you are signed
-        in as an account that can consent for the organisation. In the portal, all five permissions should
+        in as an account that can consent for the organisation. In the portal, all six permissions should
         show <strong>Granted</strong> with a green check.
       </p>
     </details>
