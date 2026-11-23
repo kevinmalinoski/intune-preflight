@@ -233,6 +233,12 @@ describe("readPhysicalIds and platformFromOperatingSystem", () => {
     const { platformFromOperatingSystem } = await import("./index.js");
     expect(platformFromOperatingSystem("Windows")).toBe("windows");
     expect(platformFromOperatingSystem("MacMDM")).toBe("macos");
+    expect(platformFromOperatingSystem("macOS")).toBe("macos");
+    expect(platformFromOperatingSystem("Mac OS X")).toBe("macos");
+    expect(platformFromOperatingSystem("IPhone")).toBe("ios");
+    expect(platformFromOperatingSystem("iOS")).toBe("ios");
+    expect(platformFromOperatingSystem("AndroidEnterprise")).toBe("android");
+    expect(platformFromOperatingSystem("")).toBeUndefined();
     expect(platformFromOperatingSystem("iPadOS")).toBe("ios");
     expect(platformFromOperatingSystem("AndroidForWork")).toBe("android");
     expect(platformFromOperatingSystem("Linux")).toBeUndefined();

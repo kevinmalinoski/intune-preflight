@@ -160,8 +160,6 @@ adding a capability.
 - **Per-property template defaults** — the last of the legacy default-noise
   edge: a real enum default (`cellularData = allowed`) still can't be told from a
   deliberate choice without a per-property default map.
-- **Autopilot groups by `enrollmentProfileName`** — a real-tenant targeting shape
-  the flat evaluator doesn't recognise yet, alongside `[ZTDId]` / `[OrderID]`.
 - **Accessibility pass on the diagram and the baseline grid** — the panel and the
   dialogs are keyboard-navigable; the React Flow canvas and the resizable data
   grid are the parts that still assume a mouse.
@@ -191,6 +189,9 @@ rather than corrections.
   shipped in v3.2, along with nested groups and starting from a real device.
   What it cannot judge are rules on properties the simulated endpoint doesn't
   have: enrollment profile name, OS version, model, ownership, category.
+  Enrollment profile name comes first: it is a common Autopilot targeting
+  shape, and the names in rules are already checked against the tenant's
+  profiles, so the input would be a pick from a known list.
   Adding the common ones as optional inputs would let more rules settle without
   a real device, at the cost of a longer form. Worth doing only for the
   properties real tenants' rules actually use.

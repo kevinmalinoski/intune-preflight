@@ -2,8 +2,8 @@
 
 | Doc | What's in it |
 |---|---|
-| **[FEATURES.md](FEATURES.md)** | Full walkthrough of the endpoint simulator and the Assignment Manifest, with screenshots |
-| **[SETUP.md](SETUP.md)** | Entra app registration, permissions, `.env`, Docker / npm, API reference, troubleshooting |
+| **[FEATURES.md](FEATURES.md)** | Full walkthrough of the endpoint simulator, the Apps view and the Assignment Manifest, with screenshots |
+| **[SETUP.md](SETUP.md)** | Browser mode and who can set it up, then self-hosting: app registration, `.env`, Docker / npm, API reference, troubleshooting |
 | **[img/](img/README.md)** | Screenshots — the shot list says what each file should capture |
 | **[../ROADMAP.md](../ROADMAP.md)** | Known limitations in detail, and what's planned next |
 | **[../CHANGELOG.md](../CHANGELOG.md)** | Release history |

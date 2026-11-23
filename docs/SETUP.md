@@ -9,79 +9,58 @@ needs no sign-in and no app registration.
 | | What it costs you | Read this |
 |---|---|---|
 | **Browser** | one app registration, about 3 minutes. Nothing installed. | [Browser mode](#browser-mode--sign-in-as-yourself-no-backend), or the [walkthrough with a copy-paste script](https://kevinmalinoski.github.io/intune-preflight/connect/) |
-| **Self-hosted** | an app registration with a client secret, plus Docker or Node on a host you run | [Requirements](#requirements) onward |
+| **Self-hosted** | an app registration with a client secret, plus Docker or Node on a host you run | [Self-hosted](#self-hosted) |
 
 Browser mode is the faster path and reads your tenant as *you* — scope tags and all.
 Self-hosting uses application credentials and is the only way to see a tenant unfiltered.
 Both run the same engine.
 
 - [Browser mode — sign in as yourself, no backend](#browser-mode--sign-in-as-yourself-no-backend)
-- [Requirements](#requirements)
-- [Who can install this — required Entra roles](#who-can-install-this--required-entra-roles)
-- [1. Create an Entra app registration](#1-create-an-entra-app-registration)
-- [2. Configure](#2-configure)
-- [3. Run](#3-run)
+  - [Who can set it up](#who-can-set-it-up)
+  - [Quickest path — one script](#quickest-path--one-script-about-three-minutes)
+  - [Or by hand, in the portal](#or-by-hand-in-the-portal)
+  - [Hosting the browser build yourself](#hosting-the-browser-build-yourself)
+- [Self-hosted](#self-hosted)
+  - [Requirements](#requirements)
+  - [Who can install it — required Entra roles](#who-can-install-it--required-entra-roles)
+  - [1. Create an Entra app registration](#1-create-an-entra-app-registration)
+  - [2. Configure](#2-configure)
+  - [3. Run](#3-run)
 - [Project layout](#project-layout)
 - [API reference](#api-reference)
 - [Troubleshooting](#troubleshooting)
 
-## Requirements
-
-These are the **self-hosted** requirements. Browser mode needs none of them — no Node, no
-Docker, no host.
-
-- **Node.js 20+** (for the npm path), or **Docker** (recommended for a real deployment)
-- An **Entra app registration** with the read-only Graph permissions below
-- A Microsoft 365 tenant with Intune
-
-## Who can install this — required Entra roles
-
-The app uses **application (app-only) permissions**, which require **admin consent**. Granting that consent is a privileged action:
-
-- **Reading the data** afterwards only needs the read-only Graph scopes below — well within what an **Intune Administrator** can see.
-- **Granting admin consent** needs **Global Administrator** or **Privileged Role Administrator**. These are Microsoft Graph *application* permissions, and those two are the only roles that can consent to them. A **Cloud Application Administrator** or **Application Administrator** can create the app registration, but cannot grant this consent. (Browser mode is different: its permissions are *delegated*, which those two roles can consent to.)
-
-So if you are *only* an Intune Administrator, you'll need a Global Administrator or Privileged Role Administrator to click **Grant admin consent** once. After that, day-to-day use needs no elevated role.
-
-## 1. Create an Entra app registration
-
-1. Go to [entra.microsoft.com](https://entra.microsoft.com) → **Identity → Applications → App registrations → New registration**.
-2. Name it something like `intune-preflight`, leave the redirect URI blank, click **Register**.
-3. Under **API permissions → Add a permission → Microsoft Graph → Application permissions**, add:
-
-   | Permission | Needed for | Required? |
-   |---|---|---|
-   | `DeviceManagementConfiguration.Read.All` | Configuration profiles, Compliance, Settings Catalog, Administrative Templates, Assignment Filters | **Required** |
-   | `Group.Read.All` | Resolving group names and reading dynamic membership rules | **Required** |
-   | `DeviceManagementServiceConfig.Read.All` | Windows Autopilot deployment profiles | Optional — skipped gracefully if omitted |
-   | `DeviceManagementScripts.Read.All` | Platform Scripts (Windows PowerShell + macOS shell) | Optional — skipped gracefully if omitted |
-   | `DeviceManagementApps.Read.All` | The Apps view: the Required, Available and Uninstall apps an endpoint gets | **Required** for the Apps view — without it the Apps tab asks for it; the baseline still loads |
-   | `Device.Read.All` | **Start from a real device**: finding a device by name and reading the groups it is in | Optional — without it the device search names the permission; nothing else is affected |
-
-4. Click **Grant admin consent** for your tenant (needs one of the roles noted above).
-5. Under **Certificates & secrets → New client secret**, create a secret and copy its value immediately (it's only shown once).
-6. Note your **Application (client) ID**, **Directory (tenant) ID**, and the **client secret** value.
-
-Full reference: [Microsoft Graph permissions reference](https://learn.microsoft.com/en-us/graph/permissions-reference).
-
-> **Every permission is read-only.** The tool never writes to your tenant. See the [security notes](../README.md#security) before hosting it anywhere but your own machine.
-
 ## Browser mode — sign in as yourself, no backend
 
-There is a third way to run this: a static build that an Intune admin opens in a browser tab, signs
-into with **their own** admin account, and which reads the tenant straight from Microsoft Graph. No
-server, no Docker, nothing installed, and **no client secret anywhere** — a single-page app is a
-*public* client, so PKCE replaces the secret. The session lives in the tab and goes when it closes.
+The hosted app at [/app/](https://kevinmalinoski.github.io/intune-preflight/app/) is a static page
+that an Intune admin opens in a browser tab, signs into with **their own** admin account, and which
+reads the tenant straight from Microsoft Graph. No server, no Docker, nothing installed, and **no
+client secret anywhere** — a single-page app is a *public* client, so PKCE replaces the secret. The
+session lives in the tab and goes when it closes.
 
 This needs its own app registration, because the permissions are **delegated** (acting as the
 signed-in user) rather than application-wide, and because a SPA redirect URI is a different kind
 of registration.
 
+### Who can set it up
+
+| Step | Who |
+|---|---|
+| **Create the app registration** (the script below, or the portal) | Application Administrator, Cloud Application Administrator or Global Administrator |
+| **Grant admin consent**, once per tenant | The same roles. These are *delegated* permissions, which a Cloud Application Administrator or Application Administrator can consent to ([Microsoft Learn](https://learn.microsoft.com/entra/identity/enterprise-apps/grant-admin-consent#prerequisites)); the self-hosted build's application permissions need more |
+| **Sign in and use it**, every day | Any admin whose Intune role can read the configuration, such as Intune Administrator, Global Reader or Intune's built-in Read Only Operator. No Entra admin role is needed |
+
+Because the permissions are delegated, the app can only ever read what the signed-in admin could
+already read in the admin center. An admin limited by Intune scope tags sees their slice of the
+tenant rather than all of it, so read a browser-mode result as "what this admin can see"; the
+self-hosted build is the way to see everything.
+
 ### Quickest path — one script, about three minutes
 
 Open [Azure Cloud Shell](https://shell.azure.com) and choose **PowerShell**. It already has the
 Graph module and is already signed in as you, so there is nothing to install. Set `$redirectUri`
-to the URL the build will be served from, then paste the whole block:
+to the URL the build will be served from (the hosted app is
+`https://kevinmalinoski.github.io/intune-preflight/app/`), then paste the whole block:
 
 ```powershell
 Connect-MgGraph -Scopes "Application.ReadWrite.All"
@@ -94,43 +73,52 @@ $wanted = @(
   "Group.Read.All",
   "DeviceManagementServiceConfig.Read.All",
   "DeviceManagementScripts.Read.All",
-  "DeviceManagementApps.Read.All",  # the Apps view
-  "Device.Read.All"                 # Start from a real device
+  "DeviceManagementApps.Read.All",
+  "Device.Read.All"
 )
 
-$existing = Get-MgApplication -Filter "displayName eq '$displayName'" -ErrorAction SilentlyContinue
-if ($existing) {
-  Write-Host "Already exists." -ForegroundColor Yellow
-  Write-Host "TENANT_ID = $((Get-MgContext).TenantId)"
-  Write-Host "CLIENT_ID = $($existing.AppId)"
-} else {
-  # Resolve the delegated scope IDs by name off the Graph service principal, rather
-  # than hardcoding GUIDs that could be wrong or go stale.
-  $graphSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0000-c000-000000000000'"
-  $ids = $graphSp.Oauth2PermissionScopes | Where-Object { $wanted -contains $_.Value }
+# Resolve the delegated permission ids by name, rather than hardcoding GUIDs.
+$graphSp = Get-MgServicePrincipal -Filter "appId eq '00000003-0000-0000-c000-000000000000'"
+$scopes  = @($graphSp.Oauth2PermissionScopes | Where-Object { $wanted -contains $_.Value } |
+  ForEach-Object { @{ Id = $_.Id; Type = "Scope" } })
 
+$app = Get-MgApplication -Filter "displayName eq '$displayName'" | Select-Object -First 1
+if ($app) {
+  # Already set up: add what this version needs and keep everything else.
+  $others = @($app.RequiredResourceAccess | Where-Object { $_.ResourceAppId -ne $graphSp.AppId } |
+    ForEach-Object { @{ ResourceAppId = $_.ResourceAppId
+                        ResourceAccess = @($_.ResourceAccess | ForEach-Object { @{ Id = $_.Id; Type = $_.Type } }) } })
+  $current = @($app.RequiredResourceAccess | Where-Object { $_.ResourceAppId -eq $graphSp.AppId } |
+    ForEach-Object { $_.ResourceAccess } | ForEach-Object { @{ Id = $_.Id; Type = $_.Type } })
+  $added   = @($scopes | Where-Object { $current.Id -notcontains $_.Id })
+  $uris    = @(@($app.Spa.RedirectUris) + $redirectUri | Where-Object { $_ } | Select-Object -Unique)
+  Update-MgApplication -ApplicationId $app.Id -Spa @{ RedirectUris = $uris } `
+    -RequiredResourceAccess @($others + @{ ResourceAppId = $graphSp.AppId; ResourceAccess = @($current + $added) })
+  Write-Host "Updated the existing registration: $($added.Count) permission(s) added." -ForegroundColor Yellow
+} else {
   $app = New-MgApplication -DisplayName $displayName `
     -SignInAudience "AzureADMyOrg" `
     -Spa @{ RedirectUris = @($redirectUri) } `
-    -RequiredResourceAccess @(@{
-        ResourceAppId  = $graphSp.AppId
-        ResourceAccess = @($ids | ForEach-Object { @{ Id = $_.Id; Type = "Scope" } })
-      })
-
+    -RequiredResourceAccess @(@{ ResourceAppId = $graphSp.AppId; ResourceAccess = $scopes })
   New-MgServicePrincipal -AppId $app.AppId | Out-Null
   Start-Sleep -Seconds 5   # let the service principal replicate
-
-  $tenant  = (Get-MgContext).TenantId
-  $encoded = [System.Uri]::EscapeDataString($redirectUri)
-
-  Write-Host ""
-  Write-Host "TENANT_ID = $tenant"
-  Write-Host "CLIENT_ID = $($app.AppId)"
-  Write-Host ""
-  Write-Host "Now open this to grant consent:" -ForegroundColor Cyan
-  Write-Host "https://login.microsoftonline.com/$tenant/adminconsent?client_id=$($app.AppId)&redirect_uri=$encoded"
 }
+
+$tenant  = (Get-MgContext).TenantId
+$encoded = [System.Uri]::EscapeDataString($redirectUri)
+
+Write-Host ""
+Write-Host "TENANT_ID = $tenant"
+Write-Host "CLIENT_ID = $($app.AppId)"
+Write-Host ""
+Write-Host "Now open this to grant consent:" -ForegroundColor Cyan
+Write-Host "https://login.microsoftonline.com/$tenant/adminconsent?client_id=$($app.AppId)&redirect_uri=$encoded"
 ```
+
+**Already set up from an earlier version?** Run the same script again. It finds the registration
+by name, adds any permission this version needs that it lacks (and the redirect URI, if it is new),
+keeps everything else, and prints the consent link again. New permissions need consenting to, so
+open it.
 
 Open the consent URL it prints, review the six permissions, and accept. The script deliberately
 does **not** grant consent for you: consenting is the one step where an admin should see exactly
@@ -158,7 +146,7 @@ on behalf of the organisation; everyone else just needs the client ID.
 
    | Permission | Needed for |
    |---|---|
-   | `DeviceManagementConfiguration.Read.All` | Configuration profiles, Compliance, Settings Catalog, Administrative Templates, Assignment Filters |
+   | `DeviceManagementConfiguration.Read.All` | Configuration profiles, Compliance, Settings Catalog, Administrative Templates, Assignment Filters, and evaluating filters for **Start from a real device** |
    | `Group.Read.All` | Resolving group names and reading dynamic membership rules |
    | `DeviceManagementServiceConfig.Read.All` | Windows Autopilot deployment profiles |
    | `DeviceManagementScripts.Read.All` | Platform Scripts (Windows PowerShell + macOS shell) |
@@ -175,7 +163,11 @@ on behalf of the organisation; everyone else just needs the client ID.
 4. **No client secret.** Don't create one; a public client cannot keep it, and this build has
    nowhere to put it.
 
-To try it locally first, register `http://localhost:5173/` as a second SPA redirect URI and run:
+### Hosting the browser build yourself
+
+You don't need to: the hosted `/app/` above works for any tenant, with your own registration. To
+serve the same static build from your own domain, or to try it locally first, register
+`http://localhost:5173/` as a second SPA redirect URI and run:
 
 ```bash
 npm run dev:live          # web :5173, no server needed
@@ -201,10 +193,49 @@ If the deployed URL isn't `origin` + the `--base` path (a reverse proxy, say), s
 `VITE_REDIRECT_URI` at build time to the exact string registered in Entra; otherwise it is derived
 and you don't need it.
 
-**What's different in browser mode:** permissions are delegated, so what the app can read is bounded
-by what the signed-in admin can read — unlike the app-only server build, an admin scoped by RBAC
-scope tags will see their slice rather than the whole tenant. Surfacing that boundary in the UI is
-a planned follow-up; until then, read a browser-mode baseline as "what this admin can see".
+---
+
+# Self-hosted
+
+## Requirements
+
+Browser mode needs none of this — no Node, no Docker, no host.
+
+- **Node.js 20+** (for the npm path), or **Docker** (recommended for a real deployment)
+- An **Entra app registration** with the read-only Graph permissions below
+- A Microsoft 365 tenant with Intune
+
+## Who can install it — required Entra roles
+
+The app uses **application (app-only) permissions**, which require **admin consent**. Granting that consent is a privileged action:
+
+- **Reading the data** afterwards only needs the read-only Graph scopes below — well within what an **Intune Administrator** can see.
+- **Granting admin consent** needs **Global Administrator** or **Privileged Role Administrator**. These are Microsoft Graph *application* permissions, and those two are the only roles that can consent to them. A **Cloud Application Administrator** or **Application Administrator** can create the app registration, but cannot grant this consent. (Browser mode is different: its permissions are *delegated*, which those two roles can consent to.)
+
+So if you are *only* an Intune Administrator, you'll need a Global Administrator or Privileged Role Administrator to click **Grant admin consent** once. After that, day-to-day use needs no elevated role.
+
+## 1. Create an Entra app registration
+
+1. Go to [entra.microsoft.com](https://entra.microsoft.com) → **Identity → Applications → App registrations → New registration**.
+2. Name it something like `intune-preflight`, leave the redirect URI blank, click **Register**.
+3. Under **API permissions → Add a permission → Microsoft Graph → Application permissions**, add:
+
+   | Permission | Needed for | Required? |
+   |---|---|---|
+   | `DeviceManagementConfiguration.Read.All` | Configuration profiles, Compliance, Settings Catalog, Administrative Templates, Assignment Filters, and evaluating filters for **Start from a real device** | **Required** |
+   | `Group.Read.All` | Resolving group names and reading dynamic membership rules | **Required** |
+   | `DeviceManagementServiceConfig.Read.All` | Windows Autopilot deployment profiles | Optional — skipped gracefully if omitted |
+   | `DeviceManagementScripts.Read.All` | Platform Scripts (Windows PowerShell + macOS shell) | Optional — skipped gracefully if omitted |
+   | `DeviceManagementApps.Read.All` | The Apps view: the Required, Available and Uninstall apps an endpoint gets | **Required** for the Apps view — without it the Apps tab asks for it; the baseline still loads |
+   | `Device.Read.All` | **Start from a real device**: finding a device by name and reading the groups it is in | Optional — without it the device search names the permission; nothing else is affected |
+
+4. Click **Grant admin consent** for your tenant (needs one of the roles noted above).
+5. Under **Certificates & secrets → New client secret**, create a secret and copy its value immediately (it's only shown once).
+6. Note your **Application (client) ID**, **Directory (tenant) ID**, and the **client secret** value.
+
+Full reference: [Microsoft Graph permissions reference](https://learn.microsoft.com/en-us/graph/permissions-reference).
+
+> **Every permission is read-only.** The tool never writes to your tenant. See the [security notes](../README.md#security) before hosting it anywhere but your own machine.
 
 ## 2. Configure
 
@@ -305,8 +336,11 @@ The server authenticates to Microsoft Graph using the app registration (client-c
 
 | Endpoint | Description |
 |---|---|
-| `GET /api/health` | Liveness check, current mode, and any warnings from the last load |
+| `GET /api/health` | Liveness check, current mode, any warnings from the last load, and `loadedAt`: when the tenant data was read |
 | `GET /api/groups` | Security groups referenced by assignments, with policy/setting counts and membership rules |
+| `GET /api/profile-name-warnings` | Dynamic groups anywhere in the tenant whose rule names an enrollment profile that no Autopilot profile has |
+| `GET /api/devices?search=<name>` | Active, Intune-managed Entra devices whose name starts with `search` (at least two characters, up to 15 results); `hidden` counts the name matches left out as unmanaged, disabled or not signed in for 90 days. Needs `Device.Read.All` |
+| `GET /api/devices/<id>/membership` | One device's OS, Autopilot facts, enrollment profile name, every group it is in (nesting included) and, under `filters`, which device Assignment Filters for its platform Intune says it matches (`filtersUnchecked` says why when they could not be evaluated). Needs `Device.Read.All` |
 | `GET /api/filters` | Intune Assignment Filters available in the tenant |
 | `GET /api/unassigned?platform=windows` | Policies with no assignment (the Policy Waitlist) |
 | `GET /api/simulate?groups=id1,id2&platform=windows&deviceFilterIds=id1,id2&unassigned=id3` | Simulated endpoint baseline |
@@ -315,9 +349,11 @@ The server authenticates to Microsoft Graph using the app registration (client-c
 | `GET /api/reports/assignments?platform=windows` | Assignment Manifest data |
 | `GET /api/reports/assignments/export?platform=windows&format=csv\|xlsx` | Download the manifest as CSV or as an Excel workbook |
 | `POST /api/mode` | Switch between `demo` and `connected` |
-| `POST /api/refresh` | Clear the cache, re-fetch from Graph, and report any load warnings |
+| `POST /api/refresh` | Clear the cache, re-fetch from Graph, and report any load warnings and the new `loadedAt` |
 
 `GET /api/simulate` returns the endpoint's apps under `apps`: `apps.apps` (one entry per app and intent that lands), `apps.excluded` (assigned, then carved out by an exclusion or filter) and three lists of findings: `apps.conflicts` (one app assigned both to install and to uninstall — listed, never adjudicated), `apps.redundant` (an assignment that changes nothing: Required with Available, or one intent through several groups) and `apps.sameProduct` (different app objects that look like one product, matched on name — best-effort). When the apps permission is missing, `apps.unavailable` carries the reason and the three lists are empty.
+
+Without `Device.Read.All`, the two device routes answer `200` with `unavailable` set and the reason, rather than an error, the way the Apps view does.
 
 > Autopilot "device" and Group Tag selection are resolved in the web UI (they drive which group ids get sent in `groups`), so the API surface stays a simple "given these groups, compute the baseline."
 
@@ -363,6 +399,7 @@ never points at an intentionally empty `conflicts` list.
 - **Browser mode: the tenant ID or client ID is wrong, or you want a different tenant.** Open the lock in the top bar and choose **Change tenant**. If sign-in never succeeded there is no lock; use the pencil button in its place. Either reopens the setup form with the saved IDs filled in.
 - **The Apps tab is marked "Needs setup" and says "Apps need one more permission".** The apps read came back `403`. Add `DeviceManagementApps.Read.All` — as an **Application** permission for the self-hosted build, **Delegated** for browser mode — and grant admin consent. The self-hosted server keeps its Graph token for up to an hour, so **restart the server** after granting it; Refresh alone reuses the old token. This is not an incomplete load: the baseline never depended on it.
 - **"Start from a real device" says Graph refused.** Add `Device.Read.All` — **Application** for the self-hosted build, **Delegated** for browser mode — and grant admin consent; for the self-hosted build, restart the server afterwards for the same token reason as above. In browser mode the signed-in admin also needs a role that can read devices, such as Intune Administrator or Global Reader.
+- **"Start from a real device" says Graph refused to evaluate Assignment Filters.** The device and its groups still load; only the filters are left for you to tick. The evaluation uses `DeviceManagementConfiguration.Read.All`, which the rest of the tool needs anyway, so check that it is granted with admin consent. In browser mode the signed-in admin's Intune role must also be able to read Assignment Filters.
 - **An "Incomplete load" banner appears.** Something failed to import even after retries, so the baseline is missing data — the banner names what dropped and the server log has a summary. Usually a transient Graph error: click **Refresh from Intune**. If it persists, check the named policy in the admin center.
 - **The first load is slow.** A cold load reads every policy and assignment in the tenant. It's cached afterwards (`CACHE_TTL_SECONDS`), so only the first request pays for it. The server logs a summary line with call counts and any throttling.
 - **Docker CLI says `failed to connect to Docker API at npipe://…`** — Docker Desktop isn't running or hasn't finished starting. Launch it, wait for **"Engine running,"** and confirm with `docker version` (you want a **Server:** section).

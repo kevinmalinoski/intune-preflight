@@ -1,11 +1,25 @@
 import { useEffect, useRef, useState } from "react";
-import type { DeviceLookupUnavailable, DeviceMembership, DeviceSearchResult } from "@intune-preflight/shared";
+import {
+  DEVICE_ACTIVE_DAYS,
+  type DeviceLookupUnavailable,
+  type DeviceMembership,
+  type DeviceSearchResult,
+  type Platform,
+} from "@intune-preflight/shared";
 import { api } from "./api.ts";
+import { PLATFORM_OPTIONS } from "./platforms.ts";
 
 /** What the simulator was last started from, for the note under the search. */
 export interface LoadedDevice {
   name: string;
-  /** Groups the device is in that carry something this tenant assigns. */
+  /**
+   * Set when the device's OS maps to none of the four platforms (Linux, or
+   * blank): the simulator kept `keptPlatform`, and the note must say so rather
+   * than present that platform as the device's.
+   */
+  unrecognisedOs?: string;
+  keptPlatform?: Platform;
+  /** Groups the device is in that carry something this tenant assigns for its OS. */
   matched: number;
   /** Every group the device is in. */
   total: number;
@@ -14,6 +28,22 @@ export interface LoadedDevice {
   /** The device's groups that nothing in this tenant is assigned to. */
   unassignedGroups: { displayName: string; membershipRule?: string }[];
   enrollmentProfileName?: string;
+  /** The device Assignment Filters for its platform, as Intune evaluated them. */
+  filters?: { displayName: string; matches: boolean }[];
+  /** Set instead of `filters` when Intune could not evaluate them. */
+  filtersUnchecked?: string;
+}
+
+/** The note's filter line: which filters Intune says the device matches. */
+function filterLine(filters: { displayName: string; matches: boolean }[]): string | null {
+  if (filters.length === 0) return null;
+  const matched = filters.filter((f) => f.matches).map((f) => `“${f.displayName}”`);
+  if (matched.length === 0) {
+    return filters.length === 1
+      ? `Doesn’t match the one Assignment Filter for its platform.`
+      : `Matches none of the ${filters.length} Assignment Filters for its platform.`;
+  }
+  return `Matches ${matched.length === 1 ? "filter" : "filters"} ${matched.join(", ")}, per Intune; ticked.`;
 }
 
 /**
@@ -25,6 +55,11 @@ export interface LoadedDevice {
  * machine is in that nobody expected. Everything it sets stays editable
  * afterwards, so it is a starting point, not a lock.
  */
+/** Says how many name matches the search left out, and why. */
+function hiddenNote(n: number): string {
+  return `${n} more ${n === 1 ? "is" : "are"} hidden: not managed by Intune, disabled, or not signed in for ${DEVICE_ACTIVE_DAYS} days.`;
+}
+
 export function DeviceLookup({
   loaded,
   onLoad,
@@ -36,6 +71,7 @@ export function DeviceLookup({
 }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<DeviceSearchResult[]>([]);
+  const [hidden, setHidden] = useState(0);
   const [searching, setSearching] = useState(false);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [unavailable, setUnavailable] = useState<DeviceLookupUnavailable | null>(null);
@@ -48,6 +84,7 @@ export function DeviceLookup({
     const text = query.trim();
     if (text.length < 2) {
       setResults([]);
+      setHidden(0);
       setSearching(false);
       return;
     }
@@ -60,9 +97,11 @@ export function DeviceLookup({
           if ("unavailable" in res) {
             setUnavailable(res.unavailable);
             setResults([]);
+            setHidden(0);
           } else {
             setUnavailable(null);
             setResults(res.devices);
+            setHidden(res.hidden ?? 0);
           }
           setError(null);
         })
@@ -117,9 +156,10 @@ export function DeviceLookup({
     <div ref={boxRef}>
       <div
         className="mb-1 text-[10px] font-medium uppercase tracking-wide text-slate-500"
-        title="Search your tenant's devices by name and start from one: its OS, Autopilot registration, Group Tag and every group it is actually in, including through nested groups. Everything stays editable afterwards."
+        title="Search your tenant's active Intune-managed devices by name and start from one: its OS, Autopilot registration, Group Tag and every group it is actually in, including through nested groups. Everything stays editable afterwards."
       >
-        Start from a real device
+        Start from a real device{" "}
+        <span className="font-normal normal-case tracking-normal text-slate-500">(optional)</span>
       </div>
       <div className="relative">
         <input
@@ -142,24 +182,33 @@ export function DeviceLookup({
             ) : searching && results.length === 0 ? (
               <div className="px-2.5 py-2 text-[11px] text-slate-500">Searching…</div>
             ) : results.length === 0 ? (
-              <div className="px-2.5 py-2 text-[11px] text-slate-500">No device name starts with that.</div>
+              <div className="px-2.5 py-2 text-[11px] leading-relaxed text-slate-500">
+                {hidden > 0
+                  ? `No active Intune-managed device name starts with that. ${hiddenNote(hidden)}`
+                  : "No device name starts with that."}
+              </div>
             ) : (
-              results.map((d) => (
-                <button
-                  key={d.id}
-                  type="button"
-                  onClick={() => choose(d)}
-                  disabled={loadingId !== null}
-                  className="flex w-full items-baseline gap-2 border-b border-ink-800 px-2.5 py-2 text-left text-xs last:border-b-0 hover:bg-ink-800 disabled:cursor-wait"
-                >
-                  <span className="min-w-0 flex-1 break-words text-slate-200">{d.displayName}</span>
-                  <span className="shrink-0 text-[10px] text-slate-500">
-                    {loadingId === d.id
-                      ? "Reading groups…"
-                      : [d.operatingSystem, d.trustType].filter(Boolean).join(" · ")}
-                  </span>
-                </button>
-              ))
+              <>
+                {results.map((d) => (
+                  <button
+                    key={d.id}
+                    type="button"
+                    onClick={() => choose(d)}
+                    disabled={loadingId !== null}
+                    className="flex w-full items-baseline gap-2 border-b border-ink-800 px-2.5 py-2 text-left text-xs last:border-b-0 hover:bg-ink-800 disabled:cursor-wait"
+                  >
+                    <span className="min-w-0 flex-1 break-words text-slate-200">{d.displayName}</span>
+                    <span className="shrink-0 text-[10px] text-slate-500">
+                      {loadingId === d.id
+                        ? "Reading groups…"
+                        : [d.operatingSystem, d.trustType].filter(Boolean).join(" · ")}
+                    </span>
+                  </button>
+                ))}
+                {hidden > 0 && (
+                  <div className="px-2.5 py-1.5 text-[10px] leading-relaxed text-slate-500">{hiddenNote(hidden)}</div>
+                )}
+              </>
             )}
           </div>
         )}
@@ -169,9 +218,23 @@ export function DeviceLookup({
           <span className="min-w-0 flex-1">
             Started from <span className="font-medium text-slate-100">{loaded.name}</span>: in {loaded.total} group
             {loaded.total === 1 ? "" : "s"}, {loaded.matched} of which this tenant assigns to.
+            {loaded.unrecognisedOs !== undefined && (
+              <span className="block text-amber-300">
+                {loaded.unrecognisedOs
+                  ? `Its OS, “${loaded.unrecognisedOs}”, is not one Preflight simulates.`
+                  : "Entra reports no OS for it."}{" "}
+                The platform was left at{" "}
+                {PLATFORM_OPTIONS.find((p) => p.value === loaded.keptPlatform)?.label ?? loaded.keptPlatform}; check it
+                before trusting the result.
+              </span>
+            )}
             {loaded.enrollmentProfileName && (
               <span className="block text-slate-500">Enrollment profile: “{loaded.enrollmentProfileName}”</span>
             )}
+            {loaded.filters && filterLine(loaded.filters) && (
+              <span className="block text-slate-500">{filterLine(loaded.filters)}</span>
+            )}
+            {loaded.filtersUnchecked && <span className="block text-amber-300">{loaded.filtersUnchecked}</span>}
             {loaded.unassignedGroups.length > 0 && (
               <details className="mt-0.5 text-slate-500">
                 <summary className="cursor-pointer hover:text-slate-300">

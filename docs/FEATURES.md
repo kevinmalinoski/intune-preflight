@@ -1,12 +1,22 @@
 # Features
 
-A walkthrough of what Intune Preflight does. Two tabs: the **Endpoint Preflight** simulator (what would *this device* get — its settings and, new in v3, its apps) and the **Assignment Manifest** (which groups carry which policies, tenant-wide).
+A walkthrough of what Intune Preflight does. Two tabs: the **Endpoint Preflight** simulator (what would *this device* get — its settings and its apps) and the **Assignment Manifest** (which groups carry which policies, tenant-wide).
 
 > Everything here is read-only. The tool never writes to your tenant.
 
 - [Endpoint Preflight — the simulator](#endpoint-preflight--the-simulator)
-  - [Apps for this endpoint](#apps-for-this-endpoint) _(new in v3)_
+  - [Start from a real device](#start-from-a-real-device)
+  - [Entra group assignment](#entra-group-assignment) — nested groups, dynamic rules, enrollment profile names
+  - [Autopilot Group Tag simulation](#autopilot-group-tag-simulation-v1)
+  - [Assignment Filter simulation](#assignment-filter-simulation)
+  - [Collapsed vs. Detail view](#collapsed-vs-detail-view) · [Hide a group's policies](#hide-a-groups-policies)
+  - [Policy Waitlist](#policy-waitlist--what-if-i-assigned-this)
+  - [Merged baseline](#merged-baseline--policy-drill-down) · [CSP paths](#csp-paths--oma-uris) · [Conflicts & overlaps](#policy-overlap--conflict-detection-windows)
+  - [Autopilot profile associations](#autopilot-profile-associations-v1--v2)
+  - [Apps for this endpoint](#apps-for-this-endpoint)
+  - [Open in Intune](#open-in-intune) · [Platform support](#platform-support)
 - [Assignment Manifest](#assignment-manifest)
+- [Built for real tenants](#built-for-real-tenants) — refreshing, large tenants, incomplete loads
 
 ---
 
@@ -30,9 +40,13 @@ On a phone-width screen the left column becomes a one-line summary of the endpoi
 
 ## Start from a real device
 
-Type the start of a device's name under **Start from a real device** and pick it. The endpoint is set from what Entra holds for that device: its OS, whether it is registered with Autopilot, its Group Tag, and **every group it is in, including through nested groups**. A note under the search says how many of those groups this tenant assigns anything to, lists the ones it doesn't, and shows the device's enrollment profile name in quotes, so a stray space is visible.
+This is optional: everything else works on an endpoint you build by hand. When there is a real machine to compare with, type the start of its name under **Start from a real device (optional)** and pick it. The search lists only devices Intune actively manages: enabled in Entra, enrolled in Intune (not registered-only, and not managed by Configuration Manager alone or another MDM), and signed in within the last 90 days. A line under the results counts the name matches it left out. The endpoint is set from what Entra holds for that device: its platform, whether it is registered with Autopilot, its Group Tag, and **every group it is in, including through nested groups**. A note under the search says how many of those groups this tenant assigns anything to, lists the ones it doesn't, and shows the device's enrollment profile name in quotes, so a stray space is visible.
 
-It answers the question a hand-built endpoint can't: which groups a real machine is actually in. Everything it sets stays editable, so it is a starting point for a what-if, not a lock. Device filters are cleared, because Graph does not say which ones a device matches.
+![Start from a real device: search by name, pick one, and the platform, Autopilot, Group Tag and groups are set from it](img/gif-02-real-device.gif)
+
+_Type the start of a name and pick the device. The endpoint switches from Android to Windows, ticks Autopilot with the device's Group Tag, and ticks the groups it is in, each marked **✓ in device**._
+
+It answers the question a hand-built endpoint can't: which groups a real machine is actually in. Everything it sets stays editable, so it is a starting point for a what-if, not a lock. Picking a Mac while you were simulating a Windows Autopilot device switches the platform to macOS and clears the Windows-only settings. If Entra reports an OS Preflight doesn't simulate (Linux, say, or none at all), the platform is left as it was and the note says so in amber. Device filters are set too: each of the tenant's device Assignment Filters for the platform is evaluated **by Intune itself**, the same check as **Preview devices** on a filter in the admin center, and the ones the device matches are ticked. The note names them, or says the device matches none. If Intune can't evaluate them, the note says so in amber and the filters are left for you to tick. Managed-app filters (for app protection) are skipped, since they judge an app, not the device.
 
 It needs `Device.Read.All`, which is optional. Without it the search names the permission and the rest of the tool is unaffected. The sample tenant has no real devices, so in demo mode the search says so.
 
@@ -46,7 +60,7 @@ Pick the Entra security groups the endpoint is associated with. Policies resolve
 
 _The endpoint sidebar. Search and tick the groups an endpoint belongs to; selected groups rise to the top. **All Devices** and **All Users** always apply and are added automatically. Each dynamic group's membership rule is one click away under **rule**._
 
-Three things happen automatically:
+Several things happen automatically:
 
 - **All Devices / All Users** are always in play — every device inherits them, so they're always shown.
 - **Exclude wins.** If any selected group is excluded from a policy, that policy is dropped from the applied set and shown as an exclude — never silently omitted, and never wrongly counted as applied.
@@ -68,10 +82,10 @@ _Set the Group Tag and the matching dynamic groups float to the top and select t
 **Three match states — surfaced, not guessed:**
 
 - **`group tag`** — the rule's `[OrderID]` clause confidently matches the tag, and nothing else in the rule needs evaluating. **Auto-selected.**
-- **`+ conditions`** — the tag matches, but the rule *also* hinges on a property a Group Tag can't decide (`deviceOSVersion`, `deviceCategory`, enrollment profile, …). **Not auto-selected** — the full membership rule is shown so you can decide, or start from a real device to see its actual groups. (Before v3.2 these were auto-selected.) A rule whose other parts can't change the answer — the tag clause sits in an `or`, say — is a plain match and is selected.
+- **`+ conditions`** — the tag matches, but the rule *also* hinges on a property a Group Tag can't decide (`deviceOSVersion`, `deviceCategory`, enrollment profile, …). **Not auto-selected** — the full membership rule is shown so you can decide, or start from a real device to see its actual groups. A rule whose other parts can't change the answer — the tag clause sits in an `or`, say, or the other part is a Windows OS check the tool does evaluate — is a plain match and is selected.
 - **`conditional`** — the tag is referenced but the flat evaluator can't confirm the combined rule (e.g. two ANDed `[OrderID]` tags). **Surfaced but not auto-selected** — review the rule and tick it if it applies.
 
-> **Why not a full evaluator?** Auto-selection reads the `[OrderID]` (Group Tag) and `[ZTDId]` (Autopilot-joined) clauses in `device.devicePhysicalIds` (`-eq` / `-startsWith`, plus `-contains` for `[ZTDId]`). Other device properties can't be evaluated from a Group Tag alone, so rather than pretend to be Entra's membership engine, the tool **shows the rule and the match state** and lets you judge. A real membership-rule evaluator is a planned accuracy upgrade — see [ROADMAP.md](../ROADMAP.md).
+> **Why not a full evaluator?** Auto-selection reads the `[OrderID]` (Group Tag) and `[ZTDId]` (Autopilot-joined) clauses in `device.devicePhysicalIds` (`-eq` / `-startsWith`, plus `-contains` for `[ZTDId]`). Other device properties can't be evaluated from a Group Tag alone, so rather than pretend to be Entra's membership engine, the tool **shows the rule and the match state** and lets you judge. When the answer matters, [start from a real device](#start-from-a-real-device): its actual memberships replace the judgement. See [ROADMAP.md](../ROADMAP.md) for what more could be modelled.
 
 **`or` is handled correctly, with operator precedence.** A bare `[ZTDId]` clause is satisfied by *every* Autopilot-registered device, so whenever it stands as a top-level `or` branch the group is selected — any satisfied branch grants membership. Entra applies standard precedence (`and` binds tighter than `or`), so this very common real-tenant shape resolves as `(ownership and trust and appId and osType) or (ZTDId)` — and an Autopilot device is a member via that last branch regardless of the `and` chain:
 
@@ -255,6 +269,10 @@ Finding a problem here usually means going to fix it there. A small arrow beside
 - **Read-only, as ever** — the link opens the admin center in your own session. Preflight itself still never writes to the tenant.
 - **In the sample tenant** — its objects are made up, so the arrow is shown inactive and says on hover what it does against a real tenant.
 
+![Fix and verify: open the conflicting policy in Intune, remove its assignment, refresh, and the conflicts clear](img/gif-03-fix-and-verify.gif)
+
+_User Rights shows four conflicts. The source policy's name opens it in the Intune admin center, where its assignment is removed and saved. Back in Preflight, **Refresh from Intune** keeps the endpoint, and the baseline goes from 709 settings and 5 conflicts to 701 and 1. See [Refresh without losing your place](#built-for-real-tenants)._
+
 ## Platform support
 
 Windows, macOS, iOS/iPadOS, and Android are scoped separately, so a Windows simulation never gets cluttered with macOS compliance policies.
@@ -323,11 +341,11 @@ This is the fastest way to answer *"what does my Kiosk filter actually do to my 
 
 ## Send groups to the simulator
 
-The Manifest and the simulator are two lenses on the same data, so they connect. Tick the checkbox on one or more groups and a bar rises from the bottom: **"Simulate a device in these groups →"**. It drops you into Endpoint Preflight seeded with exactly those groups — plus any device filters you were simulating here — on the Manifest's current OS, recomputing the full merged baseline from scratch. You go from *"which groups look interesting"* to *"what a device in them actually gets"* in one click. (All Devices / All Users always apply, so they're marked *always applies* rather than something you select.)
+The Manifest and the simulator are two lenses on the same data, so they connect. Tick the checkbox on one or more groups and a bar rises from the bottom: **Simulate a device in these N groups →**. It drops you into Endpoint Preflight seeded with exactly those groups — plus any device filters you were simulating here — on the Manifest's current OS, recomputing the full merged baseline from scratch. You go from *"which groups look interesting"* to *"what a device in them actually gets"* in one click. (All Devices / All Users always apply, so they're marked *always applies* rather than something you select.)
 
-![Send checked groups to the simulator](img/16-manifest-simulate.png)
+![Send groups to the simulator: tick three groups in the Manifest, watch their seating charts appear, then simulate a device in them](img/gif-04-manifest-to-simulator.gif)
 
-_Check groups in the Manifest, then simulate a device in exactly those groups._
+_Tick three groups and each one's seating chart joins the bar. **Simulate a device in these 3 groups →** opens Endpoint Preflight with exactly those groups selected and the merged baseline computed._
 
 ## Per-group policy "seating charts"
 
@@ -349,7 +367,7 @@ The workbook is there because mobile Excel will not open a `.csv` at all, howeve
 
 _Export of every policy → group assignment for the selected platform._
 
-> **Shared use is now visible** through the per-group seating charts above — where the *same policy* is assigned across multiple Entra groups. Surfacing group *pairs* whose combined assignment produces conflicts is parked under *Under consideration* in [ROADMAP.md](../ROADMAP.md).
+> **Shared use is visible** through the per-group seating charts above — where the *same policy* is assigned across multiple Entra groups. Surfacing group *pairs* whose combined assignment produces conflicts is parked under *Under consideration* in [ROADMAP.md](../ROADMAP.md).
 
 ---
 
@@ -360,4 +378,5 @@ A few things that matter once you point this at a production-sized tenant:
 - **Fast on large tenants.** Assignments are pulled inline with each collection and per-policy detail calls run with bounded concurrency — a 140-policy tenant loads in seconds.
 - **Resilient to flaky Graph.** Throttling (429) and transient gateway errors (502/503/504) are retried with backoff, and every request has a timeout so one wedged connection can't stall a load.
 - **Never silently incomplete.** If anything fails to import after retries, the app shows a clear **"Incomplete load"** banner naming what dropped, and the server logs a summary. A partial baseline is never presented as a complete one.
-- **Refresh on demand.** An in-memory cache keeps things fast; **Refresh from Intune** clears it and re-reads the tenant after you make changes in the admin center.
+- **Refresh without losing your place.** Changed an assignment in the admin center? **Refresh from Intune** re-reads the tenant and asks what to keep. **Keep my setup** (the default) re-checks the same endpoint and Manifest selection against the new data, so you can watch the policy drop off; groups and filters that no longer exist fall out, and a waitlisted policy that has since been assigned leaves the waitlist. **Reset** starts from a clean endpoint. The dialog shows when the data on screen was last read.
+- **Changing tenant.** In browser mode the lock in the top bar has **Change tenant**, which reopens the setup form with the saved IDs. The IDs can also be carried in the URL as `?tenant=…&client=…`.

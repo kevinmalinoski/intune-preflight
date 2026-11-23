@@ -141,6 +141,11 @@ export interface GraphClient {
   graphGetObject<T>(path: string, useBeta?: boolean): Promise<T>;
   /** Fetches every page of a Graph collection endpoint, following @odata.nextLink. */
   graphGetCollection<T>(path: string, useBeta?: boolean): Promise<T[]>;
+  /**
+   * Calls a Graph action that reads but has to be POSTed, such as
+   * `evaluateAssignmentFilter`. Never used to change anything in the tenant.
+   */
+  graphPostAction<T>(path: string, body: unknown, useBeta?: boolean): Promise<T>;
   mapWithConcurrency: typeof mapWithConcurrency;
   /** How many per-item detail calls this client's callers should run at once. */
   concurrency: number;
@@ -236,6 +241,11 @@ export function createGraphClient({
     async graphGetObject<T>(path: string, useBeta = false): Promise<T> {
       const base = useBeta ? GRAPH_BETA : GRAPH_BASE;
       return (await graphFetch(`${base}${path}`)) as T;
+    },
+
+    async graphPostAction<T>(path: string, body: unknown, useBeta = false): Promise<T> {
+      const base = useBeta ? GRAPH_BETA : GRAPH_BASE;
+      return (await graphFetch(`${base}${path}`, { method: "POST", body: JSON.stringify(body) })) as T;
     },
 
     async graphGetCollection<T>(path: string, useBeta = false): Promise<T[]> {

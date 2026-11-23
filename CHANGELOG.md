@@ -6,6 +6,49 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [3.3.0] — 2026-11-23
+
+Start from a real device now sets the Assignment Filters too, evaluated by
+Intune itself, and lists only devices Intune actively manages. The README and
+docs get four workflow GIFs and retaken screenshots. No new permission.
+
+### Fixed
+- **A group the rule settles no longer says "+ conditions".** A Group Tag
+  match ANDed with a condition the tool does evaluate (a Windows OS) was
+  correctly selected but still carried the amber pill saying its membership
+  was unknown. The "+ conditions", "conditional" and "autopilot · + conditions"
+  pills now appear only when the whole rule really can't be decided.
+- **Starting from a device with an OS Preflight doesn't simulate** (Linux, or
+  none reported) no longer passes the current platform off as the device's: the
+  note says the platform was kept. The "assigns to" count now includes only
+  groups carrying policy for the device's OS, matching what gets ticked.
+
+### Added
+- **Start from a real device sets the Assignment Filters too.** Each device
+  filter for the device's platform is evaluated by Intune itself (the same check
+  as Preview devices in the admin center, through Graph's beta
+  `evaluateAssignmentFilter`), and the ones it matches are ticked. The note
+  names them. No new permission: it uses `DeviceManagementConfiguration.Read.All`.
+
+### Changed
+- **Start from a real device lists only active Intune-managed devices.** Devices
+  that are only registered in Entra, disabled, managed by Configuration Manager
+  alone or another MDM, or not signed in for 90 days are left out, and a line
+  under the results counts them.
+- The device search is labelled **Start from a real device (optional)**.
+
+### Documentation
+- The README says who the tool is for and what setting it up needs, and drops
+  per-feature version markers. SETUP.md puts browser mode first, with a table of
+  which Entra and Intune roles each step needs, and documents the device and
+  profile-name API routes. FEATURES.md has a full contents list and covers
+  Keep my setup, Change tenant and the platform switch. Screenshots retaken,
+  the Assignment Manifest ones now by the capture script too.
+- Four workflow GIFs: building an endpoint (the README's opening image),
+  starting from a real device, fixing a conflict in Intune and refreshing, and
+  sending Manifest groups to the simulator.
+- Removed an unreferenced early screenshot (`docs/baseline.png`).
+
 ## [3.2.0] — 2026-11-19
 
 Start from a real device and see the groups it is actually in; nested groups
@@ -912,8 +955,8 @@ state rules.
   dropped connection, a body failing mid-stream, `@odata.nextLink` paging, 204.
 
 ### Docs
-- **ROADMAP split into [v2 maintenance](ROADMAP.md#v2-maintenance) and
-  [v3 bets](ROADMAP.md#v3-bets).** The forward-looking list read as six
+- **ROADMAP split into [v2 maintenance](ROADMAP.md#maintenance) and
+  [v3 bets](ROADMAP.md#whats-next).** The forward-looking list read as six
   commitments led by the largest of them (a real dynamic-group rule
   parser). v2 maintenance is now explicitly the whole scope of the 2.x line, the
   rule parser is explicitly deferred — the "surfaced, not guessed" Group Tag work

@@ -399,6 +399,18 @@ describe("deviceReducer — start from a real device", () => {
     expect(state.nestedAutoIds).toEqual([]);
   });
 
+  it("replaces hand-ticked filters with the ones Intune says the device matches", () => {
+    const before = run(loaded([group("g1")]), { type: "toggleDeviceFilter", id: "hand-ticked" });
+    const state = deviceReducer(before, {
+      type: "applyRealDevice",
+      platform: "windows",
+      groupIds: ["g1"],
+      isAutopilot: false,
+      filterIds: ["kiosk", "kiosk"],
+    });
+    expect(state.deviceFilterIds).toEqual(["kiosk"]);
+  });
+
   it("keeps Autopilot off for a device that is not Windows", () => {
     const state = deviceReducer(loaded([group("m", { platforms: ["macos"] })]), {
       type: "applyRealDevice",
@@ -411,6 +423,42 @@ describe("deviceReducer — start from a real device", () => {
     expect(state.isAutopilotDevice).toBe(false);
     expect(state.groupTag).toBe("");
     expect(state.selectedGroupIds).toEqual(["m"]);
+  });
+});
+
+describe("deviceReducer — a real Mac picked while simulating Windows", () => {
+  it("swaps to macOS and drops the Windows-only setup", () => {
+    let state = loaded([
+      group("win", { platforms: ["windows"] }),
+      group("both", { platforms: ["windows", "macos"] }),
+      group("mac", { platforms: ["macos"] }),
+    ]);
+    state = run(
+      state,
+      { type: "toggleAutopilotDevice" },
+      { type: "setGroupTag", groupTag: "KIOSK" },
+      { type: "toggleGroup", id: "win" }
+    );
+    expect(state.platform).toBe("windows");
+    const next = deviceReducer(state, {
+      type: "applyRealDevice",
+      platform: "macos",
+      groupIds: ["win", "both", "mac"],
+      isAutopilot: false,
+    });
+    expect(next.platform).toBe("macos");
+    expect(next.isAutopilotDevice).toBe(false);
+    expect(next.groupTag).toBe("");
+    expect(next.selectedGroupIds).toEqual(["both", "mac"]);
+  });
+
+  it("keeps the current platform when the device's OS is not recognised", () => {
+    const next = deviceReducer(loaded([group("g1")]), {
+      type: "applyRealDevice",
+      groupIds: ["g1"],
+      isAutopilot: false,
+    });
+    expect(next.platform).toBe("windows");
   });
 });
 

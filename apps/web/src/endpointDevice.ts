@@ -76,6 +76,8 @@ export type DeviceAction =
       groupIds: string[];
       isAutopilot: boolean;
       groupTag?: string;
+      /** Assignment Filters Intune says the device matches. */
+      filterIds?: string[];
     }
   | { type: "setPlatform"; platform: Platform }
   | { type: "toggleGroup"; id: string }
@@ -290,7 +292,7 @@ export function deviceReducer(state: DeviceState, action: DeviceAction): DeviceS
         isAutopilotDevice: autopilot,
         groupTag: autopilot ? (action.groupTag ?? "") : "",
         selectedGroupIds: [...new Set(action.groupIds)].filter((id) => known.has(id)),
-        deviceFilterIds: [],
+        deviceFilterIds: [...new Set(action.filterIds ?? [])],
         nestedAutoIds: [],
       });
     }

@@ -666,6 +666,14 @@ export interface DeviceMembership {
   enrollmentProfileName?: string;
   /** Every group the device is a member of, directly or through nesting. */
   groups: { id: string; displayName: string; isDynamic?: boolean; membershipRule?: string }[];
+  /**
+   * The tenant's device Assignment Filters for the device's platform, each
+   * evaluated by Intune itself against this device. Empty when the platform
+   * has none; absent when they could not be evaluated (see `filtersUnchecked`).
+   */
+  filters?: { id: string; displayName: string; matches: boolean }[];
+  /** Why the filters could not be evaluated, when they could not. */
+  filtersUnchecked?: string;
 }
 
 /** Why "Load a real device" cannot run, in the same shape as AppsUnavailable. */
@@ -681,7 +689,20 @@ export const DEVICE_LOOKUP_DEMO: DeviceLookupUnavailable = {
   detail: "The sample tenant has no real devices. Switch to Connected to load one from your tenant.",
 };
 
-export type DeviceSearchResponse = { devices: DeviceSearchResult[] } | { unavailable: DeviceLookupUnavailable };
+export type DeviceSearchResponse =
+  | {
+      devices: DeviceSearchResult[];
+      /**
+       * Devices that matched the name but were left out because Intune does not
+       * manage them, they are disabled, or they have not signed in for
+       * DEVICE_ACTIVE_DAYS days.
+       */
+      hidden?: number;
+    }
+  | { unavailable: DeviceLookupUnavailable };
+
+/** How recently a device must have signed in to Entra to count as active. */
+export const DEVICE_ACTIVE_DAYS = 90;
 export type DeviceMembershipResponse = { membership: DeviceMembership } | { unavailable: DeviceLookupUnavailable };
 
 /** The simulator platform for an Entra device's `operatingSystem` string. */

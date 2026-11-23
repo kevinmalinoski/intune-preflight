@@ -10,15 +10,8 @@ import {
   type RuleVerdict,
 } from "@intune-preflight/shared";
 import type { AssignmentFilter, GroupSummary, Platform, ProfileNameWarning } from "@intune-preflight/shared";
+import { PLATFORM_OPTIONS } from "./platforms.ts";
 import { PortalLink } from "./PortalLink.tsx";
-
-// `short` is what fits four-across in the sidebar; "iOS / iPadOS" does not.
-const PLATFORM_OPTIONS: { value: Platform; label: string; short: string }[] = [
-  { value: "windows", label: "Windows", short: "Windows" },
-  { value: "macos", label: "macOS", short: "macOS" },
-  { value: "ios", label: "iOS / iPadOS", short: "iOS" },
-  { value: "android", label: "Android", short: "Android" },
-];
 
 /**
  * The simulated endpoint in one line: OS, Autopilot, filters, groups.
@@ -361,16 +354,22 @@ export function EndpointPicker({
               const isAutopilotConditional =
                 autopilotOn && classifyAutopilotMatch(g.membershipRule).state === "conditional";
               const tagActive = isMatch || isConditional;
+              // The amber "can't tell" pills describe the Group Tag or Autopilot
+              // clause on its own. When the whole rule is settled anyway -- the
+              // other condition is one the judge models, such as a Windows OS --
+              // saying membership is unknown would be false.
+              const verdict = verdicts.get(g.id);
+              const settled = verdict === "member" || verdict === "not-member";
               const highlight = tagActive || isAutopilotConditional;
               // Show the rule when we couldn't fully decide it (Group Tag conditional,
               // a tag match that also hinges on other properties, or an Autopilot
               // "+ conditions" group whose extra condition we can't check).
               const stale = g.staleProfileNames ?? [];
               const showRule =
-                isConditional || (isMatch && !tm.fullyEvaluated) || isAutopilotConditional || stale.length > 0;
+                (!settled && (isConditional || (isMatch && !tm.fullyEvaluated) || isAutopilotConditional)) ||
+                stale.length > 0;
               const via = nestedVia.get(g.id);
               const selected = selectedGroupIds.includes(g.id);
-              const verdict = verdicts.get(g.id);
               const unmodelled = unmodelledRuleProperties(g.membershipRule);
               // The tag and Autopilot pills already speak for these rows.
               const otherPillShown = tagActive || isAutopilotConditional || (isAutopilotJoined && isAutopilotDevice);
@@ -446,7 +445,7 @@ export function EndpointPicker({
                           {tagScope}
                         </span>
                       )}
-                      {isMatch && !tm.fullyEvaluated && (
+                      {isMatch && !tm.fullyEvaluated && !settled && (
                         <span
                           className="animate-fade-in inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[9px] font-medium leading-none text-amber-300/90 ring-1 ring-inset ring-amber-400/40"
                           title={`The Group Tag matches, but this rule also depends on ${unmodelledRuleProperties(g.membershipRule).join(", ") || "properties a Group Tag can't decide"}, so whether this device is in the group is not known. It is not selected automatically: read the rule and tick it if it applies, or start from a real device.`}
@@ -454,7 +453,7 @@ export function EndpointPicker({
                           + conditions
                         </span>
                       )}
-                      {isConditional && (
+                      {isConditional && !settled && (
                         <span
                           className="animate-fade-in inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[9px] font-medium leading-none text-amber-300/90 ring-1 ring-inset ring-amber-400/40"
                           title="The Group Tag is referenced in this rule, but full membership can't be confirmed from the tag alone — review the rule and select manually if it applies."
@@ -470,7 +469,7 @@ export function EndpointPicker({
                           🔒 autopilot
                         </span>
                       )}
-                      {isAutopilotConditional && (
+                      {isAutopilotConditional && !settled && (
                         <span
                           className="animate-fade-in inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[9px] font-medium leading-none text-amber-300/90 ring-1 ring-inset ring-amber-400/40"
                           title="An Autopilot ([ZTDId]) group whose rule also depends on a device condition that can't be evaluated here (e.g. excluding Cloud PCs). Review the rule and include it if it applies to this device."

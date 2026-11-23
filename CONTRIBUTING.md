@@ -38,7 +38,7 @@ npm run dev               # server :4000, web :5173
 **You don't need a tenant or an app registration to develop.** With no `.env` present the server
 starts in **Demo** mode against the bundled sample tenant, which exercises every feature —
 conflicts, overlaps, exclusions, Assignment Filters, dynamic Group Tag implication, unassigned
-policies, and Autopilot V1 + V2. Most work can be done and tested entirely there.
+policies, Autopilot V1 + V2, and an app for every app finding. Most work can be done and tested entirely there.
 
 To point it at a real tenant, add credentials and restart; the header's **Demo / Connected**
 toggle unlocks once they're present:

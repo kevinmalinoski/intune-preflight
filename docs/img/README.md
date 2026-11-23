@@ -2,13 +2,13 @@
 
 Save PNGs here with these **exact filenames** and they'll light up in the docs. Captions are already written in [FEATURES.md](../FEATURES.md) — you only need the images.
 
-Shots are retaken with `scripts/capture-docs-shots.mjs`, which drives headless Edge at 2x against the **demo build** and writes these files; add a shot there rather than capturing by hand, so the next retake is one command. Roughly **1600px wide** is plenty (docs scale to page width). Delete any line in `FEATURES.md` for a shot you decide not to take, so the page has no broken image.
+Shots are retaken with `scripts/capture-docs-shots.mjs`, which drives headless Edge at 2x against the **demo build** and writes these files; add a shot there rather than capturing by hand, so the next retake is one command. The one exception is `08-csp-paths.png`, still a hand capture. Roughly **1600px wide** is plenty (docs scale to page width). Delete any line in `FEATURES.md` for a shot you decide not to take, so the page has no broken image.
 
 ## Main README
 
 | File | What to capture |
 |---|---|
-| `01-simulator-overview.png` | **Hero shot.** The full simulator: configured endpoint → Autopilot card → Entra groups → policy-type bubbles. Also used at the top of FEATURES.md. |
+| `01-simulator-overview.png` | The full simulator: configured endpoint → Autopilot card → Entra groups → policy-type bubbles. Used at the top of FEATURES.md; the README's hero is `gif-01-build-an-endpoint.gif`. |
 
 ## Endpoint Preflight (simulator)
 
@@ -33,6 +33,20 @@ Shots are retaken with `scripts/capture-docs-shots.mjs`, which drives headless E
 | `19-apps-same-product.png` | The Apps rail after clicking a **same product / opposing intents** alert — the drill-down to the overlapping app objects. |
 | `20-apps-findings.png` | The Apps rail on **LOB to convert**, with the Microsoft links and the Enrollment Status Page warning. |
 
+## Workflow GIFs (recorded by hand)
+
+The capture script takes stills only. These four are recorded by hand, all against a real tenant;
+two of them have to be, because the sample tenant has no devices and no real assignment to change. Keep each **8–15 seconds**,
+**1200–1600px wide**, **under 8 MB**, at 100% browser zoom with the cursor visible, and save them
+with these exact names.
+
+| File | Tenant | What to record | Used in |
+|---|---|---|---|
+| `gif-01-build-an-endpoint.gif` | real (recorded 2026-11-23) | Tick **Autopilot device**, type a Group Tag (`KIOSK-MULTI`), watch the matching groups rise and tick, the diagram redraw and the baseline count change. | README hero |
+| `gif-02-real-device.gif` | real (recorded 2026-11-23) | Type the start of a device name, pick it: platform switches, groups tick with **✓ in device**, the note shows the group count and enrollment profile. | README feature list, FEATURES "Start from a real device" |
+| `gif-03-fix-and-verify.gif` | real (recorded 2026-11-23) | With an endpoint set up, open **Refresh from Intune → Keep my setup** after changing an assignment in Intune, and the policy leaves the diagram. Cut the waiting. | README "Into the admin center and back", FEATURES "Open in Intune" |
+| `gif-04-manifest-to-simulator.gif` | real (recorded 2026-11-23) | In the Manifest, tick three groups and watch their seating charts join the bar, then **Simulate a device in these 3 groups →** and land in the simulator. | FEATURES "Send groups to the simulator" |
+
 ## Assignment Manifest
 
 | File | What to capture |
@@ -40,7 +54,8 @@ Shots are retaken with `scripts/capture-docs-shots.mjs`, which drives headless E
 | `12-manifest-overview.png` | The Manifest table sorted by **Direct** descending, showing the hotspot groups at the top. |
 | `13-manifest-expanded.png` | A group row expanded — the effective policy set with "via All Devices" tags, implied flags, and excludes at the bottom. |
 | `14-manifest-filter-simulation.png` | A **⛃ filter chip** toggled on, showing the struck-through **Filtered** rows and the changed counts. |
-| `15-manifest-export.png` | The **Export ▾** menu open on its formats, or the exported workbook opened in Excel. |
+| `15-manifest-export.png` | The **Export ▾** menu open on its formats. |
+| `17-manifest-seating-charts.png` | A checked group's seating chart opened into its named policy list. |
 
 ---
 

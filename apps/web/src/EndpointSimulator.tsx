@@ -74,11 +74,17 @@ export function EndpointSimulator({
         groupIds: m.groups.map((g) => g.id),
         isAutopilot: m.isAutopilot,
         groupTag: m.groupTag,
+        filterIds: (m.filters ?? []).filter((f) => f.matches).map((f) => f.id),
       });
       const known = new Set(groups.map((g) => g.id));
+      // The reducer keeps only groups carrying policy for the device's OS, so
+      // count the same way -- otherwise the note claims groups nothing ticks.
+      const effective = m.platform ?? platform;
+      const onPlatform = new Set(groups.filter((g) => g.platforms.includes(effective)).map((g) => g.id));
       setLoadedDevice({
         name: m.device.displayName,
-        matched: m.groups.filter((g) => known.has(g.id)).length,
+        ...(m.platform ? {} : { unrecognisedOs: m.device.operatingSystem ?? "", keptPlatform: platform }),
+        matched: m.groups.filter((g) => onPlatform.has(g.id)).length,
         total: m.groups.length,
         groupIds: m.groups.map((g) => g.id),
         unassignedGroups: m.groups
@@ -86,9 +92,11 @@ export function EndpointSimulator({
           .map((g) => ({ displayName: g.displayName, membershipRule: g.membershipRule }))
           .sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { sensitivity: "base" })),
         enrollmentProfileName: m.enrollmentProfileName,
+        ...(m.filters ? { filters: m.filters.map(({ displayName, matches }) => ({ displayName, matches })) } : {}),
+        ...(m.filtersUnchecked ? { filtersUnchecked: m.filtersUnchecked } : {}),
       });
     },
-    [groups]
+    [groups, platform]
   );
 
   const compact = useSyncExternalStore(subscribeLayout, isCompact, () => false);

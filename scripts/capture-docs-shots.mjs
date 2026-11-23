@@ -103,6 +103,11 @@ async function shot(name, selector, pad = 0, maxHeight = Infinity) {
   writeFileSync(`${OUT}/${name}.png`, Buffer.from(res.result.data, "base64"));
   console.log("shot", name);
 }
+async function manifest() {
+  await fresh();
+  await js(`$click("header button", "Assignment Manifest")`);
+  await sleep(1500);
+}
 const CANVAS = ".react-flow";
 const SIDEBAR = 'aside[aria-label="Simulated endpoint"]';
 const RAIL_APPS = 'aside[aria-label="Apps"]';
@@ -199,6 +204,39 @@ const shots = {
     await js(`$group("macOS - Laptops")`);
     await sleep(1500);
     await shot("11-platform-support");
+  },
+  "12-manifest-overview": async () => {
+    await manifest();
+    await shot("12-manifest-overview", "body", 0, 640);
+  },
+  "13-manifest-expanded": async () => {
+    await manifest();
+    await js(`$click("tbody tr", "Windows - Update Ring - Pilot")`);
+    await sleep(800);
+    await shot("13-manifest-expanded", "table", 0, 620);
+  },
+  "14-manifest-filter-simulation": async () => {
+    await manifest();
+    await js(`$click("button", "⛃ Corporate-Owned")`);
+    await sleep(600);
+    await js(`$click("tbody tr", "All Devices")`);
+    await sleep(800);
+    await shot("14-manifest-filter-simulation");
+  },
+  "15-manifest-export": async () => {
+    await manifest();
+    await js(`$click("button", "Export")`);
+    await sleep(600);
+    await shot("15-manifest-export", '[role="menu"]');
+  },
+  "17-manifest-seating-charts": async () => {
+    await manifest();
+    for (const g of ["Windows - Corporate Devices", "Windows - Update Ring - Pilot"])
+      await js(`$text("tbody tr", ${JSON.stringify(g)}).querySelector("input[type=checkbox]").click(), true`);
+    await sleep(1000);
+    await js(`$click('[role="button"]', "Windows - Corporate Devices")`);
+    await sleep(800);
+    await shot("17-manifest-seating-charts", "div.max-w-2xl.rounded-xl");
   },
   "18-apps-overview": async () => {
     await fresh({ simulatorRailTab: "apps" });

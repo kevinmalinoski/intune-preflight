@@ -12,12 +12,13 @@
  */
 
 import type { Configuration } from "@azure/msal-browser";
-import { APPS_GRAPH_PERMISSION } from "@intune-preflight/shared";
+import { APPS_GRAPH_PERMISSION, DEVICE_GRAPH_PERMISSION } from "@intune-preflight/shared";
 
 /**
- * Delegated Graph scopes for a read-only tenant inspection. All five require
- * admin consent; the first four are what a full load actually reads, and the
- * tool stays read-only by never asking for a write scope (see CONTRIBUTING).
+ * Delegated Graph scopes for a read-only tenant inspection: what a full load
+ * actually reads. These and the optional ones below all require admin consent,
+ * and the tool stays read-only by never asking for a write scope (see
+ * CONTRIBUTING).
  */
 export const GRAPH_SCOPES = [
   "DeviceManagementConfiguration.Read.All",
@@ -27,17 +28,18 @@ export const GRAPH_SCOPES = [
 ] as const;
 
 /**
- * Read by the Apps view, and deliberately NOT in GRAPH_SCOPES.
+ * Read by the Apps view and by "Start from a real device", and deliberately
+ * NOT in GRAPH_SCOPES.
  *
  * Asking for it at sign-in would put a consent prompt -- or, for an admin who
  * cannot consent, a failed sign-in -- in front of every tenant that has not
- * granted it, to enable a view that is optional. It does not need asking for:
+ * granted it, to enable features that are optional. It does not need asking for:
  * Entra issues a Graph token carrying every delegated Graph permission the app
  * has been consented to, not only the ones named in the request. So granting
- * this in the app registration is enough for the apps read to succeed, and
- * without it that one read comes back 403 and the Apps view says why.
+ * this in the app registration is enough for those reads to succeed, and
+ * without one its read comes back 403 and the feature says which to add.
  */
-export const OPTIONAL_GRAPH_SCOPES = [APPS_GRAPH_PERMISSION] as const;
+export const OPTIONAL_GRAPH_SCOPES = [APPS_GRAPH_PERMISSION, DEVICE_GRAPH_PERMISSION] as const;
 
 export interface RedirectUriInputs {
   /** `VITE_REDIRECT_URI`, when the deploy sets one. */

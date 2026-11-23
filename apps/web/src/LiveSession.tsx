@@ -147,7 +147,8 @@ function LiveSetupPanel({ onUseSampleTenant }: { onUseSampleTenant: () => void }
             </li>
             <li>
               These <span className="text-slate-300">delegated</span> Graph permissions, admin-consented:{" "}
-              {[...GRAPH_SCOPES, ...OPTIONAL_GRAPH_SCOPES].join(", ")}. All read-only.
+              {GRAPH_SCOPES.join(", ")}. Optional, for the Apps view and Start from a real device:{" "}
+              {OPTIONAL_GRAPH_SCOPES.join(", ")}. All read-only.
             </li>
           </ul>
           <p className="mt-2">
