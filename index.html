@@ -99,7 +99,7 @@
         See what Intune applies to a device.<br><span style="color:var(--em);">Before you deploy it.</span>
       </h1>
       <p style="font-size:20px;color:var(--mut);max-width:680px;margin:26px auto 0;line-height:1.55;">
-        Pick an OS, the Entra groups a device belongs to and its Autopilot group tag, and see the exact merged
+        Pick an OS, the Entra groups a device belongs to and its Autopilot group tag, or start from a real device, and see the exact merged
         CSP baseline it would receive — conflicts, overlaps and legacy Endpoint Security included —
         and the apps installed on it or removed from it. No hardware, no enrollment, no writes.
       </p>
@@ -182,9 +182,26 @@
       <p class="muted" style="font-size:18px;margin-top:16px;">Intune tells you what you assigned. Preflight tells you what a device actually ends up with, and where your assignments collide.</p>
     </div>
 
+    <!-- row: real device -->
+    <div class="wrap" style="display:grid;grid-template-columns:1fr 1.15fr;gap:56px;align-items:center;margin-top:72px;">
+      <div>
+        <div class="chip" style="display:inline-block;">Start from a real device</div>
+        <h3 style="font-size:28px;font-weight:700;letter-spacing:-.01em;margin-top:18px;">The groups a device is really in, not the ones you expect</h3>
+        <p class="muted" style="font-size:16px;margin-top:14px;">Type the start of a device name and pick it. The endpoint takes its platform, Autopilot registration and Group Tag, and ticks every group it is in, nested ones included. Intune itself checks which Assignment Filters it matches. Only devices Intune actively manages are listed, and everything stays editable for a what-if.</p>
+        <ul style="margin-top:18px;display:flex;flex-direction:column;gap:10px;font-size:15px;">
+          <li style="display:flex;gap:10px;"><span style="color:var(--em);">→</span> Groups it is in that nothing is assigned to, listed</li>
+          <li style="display:flex;gap:10px;"><span style="color:var(--em);">→</span> Its enrollment profile name in quotes, so a stray space shows</li>
+          <li style="display:flex;gap:10px;"><span style="color:var(--em);">→</span> Optional: one extra read-only permission, <span class="mono">Device.Read.All</span></li>
+        </ul>
+      </div>
+      <div class="frame"><div class="frbar"><span class="dot" style="background:#ff5f56;"></span><span class="dot" style="background:#febc2e;"></span><span class="dot" style="background:#28c840;"></span></div>
+        <img class="shot" src="./gif-02-real-device.gif" width="1200" height="883" style="height:auto;" loading="lazy" alt="Searching for a device by name and picking it: the platform switches, Autopilot and its Group Tag are set, and the groups it is in are ticked">
+      </div>
+    </div>
+
     <!-- row: apps -->
     <div class="wrap" style="text-align:center;max-width:760px;margin-top:72px;">
-      <div class="chip" style="display:inline-block;">Apps · new in v3</div>
+      <div class="chip" style="display:inline-block;">Apps</div>
       <h3 style="font-size:28px;font-weight:700;letter-spacing:-.01em;margin-top:18px;">The apps a device gets, and where their assignments collide</h3>
       <p class="muted" style="font-size:16px;margin-top:14px;">The groups that deliver a device's policies deliver its apps too. See what is Required, Available or set to Uninstall, grouped by app type, with the trouble flagged: an app both installed and removed, an Available assignment that Required makes redundant, the same product packaged twice, and a line-of-business .msi that should be a Win32 app.</p>
     </div>
@@ -214,12 +231,24 @@
     <!-- row: seating charts -->
     <div class="wrap" style="display:grid;grid-template-columns:1.15fr 1fr;gap:56px;align-items:center;margin-top:80px;">
       <div class="frame"><div class="frbar"><span class="dot" style="background:#ff5f56;"></span><span class="dot" style="background:#febc2e;"></span><span class="dot" style="background:#28c840;"></span></div>
-        <img class="shot" src="./seating.jpg" alt="Per-group seating charts showing whether a group's policies are its own or shared">
+        <img class="shot" src="./gif-04-manifest-to-simulator.gif" width="1200" height="883" style="height:auto;" loading="lazy" alt="Ticking three groups in the Assignment Manifest, their seating charts appearing, then simulating a device in those groups">
       </div>
       <div>
         <div class="chip" style="display:inline-block;">Seating charts</div>
         <h3 style="font-size:28px;font-weight:700;letter-spacing:-.01em;margin-top:18px;">Spot the overcrowding before it's a conflict</h3>
         <p class="muted" style="font-size:16px;margin-top:14px;">Check a group and see, at a glance, whether its policies are its own or borrowed from half the tenant. Cool means unique to the group; hot means shared widely. Then send those groups straight into the simulator to see the merged result on a device.</p>
+      </div>
+    </div>
+
+    <!-- row: fix and verify -->
+    <div class="wrap" style="display:grid;grid-template-columns:1fr 1.15fr;gap:56px;align-items:center;margin-top:80px;">
+      <div>
+        <div class="chip" style="display:inline-block;">Open in Intune · Refresh</div>
+        <h3 style="font-size:28px;font-weight:700;letter-spacing:-.01em;margin-top:18px;">From finding to fix, and back to check it</h3>
+        <p class="muted" style="font-size:16px;margin-top:14px;">A small arrow beside a policy, app or group opens that exact object in the Intune or Entra admin center. Fix it there, then <strong style="color:var(--tx);">Refresh from Intune</strong> and keep your setup: the same endpoint is checked against the new data, so you watch the conflict clear instead of waiting for a device to check in.</p>
+      </div>
+      <div class="frame"><div class="frbar"><span class="dot" style="background:#ff5f56;"></span><span class="dot" style="background:#febc2e;"></span><span class="dot" style="background:#28c840;"></span></div>
+        <img class="shot" src="./gif-03-fix-and-verify.gif" width="1200" height="883" style="height:auto;" loading="lazy" alt="Opening a conflicting policy in the Intune admin center, removing its assignment, then refreshing Preflight and watching the conflicts drop">
       </div>
     </div>
 
@@ -246,8 +275,8 @@
         <p class="muted" style="font-size:15px;margin-top:12px;">Policies and apps for Windows, macOS, iOS/iPadOS and Android, each scoped and resolved separately.</p>
       </div>
       <div class="card fcard" style="padding:24px 24px 24px 27px;--accent:#38bdf8;">
-        <div class="eyebrow">Open in Intune · new</div>
-        <p class="muted" style="font-size:15px;margin-top:12px;">A small arrow beside a policy, app or group opens that exact object in the admin center, so a finding is one click from its fix.</p>
+        <div class="eyebrow">Honest dynamic rules</div>
+        <p class="muted" style="font-size:15px;margin-top:12px;">Each rule is judged member, not a member or can't tell. Nested groups are followed, and a group that may include the device is flagged for review, never ticked on a guess.</p>
       </div>
       <div class="card fcard" style="padding:24px 24px 24px 27px;--accent:#fb923c;">
         <div class="eyebrow">Policy Waitlist</div>

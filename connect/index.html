@@ -119,9 +119,9 @@
   <div class="card" style="padding:26px 28px;">
     <div class="eyebrow">Before you start</div>
     <p class="muted" style="font-size:15.5px;margin-top:12px;">
-      You need an account in your tenant that can consent to Graph permissions on behalf of the
-      organisation — <strong style="color:var(--tx);">Global Administrator</strong>,
-      <strong style="color:var(--tx);">Privileged Role Administrator</strong> or
+      You need an account in your tenant that can create an app registration and consent to Graph
+      permissions on behalf of the organisation — <strong style="color:var(--tx);">Global Administrator</strong>,
+      <strong style="color:var(--tx);">Application Administrator</strong> or
       <strong style="color:var(--tx);">Cloud Application Administrator</strong>.
     </p>
     <p class="muted" style="font-size:15.5px;margin-top:10px;">
@@ -130,7 +130,8 @@
     </p>
     <p class="muted" style="font-size:15.5px;margin-top:10px;">
       You only do this <strong style="color:var(--tx);">once per tenant</strong>. Everyone else on your
-      team just needs the client ID it produces.
+      team just needs the client ID it produces, and an Intune role that can read the configuration, such
+      as Intune Administrator, Global Reader or Read Only Operator. No Entra admin role is needed to use it.
     </p>
   </div>
 </div>
@@ -228,7 +229,7 @@ Write-Host "https://login.microsoftonline.com/$tenant/adminconsent?client_id=$($
         <table>
           <thead><tr><th>Permission</th><th>What it reads</th></tr></thead>
           <tbody>
-            <tr><td class="mono">DeviceManagementConfiguration.Read.All</td><td class="muted">Configuration profiles, Compliance policies, Settings Catalog, Administrative Templates, Assignment Filters</td></tr>
+            <tr><td class="mono">DeviceManagementConfiguration.Read.All</td><td class="muted">Configuration profiles, Compliance policies, Settings Catalog, Administrative Templates, Assignment Filters, and checking which filters a real device matches</td></tr>
             <tr><td class="mono">Group.Read.All</td><td class="muted">Group names, and the dynamic membership rules behind them</td></tr>
             <tr><td class="mono">DeviceManagementServiceConfig.Read.All</td><td class="muted">Windows Autopilot deployment profiles</td></tr>
             <tr><td class="mono">DeviceManagementScripts.Read.All</td><td class="muted">Platform Scripts — Windows PowerShell and macOS shell</td></tr>
@@ -238,7 +239,8 @@ Write-Host "https://login.microsoftonline.com/$tenant/adminconsent?client_id=$($
         </table>
         <div class="note">
           Every one ends in <strong>.Read.All</strong>. There is no write permission in the list, so the
-          tool <strong>cannot change anything</strong> in your tenant even if it wanted to.
+          tool <strong>cannot change anything</strong> in your tenant even if it wanted to. Its one call
+          that is not a plain read asks Intune whether a device matches an Assignment Filter, and changes nothing.
         </div>
         <div class="note warn">
           After you accept, your browser lands back here with <span class="mono">?admin_consent=True</span>
@@ -336,6 +338,16 @@ Write-Host "https://login.microsoftonline.com/$tenant/adminconsent?client_id=$($
         <strong>Delegated</strong> Microsoft Graph permission, and click <strong>Grant admin consent</strong>.
         Then end the session here and sign in again. Your account also needs a role that can read devices,
         such as Intune Administrator or Global Reader. Everything else works without it.
+      </p>
+    </details>
+
+    <details>
+      <summary>A picked device says Intune could not evaluate its Assignment Filters</summary>
+      <p>
+        The device and its groups still load; only the filters are left for you to tick by hand. The check
+        uses <span class="mono">DeviceManagementConfiguration.Read.All</span>, which the rest of the tool
+        needs anyway, so confirm it shows <strong>Granted</strong> on the registration's
+        <strong>API permissions</strong> page. Your Intune role also has to be able to read Assignment Filters.
       </p>
     </details>
 
